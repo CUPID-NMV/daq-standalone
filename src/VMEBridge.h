@@ -1,0 +1,28 @@
+#ifndef VMEBRIDGE_H
+#define VMEBRIDGE_H
+
+#include <string>
+#include <CAENVMEtypes.h>
+#include <cstdint>
+#include "CAENVMElib.h"
+#include "CAENDigitizer.h"
+
+class VMEBridge {
+public:
+    VMEBridge(const std::string& ip);
+    ~VMEBridge();
+
+    void Open();
+    void Close();
+    uint32_t Read(uint32_t address);
+    void Write(uint32_t address, uint32_t data);
+    int GetHandle() const;
+
+private:
+    std::string fIPAddress;
+    int fHandle;
+
+    std::string ToHex(uint32_t val);
+};
+
+#endif // VMEBRIDGE_H

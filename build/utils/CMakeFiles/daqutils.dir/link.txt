@@ -1,0 +1,1 @@
+/usr/bin/c++ -fPIC -shared -Wl,-soname,libdaqutils.so.1.0 -o libdaqutils.so.1.0 CMakeFiles/daqutils.dir/Log.cpp.o CMakeFiles/daqutils.dir/Config.cpp.o 

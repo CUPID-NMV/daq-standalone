@@ -1,0 +1,2 @@
+/usr/bin/ar qc libdaqcomponents.a CMakeFiles/daqcomponents.dir/Digitizer.cpp.o CMakeFiles/daqcomponents.dir/Bridge.cpp.o CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.o
+/usr/bin/ranlib libdaqcomponents.a

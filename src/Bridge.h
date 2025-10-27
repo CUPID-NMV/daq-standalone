@@ -1,0 +1,71 @@
+#ifndef BRIDGE_H
+#define BRIDGE_H
+
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <H5Cpp.h>
+#include "CAENVMElib.h"
+#include "CAENDigitizer.h"
+#include "CAENComm.h"
+
+class Config; // forward declaration
+class Log;    // forward declaration
+
+class Bridge {
+public:
+  Bridge(Config& config);  // usa solo Config
+  ~Bridge();
+    // VME Bridge connection
+    void Open();
+    void Close();
+  int GetHandle() const;
+    // Pulser control
+    void SetPulser();
+    void StartPulser();
+    void StopPulser();
+    void SetPulserParameters(uint32_t period, uint32_t width, CVTimeUnits unit);
+
+    // Digitizer control
+    void InitDigitizer();
+    void StartAcquisition();
+    void StopAcquisition();
+
+    // Data handling
+    void ReadData(std::vector<uint32_t>& buffer);
+    void SaveDataToHDF5(const std::vector<uint32_t>& data);
+
+    // Utility / error checking
+    void CheckVMEError(CVErrorCodes code, const std::string& operation);
+    void CheckDigitizerError(int code, const std::string& operation);
+    std::string GenerateHDF5Filename() const;
+
+    // Access to raw VME operations (from VMEBridge)
+    uint32_t Read(uint32_t address);
+    void Write(uint32_t address, uint32_t data);
+    std::string ToHex(uint32_t val);
+
+private:
+    // VME Bridge parameters
+    CVBoardTypes fBoardType;
+    std::string fIPAddress;
+    int32_t fHandle;
+
+    // Pulser parameters
+    CVPulserSelect fPulserSelect;
+    CVOutputSelect fPulserChannel;
+    CVIOPolarity fPulserPolarity;
+    CVIOSources fIOSource;
+
+    // Digitizer parameters
+    int fDigitizerHandle;
+    int fDigitizerModel;
+    uint32_t fDigitizerAddress;
+
+    // Configuration reference
+    Config& fConfig;
+
+    // (eventuali membri di Log o simili se necessari)
+};
+
+#endif // BRIDGE_H

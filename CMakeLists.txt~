@@ -1,0 +1,187 @@
+cmake_minimum_required(VERSION 3.19.0 FATAL_ERROR)
+
+project(GAGG-DAQ
+  VERSION 0.0.1
+  LANGUAGES CXX
+  DESCRIPTION "Software package to control the CAEN DAQ"
+  )
+
+if(NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+endif()
+
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17 CACHE STRING "")
+  set(CMAKE_CXX_STANDARD_REQUIRED True)
+endif()
+
+if(CMAKE_CXX_STANDARD LESS 17)
+  message(WARNING "Incompatible c++ standard ${CMAKE_CXX_STANDARD}. GAGG-DAQ requires a minimum of c++17")
+endif()
+
+# Turn off gnu specific extensions
+set(CMAKE_CXX_ESTENSIONS OFF)
+if(UNIX AND NOT APPLE)
+  set(LINUX TRUE)
+endif()
+
+if(LINUX)
+  set(CMAKE_AR "gcc-ar")
+  set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> qcs <TARGET> <LINK_FLAGS> <OBJECT>")
+  set(CMAKE_CXX_ARCHIVE_FINISH true)
+endif()
+
+set(default_build_type "Release")
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  message(STATUS "Setting build type to ${default_build_type} (default)")
+  set(CMAKE_BUILD_TYPE ${default_build_type} CACHE STRING "Choose the type of build" FORCE)
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
+endif()
+
+if(CMAKE_BUILD_TYPE MATCHES "^release$")
+  message(STATUS "Setting build type to 'Release' instead of ${CMAKE_BUILD_TYPE}")
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the build type" FORCE)
+endif()
+if(CMAKE_BUILD_TYPE MATCHES "^debug$")
+  message(STATUS "Setting build type to 'Debug' instead of ${CMAKE_BUILD_TYPE}")
+  set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose the build type" FORCE)
+endif()
+
+if (NOT CMAKE_BUILD_TYPE MATCHES "^(Debug|Release)$")
+    message(FATAL_ERROR "'${CMAKE_BUILD_TYPE}' is not a valid build type. Please choose either 'Release' or 'Debug'.")
+endif()
+
+message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}" )
+
+#list(APPEND CMAKE_PREFIX_PATH $ENV{CAENVMELIB})
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+
+message( STATUS "Project Version: ${CMAKE_PROJECT_VERSION}")
+
+# find the ROOT dependency
+find_package(ROOT REQUIRED COMPONENTS
+  Core RIO Net Hist GenVector MLP Graf Graf3d Gpad Tree
+  Rint Postscript Matrix Physics MathCore Thread Gui
+  Imt ROOTVecOps TreePlayer MultiProc Spectrum
+  ROOTDataFrame)
+
+# include "useful" ROOT cmake functions
+# which are useful for building dictionaries
+include(${ROOT_USE_FILE})
+
+# set RPATH options
+set(CMAKE_INSTALL_RPATH ${CMAKE_INSTALL_PREFIX}/lib)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+# output shared libraries and executables in lib/ and bin/
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
+
+# compiler flags
+add_compile_options(
+  # flags applied to ALL build types
+  "-Wall"
+  "-Wno-unused-parameter"
+  "-Wno-unused-local-typedefs"
+  #"-Werror"
+  "-gdwarf-2"
+  "-Werror=return-type"
+  "-Winit-self"
+  "-Woverloaded-virtual"
+  "-fdiagnostics-color=always"
+  # "-Werror=sign-compare"
+
+  # debug flags
+  "$<$<CONFIG:DEBUG>:-O0;-g>"
+
+  # release flags
+  "$<$<CONFIG:RELEASE>:-O3;-flto;-pthread;-fno-omit-frame-pointer>"
+  )
+
+# clang tidy
+
+if(ENABLE_CLANG_TIDY)
+  set(CMAKE_CXX_CLANG_TIDY "clang-tidy") 
+endif()
+
+if(ENABLE_CLANG_TIDY_WITH_FIXES)
+  set(CMAKE_CXX_CLANG_TIDY "clang-tidy;-fix") 
+endif()
+
+if (CMAKE_BUILD_TYPE MATCHES "^Debug$")
+  if (COVERAGE)
+    add_compile_options("-fprofile-arcs" "-ftest-coverage")
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+      # using Clang / LLVM
+      link_libraries(-fprofile-instr-generate)
+      add_custom_target(coverage
+        COMMAND gcovr --gcov-executable "llvm-cov gcov" -r ${CMAKE_SOURCE_DIR} ${PROJECT_BINARY_DIR} -s --exclude-directories Tests
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+	)
+    elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      link_libraries(-lgcov) # gcov symbols
+      add_custom_target(coverage
+        COMMAND gcovr -r ${CMAKE_SOURCE_DIR} ${PROJECT_BINARY_DIR} -s --exclude-directories Tests
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+	)
+    endif()
+  endif()
+endif()
+
+# add shared library targets
+add_subdirectory(toml)
+add_subdirectory(utils)
+add_subdirectory(src)
+add_subdirectory(main)
+
+set(CMAKE_INSTALL_INCLUDEDIR ${CMAKE_INSTALL_PREFIX}/include)
+install(TARGETS daqcomponents
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  )
+
+# install headers
+# Globbing here is fine because it does not influence build behaviour
+install(DIRECTORY "${CMAKE_SOURCE_DIR}/"
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/
+  FILES_MATCHING PATTERN "*.h" 
+  PATTERN ".git*" EXCLUDE
+  )
+
+# Copy the config files to build directory 
+# Will not overwrite the content of the directory if the directory is already present.
+# if(EXISTS ${CMAKE_BINARY_DIR}/config)
+#  #do nothing
+# else( )
+#  file(COPY config/ DESTINATION ${CMAKE_BINARY_DIR}/config)
+# endif()
+
+message (STATUS "Writing setup.sh...")
+
+file(WRITE ${PROJECT_BINARY_DIR}/setup.sh "
+#
+# Do not hand edit this file. It was generated by CMake.
+#
+(return 0 2>/dev/null) && sourced=1 || sourced=0
+if [ \"\$sourced\" = \"0\" ];then
+    echo \"You should be sourcing this file, not executing it.\"
+    exit 1
+fi
+export DEBUG_LEVEL=${CMAKE_BUILD_TYPE}
+
+# Linux: 
+export LD_LIBRARY_PATH=\${PWD}/lib:\${LD_LIBRARY_PATH}
+
+# MacOS:
+export DYLD_FALLBACK_LIBRARY_PATH=\${PWD}/lib:\${ROOT_LIB}:\${DYLD_FALLBACK_LIBRARY_PATH}
+
+# Define the GAGGDAQ package for others:
+export GAGGDAQ_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+export GAGGDAQ_LIBRARY_DIR=\${PWD}/lib
+
+")
+

@@ -1,0 +1,332 @@
+// Digitizer.cpp aggiornato per V1742 e struttura CAEN_DGTZ_X742_EVENT_t
+#define CAEN_USE_X742
+
+#include <vector>
+#include <sys/time.h>
+#include <ctime>
+#include <cmath>
+#include <chrono>
+#include <fstream>
+#include <iomanip>
+#include <numeric>
+#include <map>
+#include <string>
+#include <sstream>
+#include <thread>
+#include <iostream>
+
+#include "Digitizer.h"
+#include "Log.h"
+#include "TParameter.h"
+#include <CAENDigitizer.h>
+#include <CAENDigitizerType.h>
+
+Digitizer::Digitizer() :
+
+  fConnectionType(CAEN_DGTZ_ConnectionType::CAEN_DGTZ_ETH_V4718),
+  fIPAddress(fConfig.GetEntry<std::string>("digitizer", "IPAddress", "192.168.99.105")),
+  fConetNode(fConfig.GetEntry<int>("digitizer", "ConetNode", 0)),
+  fVMEBaseAddress(0x32100000),
+  fHandle(0),
+  fRecordLength(fConfig.GetEntry<uint32_t>("digitizer", "RecordLength", 1024)),
+  fNChannels(fConfig.GetEntry<uint32_t>("digitizer", "NChannels", 8)),
+  fNTransferedEvents(1),
+  fPostTriggerSize(fConfig.GetEntry<uint32_t>("digitizer", "PostTriggerSize", 50)),
+  fAcquisitionMode(CAEN_DGTZ_FIRST_TRG_CONTROLLED),
+  fSelfTrigger(fConfig.GetEntry<bool>("digitizer", "SelfTrigger", false)),
+  fExternalTrigger(fConfig.GetEntry<bool>("digitizer", "ExternalTrigger", true)),
+  fNRMSThreshold(fConfig.GetEntry<double>("digitizer", "NRMSThreshold", 3.0)),
+  fIntegralThreshold(fConfig.GetEntry<double>("digitizer", "IntegralThreshold", -10000.0)),
+  fBufferSize(0),
+  fWaitTimeS(fConfig.GetEntry<double>("digitizer", "WaitTimeS", 3.0)),
+  fSamplingTime(4.e-9),
+  fPulsePolarity(static_cast<CAEN_DGTZ_PulsePolarity_t>(fConfig.GetEntry<uint32_t>("digitizer", "PulsePolarity", 1))),
+  fTriggerPolarity(static_cast<CAEN_DGTZ_TriggerPolarity_t>(fConfig.GetEntry<uint32_t>("digitizer", "TriggerPolarity", 1))),
+  fNNoiseEvents(fConfig.GetEntry<uint32_t>("digitizer", "NNoiseEvents", 100)),
+  fDuration(fConfig.GetTime("digitizer", "Duration", toml::time(0,0,10,0))),
+  fOutputDir(fConfig.GetEntry<std::string>("digitizer", "OutputDir", "")),
+  fOutputFileName(fConfig.GetEntry<std::string>("digitizer", "OutputFile", "")),
+  fTimestamp_s(0),
+  fTimestamp_ns(0),
+  fTriggerTime(0)
+  {
+
+    fBuffer = nullptr;
+    fVoidEvent = nullptr;
+    fEvent = nullptr;
+    fEventPtr = nullptr;
+    fROOTFile = nullptr;
+    fChannelTree = nullptr;
+    fEventTree = nullptr;
+  
+    std::vector<int64_t> tmpchlist = fConfig.GetEntryList<int64_t>("digitizer","ChannelList",99,1);
+    for(auto& c : tmpchlist)
+      fChannelList.emplace_back(static_cast<uint32_t>(c));
+    
+    fNActiveChannels = fChannelList.size();
+    Log::OutSummary("Channel list:");
+    for(auto& c : fChannelList)
+      Log::OutSummary("  " + std::to_string(c));
+
+    fChannelMask = 0;
+    for(uint32_t& c : fChannelList) {
+      if(c >= fNChannels) {
+	Log::OutError("Channel index " + std::to_string(c) + " is out of range for this digitizer (max = " + std::to_string(fNChannels - 1) + ").");
+	exit(1);
+      }
+      fChannelMask |= (1 << c);
+    }
+
+    fSelfTriggerMode = fSelfTrigger ? CAEN_DGTZ_TRGMODE_ACQ_ONLY : CAEN_DGTZ_TRGMODE_DISABLED;
+    fExternalTriggerMode = fExternalTrigger ? CAEN_DGTZ_TRGMODE_ACQ_ONLY : CAEN_DGTZ_TRGMODE_DISABLED;
+
+    std::string outputformat = fConfig.GetEntry<std::string>("digitizer","OutputFormat","");
+    if(outputformat == "ROOT")
+      fOutputFormat = kROOT;
+    else if(outputformat == "ASCII")
+      fOutputFormat = kASCII;
+    else {
+      Log::OutError("Output format " + outputformat + " does not exist. Abort.");
+      exit(1);
+    }
+  }
+  
+
+
+
+    //  fHandle(0), fBuffer(nullptr), fBufferSize(0), fVoidEvent(nullptr), fEvent(nullptr) {}
+
+Digitizer::~Digitizer() {
+  Close();
+}
+
+void Digitizer::SelectBoard()
+{
+  CAEN_DGTZ_ErrorCode re = CAEN_DGTZ_OpenDigitizer2(
+						    fConnectionType,
+						    (void*)fIPAddress.c_str(),
+						    fConetNode,
+						    fVMEBaseAddress,
+						    &fHandle
+						    );
+
+  if(re == CAEN_DGTZ_Success) {
+    Log::OutSummary("Digitizer connected.");
+    re = CAEN_DGTZ_GetInfo(fHandle, &fBoardInfo);
+    Log::OutDebug("Digitizer model: " + std::string(fBoardInfo.ModelName));
+    Log::OutDebug("Number of channels: " + std::to_string(fBoardInfo.Channels));
+    Log::OutDebug("ROC firmware release: " + std::string(fBoardInfo.ROC_FirmwareRel));
+    Log::OutDebug("AMC firmware release: " + std::string(fBoardInfo.AMC_FirmwareRel));
+    Log::OutDebug("Serial number: " + std::to_string(fBoardInfo.SerialNumber));
+  } else {
+    Log::OutError("Cannot connect to the digitizer. Error code: " + std::to_string(re) + ".");
+    exit(1);
+  }
+}
+
+
+
+void Digitizer::Reset() {
+  CAEN_DGTZ_ErrorCode re = CAEN_DGTZ_Reset(fHandle);
+  if (re == CAEN_DGTZ_Success)
+    Log::OutDebug("Digitizer reset.");
+  else {
+    Log::OutError("Cannot reset digitizer. Error code: " + std::to_string(re));
+    exit(1);
+  }
+}
+void Digitizer::Configure() {
+    Log::OutDebug("Configuring digitizer parameters...");
+
+    // Imposta record length (ad es. 1024 campioni per evento)
+    CAEN_DGTZ_SetRecordLength(fHandle, 1024);
+    fRecordLength = 1024;
+
+    // Attiva tutti i canali nel ChannelMask
+    CAEN_DGTZ_SetChannelEnableMask(fHandle, 0xFF); // canali 0–7
+    fChannelMask = 0xFF;
+    fNChannels = 8;
+    fChannelList.clear();
+    for (uint32_t ch = 0; ch < fNChannels; ++ch)
+        fChannelList.push_back(ch);
+
+    // Post Trigger (es. 80%)
+    CAEN_DGTZ_SetPostTriggerSize(fHandle, 80);
+
+    // Acquisizione software-controlled
+    CAEN_DGTZ_SetAcquisitionMode(fHandle, CAEN_DGTZ_SW_CONTROLLED);
+
+    // IO level NIM
+    CAEN_DGTZ_SetIOLevel(fHandle, CAEN_DGTZ_IOLevel_NIM);
+
+    // Trigger polarity (rising or falling edge)
+    for (uint32_t ch = 0; ch < fNChannels; ++ch) {
+        CAEN_DGTZ_SetTriggerPolarity(fHandle, ch, CAEN_DGTZ_TriggerOnFallingEdge);
+    }
+
+    Log::OutDebug("Digitizer configuration complete.");
+}
+
+void Digitizer::GetVMElibVersion() {
+  std::cout << "CAEN VMElib version: "
+	    << CAENVME_VERSION_MAJOR << "."
+	    << CAENVME_VERSION_MINOR << "."
+	    << CAENVME_VERSION_PATCH << std::endl;
+}
+
+void Digitizer::Close() {
+  if (fVoidEvent)
+    CAEN_DGTZ_FreeEvent(fHandle, &fVoidEvent);
+  if (fBuffer)
+    CAEN_DGTZ_FreeReadoutBuffer(&fBuffer);
+  if (fHandle)
+    CAEN_DGTZ_CloseDigitizer(fHandle);
+  fVoidEvent = nullptr;
+  fBuffer = nullptr;
+  fHandle = 0;
+}
+
+void Digitizer::InitAcquisition() {
+  CAEN_DGTZ_ErrorCode re;
+  re = CAEN_DGTZ_MallocReadoutBuffer(fHandle, &fBuffer, &fBufferSize);
+  if (re != CAEN_DGTZ_Success) {
+    Log::OutError("Failed to allocate buffer.");
+    exit(1);
+  }
+
+  re = CAEN_DGTZ_AllocateEvent(fHandle, &fVoidEvent);
+  if (re != CAEN_DGTZ_Success) {
+    Log::OutError("Failed to allocate event.");
+    exit(1);
+  }
+
+  fEvent = reinterpret_cast<CAEN_DGTZ_X742_EVENT_t*>(fVoidEvent);
+
+  Log::OutDebug("Acquisition initialized.");
+}
+
+void Digitizer::SetTriggerThreshold(double offset, unsigned int N)
+{
+  (void)offset;
+  (void)N;
+  CAEN_DGTZ_ErrorCode re = CAEN_DGTZ_SWStartAcquisition(fHandle);
+  if (re != CAEN_DGTZ_Success) {
+    Log::OutError("Start acquisition failed.");
+    return;
+  }
+
+  re = CAEN_DGTZ_SendSWtrigger(fHandle);
+  if (re != CAEN_DGTZ_Success) {
+    Log::OutError("Software trigger failed.");
+    return;
+  }
+
+  re = CAEN_DGTZ_ReadData(fHandle, CAEN_DGTZ_SLAVE_TERMINATED_READOUT_MBLT, fBuffer, &fBufferSize);
+  if (re != CAEN_DGTZ_Success || fBufferSize == 0) {
+    Log::OutError("ReadData failed or buffer empty.");
+    return;
+  }
+
+  uint32_t nEvents = 0;
+  re = CAEN_DGTZ_GetNumEvents(fHandle, fBuffer, fBufferSize, &nEvents);
+  if (re != CAEN_DGTZ_Success) {
+    Log::OutError("GetNumEvents failed.");
+    return;
+  }
+
+  for (uint32_t i = 0; i < nEvents; i++) {
+    re = CAEN_DGTZ_GetEventInfo(fHandle, fBuffer, fBufferSize, i, &fEventInfo, &fEventPtr);
+    if (re != CAEN_DGTZ_Success || !fEventPtr) {
+      Log::OutError("GetEventInfo failed.");
+      continue;
+    }
+
+    re = CAEN_DGTZ_DecodeEvent(fHandle, fEventPtr, &fVoidEvent);
+    if (re != CAEN_DGTZ_Success) {
+      Log::OutError("DecodeEvent failed.");
+      continue;
+    }
+
+    fEvent = reinterpret_cast<CAEN_DGTZ_X742_EVENT_t*>(fVoidEvent);
+
+    for (uint32_t ch = 0; ch < fNChannels; ++ch) {
+      int group = ch / 4;
+      int local_ch = ch % 4;
+      
+      uint32_t nsamples = fEvent->DataGroup[group].ChSize[local_ch];
+      float* waveform = fEvent->DataGroup[group].DataChannel[local_ch];    
+      if (nsamples < MIN_SAMPLES || nsamples > MAX_SAMPLES || waveform == nullptr) {
+        Log::OutDebug("  → canale " + std::to_string(ch) + " skip: nsamples=" + std::to_string(nsamples));
+        continue;
+      }
+      
+      double baseline = 0.0;
+      for (uint32_t s = 0; s < nsamples; ++s)
+        baseline += waveform[s];
+      baseline /= nsamples;
+      
+      Log::OutDebug("  → ch" + std::to_string(ch) + " baseline=" + std::to_string(baseline));
+    }
+  }
+}
+
+void Digitizer::AcquireEvents() {
+        CAEN_DGTZ_ErrorCode re = CAEN_DGTZ_SWStartAcquisition(fHandle);
+  //  CAEN_DGTZ_ErrorCode re = CAEN_DGTZ_SetExtTriggerInputMode(fHandle, CAEN_DGTZ_TriggerMode_t );
+      if (re != CAEN_DGTZ_Success) {
+        Log::OutError("Start acquisition failed.");
+        return;
+      }
+
+      
+            for (int i = 0; i < 10; i++) {
+        re = CAEN_DGTZ_ReadData(fHandle, CAEN_DGTZ_SLAVE_TERMINATED_READOUT_MBLT, fBuffer, &fBufferSize);
+        if (re != CAEN_DGTZ_Success || fBufferSize == 0) {
+	  Log::OutError("Acquire events...ReadData failed or buffer empty.");
+	  continue;
+	  }
+
+        uint32_t nEvents = 0;
+        re = CAEN_DGTZ_GetNumEvents(fHandle, fBuffer, fBufferSize, &nEvents);
+        if (re != CAEN_DGTZ_Success) {
+	  Log::OutError("GetNumEvents failed.");
+	  continue;
+        }
+
+        for (uint32_t j = 0; j < nEvents; j++) {
+	  re = CAEN_DGTZ_GetEventInfo(fHandle, fBuffer, fBufferSize, j, &fEventInfo, &fEventPtr);
+	  if (re != CAEN_DGTZ_Success || !fEventPtr) {
+	    Log::OutError("GetEventInfo failed.");
+	    continue;
+	  }
+
+	  re = CAEN_DGTZ_DecodeEvent(fHandle, fEventPtr, &fVoidEvent);
+	  if (re != CAEN_DGTZ_Success) {
+	    Log::OutError("DecodeEvent failed.");
+	    continue;
+	  }
+
+	  fEvent = reinterpret_cast<CAEN_DGTZ_X742_EVENT_t*>(fVoidEvent);
+	  Log::OutDebug("Decoded Event.");
+        }
+      }
+
+      CAEN_DGTZ_SWStopAcquisition(fHandle);
+      Log::OutDebug("Acquisition complete.");
+    }
+
+    long Digitizer::GetTime() {
+      struct timeval t1;
+      gettimeofday(&t1, nullptr);
+      return t1.tv_sec * 1000 + t1.tv_usec / 1000;
+    }
+
+    bool Digitizer::CheckAccepted(std::map<uint32_t,uint32_t>& nAccepted) {
+      for (auto& c : fChannelList)
+        if (nAccepted[c] < fNNoiseEvents)
+	  return false;
+      return true;
+    }
+
+    void Digitizer::PrepareOutput() {}
+    void Digitizer::CloseOutputFile() {}

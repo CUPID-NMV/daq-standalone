@@ -1,0 +1,116 @@
+#include "Bridge.h"
+#include "Log.h"
+
+Bridge::Bridge()
+{
+    fConnectionType = CAENComm_ConnectionType::CAENComm_USB;
+    fBoardType      = cvUSB_V3718_LOCAL;
+    fLinkNumber     = 0;
+    fConetNode      = 0;
+    fHandle         = 0;
+    fVMEBaseAddress = fConfig.GetEntry<uint32_t>("bridge","VMEBaseAddress",0x00000000);//32100000;
+    fPulserSelect   = fConfig.GetEntry<uint32_t>("bridge","PulserSelect",-1);
+    fPulserChannel  = static_cast<CVOutputSelect>( fConfig.GetEntry<uint32_t>("bridge","PulserChannel",9) );
+    fPulserPolarity = static_cast<CVIOPolarity>( fConfig.GetEntry<uint32_t>("bridge","PulserPolarity",0) );
+    fIOSource       = CVIOSources::cvPulserV3718A;//static_cast<CVIOSources>( fConfig.GetEntry<uint32_t>("bridge","IOSource",0) );
+    Log::OutDebug("Pulser channel: " + std::to_string(fPulserChannel));
+    Log::OutDebug("Pulser polarity: " + std::to_string(fPulserPolarity));
+    Log::OutDebug("IOSource: " + std::to_string(fIOSource));
+    Open();
+}
+
+Bridge::~Bridge()
+{
+    ;
+}
+
+void Bridge::Open()
+{
+    CAENComm_ErrorCode re = CAENComm_OpenDevice2( fConnectionType,//CAENComm_ConnectionType::CAENComm_USB,
+						  &fLinkNumber,
+						  fConetNode,
+						  fVMEBaseAddress,
+						  &fHandle );
+    //int re = CAENVME_Init2( fBoardType,
+    //			    &fLinkNumber,
+    //			    fConetNode,
+    //			    &fHandle );
+    if( re==0 )
+	Log::OutSummary("Bridge connected.");
+    else
+	{
+	    Log::OutError("Cannot connect to bridge. Error code: " + std::to_string(re) + ".");
+	    exit(1);
+	}
+    
+    return;
+}
+
+void Bridge::Close()
+{
+    CAENComm_CloseDevice(fHandle);
+    //CAENVME_End(fHandle);
+    
+    return;
+}
+
+void Bridge::StartPulser()
+{
+    SetPulser();
+    CVErrorCodes re = CAENVME_StartPulser( fHandle,
+					   CVPulserSelect::cvPulserA );
+    if( re==0 )
+	Log::OutDebug("Pulser started");
+    else
+	{
+	    Log::OutDebug("Cannot start pulser. Error code: " + std::to_string(re) + "." );
+	    exit(1);
+	}
+    
+    return;
+}
+
+void Bridge::StopPulser()
+{
+    CVErrorCodes re = CAENVME_StopPulser( fHandle,
+					   CVPulserSelect::cvPulserA );
+    if( re==0 )
+	Log::OutDebug("Pulser stopped");
+    else
+	{
+	    Log::OutDebug("Cannot stop pulser. Error code: " + std::to_string(re) + "." );
+	    exit(1);
+	}
+    
+    return;
+}
+
+void Bridge::SetPulser()
+{
+
+    // Configure pulser
+    CVErrorCodes re = CAENVME_SetPulserConf( fHandle,
+    					     CVPulserSelect::cvPulserA,
+					     4000,
+					     2000,
+					     CVTimeUnits::cvUnit25us,
+					     0,
+					     CVIOSources::cvManualSW,
+					     CVIOSources::cvManualSW );
+    if( re==0 )
+	Log::OutDebug("Pulser set");
+    else
+	{
+	    Log::OutDebug("Cannot set pulser. Error code: " + std::to_string(re) + "." );
+	    exit(1);
+	}
+
+    // Set pulser polarity
+    //re = CAENVME_SetOutputConf( fHandle,
+    //				fPulserChannel,
+    //				fPulserPolarity,
+    //				CVLEDPolarity::cvActiveHigh,
+    //				fIOSource );
+    
+    return;
+}

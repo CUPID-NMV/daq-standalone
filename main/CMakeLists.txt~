@@ -1,0 +1,32 @@
+set(EXE_SOURCE_FILES
+  GAGG-DAQ.cpp
+  )
+
+# Generate targets
+foreach( exesourcefile ${EXE_SOURCE_FILES} )
+    # get the name from the source path
+    # (strip .cpp, and the path preceding the basename)
+    string( REPLACE ".cpp" "" exenamenoext ${exesourcefile} )
+    get_filename_component(exename ${exenamenoext} NAME)
+
+    # prepend exe_ to the target name to avoid target name clashes,
+    # create the  executable:
+    add_executable( exe_${exename} ${exesourcefile} )
+
+    # add the project root as an include directory
+    # link all exe to Analysis, DataHandlers, Filters, OptimalFilter, and Utils libraries.
+    target_include_directories(exe_${exename} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+    target_link_libraries( exe_${exename} daqcomponents toml daqutils)
+
+    # ensure the unit test executable filename is just its test name
+    set_target_properties( exe_${exename} PROPERTIES OUTPUT_NAME ${exename})
+
+    # # # register the target as a test 
+    # add_test (NAME ${testname} COMMAND exe_${exename} )
+    # set_tests_properties(${exename} PROPERTIES TIMEOUT 250) 
+    # set_tests_properties(${exename} PROPERTIES ENVIRONMENT "OCTOPUS_SOURCE_DIR=${CMAKE_SOURCE_DIR}")
+
+    install( TARGETS exe_${exename}
+             RUNTIME DESTINATION bin/ )
+ 
+endforeach( exesourcefile ${EXE_SOURCE_FILES} )

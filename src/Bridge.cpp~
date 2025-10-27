@@ -1,0 +1,158 @@
+
+// Bridge_ETHERNET_FIXED.cpp
+#include "Bridge.h"
+#include "Config.h"
+#include "Log.h"
+#include <cstring>
+#include <ctime>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
+#include <stdexcept>
+
+Bridge::Bridge() :
+    fConfig(Config::GetInstance()),
+    fBoardType(cvV2718),
+    fIPAddress("192.168.99.105"),
+    fHandle(0),
+    fVMEBaseAddress(fConfig.GetEntry<uint32_t>("bridge", "VMEBaseAddress", 0x32100000)),
+    fPulserSelect(cvPulserA),
+    fPulserChannel(static_cast<CVOutputSelect>(fConfig.GetEntry<uint32_t>("bridge", "PulserChannel", 9))),
+    fPulserPolarity(static_cast<CVIOPolarity>(fConfig.GetEntry<uint32_t>("bridge", "PulserPolarity", 0))),
+    fIOSource(cvManualSW),
+    fDigitizerHandle(-1),
+    fDigitizerModel(1742),
+    fDigitizerAddress(fConfig.GetEntry<uint32_t>("digitizer", "BaseAddress", 0x40000000))
+{
+    Log::OutDebug("Initializing V2718 Bridge and V1742 Digitizer");
+}
+
+Bridge::~Bridge() {
+    Close();
+}
+
+void Bridge::CheckVMEError(CVErrorCodes code, const std::string& operation) {
+    if(code != cvSuccess) {
+        std::string errorMsg = "V2718 Error in " + operation + ": " + 
+                               std::to_string(code) + " - " + 
+                               CAENVME_DecodeError(code);
+        Log::OutError(errorMsg);
+        throw std::runtime_error(errorMsg);
+    }
+}
+
+void Bridge::CheckDigitizerError(int code, const std::string& operation) {
+    if(code != CAEN_DGTZ_Success) {
+        std::string errorMsg = "V1742 Error in " + operation + ": " + std::to_string(code);
+        Log::OutError(errorMsg);
+        throw std::runtime_error(errorMsg);
+    }
+}
+
+void Bridge::Open() {
+    CVErrorCodes ret = CAENVME_Init2(fBoardType, fIPAddress.c_str(), 0, &fHandle);
+    CheckVMEError(ret, "V2718 initialization");
+
+    Log::OutSummary("V2718 Bridge initialized successfully");
+
+    ret = CAENVME_SetDefaultAM(fHandle, cvA32_U_DATA);
+    CheckVMEError(ret, "Setting Address Modifier");
+
+    ret = CAENVME_SetDefaultDW(fHandle, cvD32);
+    CheckVMEError(ret, "Setting Data Width");
+}
+
+void Bridge::Close() {
+    if(fDigitizerHandle >= 0) {
+        CAEN_DGTZ_CloseDigitizer(fDigitizerHandle);
+        fDigitizerHandle = -1;
+    }
+
+    if(fHandle != 0) {
+        CAENVME_End(fHandle);
+        fHandle = 0;
+    }
+
+    Log::OutDebug("V2718 and V1742 connections closed");
+}
+
+void Bridge::SetPulserParameters(uint32_t period, uint32_t width, CVTimeUnits unit) {
+    CVErrorCodes ret = CAENVME_SetPulserConf(
+        fHandle, fPulserSelect, period, width, unit,
+        0, cvManualSW, cvManualSW
+    );
+    CheckVMEError(ret, "Pulser configuration");
+}
+
+void Bridge::StartPulser() {
+    SetPulserParameters(4000, 2000, cvUnit25us);
+    CVErrorCodes ret = CAENVME_StartPulser(fHandle, fPulserSelect);
+    CheckVMEError(ret, "Starting pulser");
+    Log::OutDebug("Pulser started");
+}
+
+void Bridge::StopPulser() {
+    CVErrorCodes ret = CAENVME_StopPulser(fHandle, fPulserSelect);
+    CheckVMEError(ret, "Stopping pulser");
+    Log::OutDebug("Pulser stopped");
+}
+
+void Bridge::InitDigitizer() {
+    CAEN_DGTZ_ConnectionType connType = CAEN_DGTZ_VME;
+    int ret = CAEN_DGTZ_OpenDigitizer(connType, fDigitizerAddress, 0, 0, &fDigitizerHandle);
+    CheckDigitizerError(ret, "Opening digitizer");
+
+    ret = CAEN_DGTZ_Reset(fDigitizerHandle);
+    CheckDigitizerError(ret, "Resetting digitizer");
+
+    ret = CAEN_DGTZ_SetRecordLength(fDigitizerHandle, 1024);
+    CheckDigitizerError(ret, "Setting record length");
+
+    ret = CAEN_DGTZ_SetPostTriggerSize(fDigitizerHandle, 50);
+    CheckDigitizerError(ret, "Setting post trigger");
+
+    uint32_t channelMask = 0xFF;
+    ret = CAEN_DGTZ_SetChannelEnableMask(fDigitizerHandle, channelMask);
+    CheckDigitizerError(ret, "Enabling channels");
+
+    Log::OutSummary("V1742 Digitizer initialized");
+}
+
+void Bridge::StartAcquisition() {
+    int ret = CAEN_DGTZ_SWStartAcquisition(fDigitizerHandle);
+    CheckDigitizerError(ret, "Starting acquisition");
+    Log::OutDebug("Digitizer acquisition started");
+}
+
+void Bridge::StopAcquisition() {
+    int ret = CAEN_DGTZ_SWStopAcquisition(fDigitizerHandle);
+    CheckDigitizerError(ret, "Stopping acquisition");
+    Log::OutDebug("Digitizer acquisition stopped");
+}
+
+void Bridge::ReadData(std::vector<uint32_t>& buffer) {
+    char* eventPtr = nullptr;
+    uint32_t size;
+
+    CAEN_DGTZ_ReadMode_t mode = CAEN_DGTZ_SLAVE_TERMINATED_READOUT_MBLT;
+    int ret = CAEN_DGTZ_ReadData(fDigitizerHandle, mode, (char**)&eventPtr, &size);
+    CheckDigitizerError(ret, "Reading data");
+
+    if(size > 0) {
+        buffer.resize(size / sizeof(uint32_t));
+        memcpy(buffer.data(), eventPtr, size);
+    }
+
+    CAEN_DGTZ_FreeEvent(fDigitizerHandle, (void**)&eventPtr);
+}
+
+std::string Bridge::GenerateHDF5Filename() const {
+    auto now = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now);
+
+    std::stringstream ss;
+    ss << "V1742_";
+    ss << std::put_time(std::localtime(&in_time_t), "%Y%m%d_%H%M%S");
+    ss << ".h5";
+    return ss.str();
+}

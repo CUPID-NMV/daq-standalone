@@ -1,0 +1,22 @@
+// HDF5Writer.hpp
+#pragma once
+
+#include <string>
+#include <vector>
+#include <H5Cpp.h>
+
+class HDF5Writer {
+public:
+    HDF5Writer(const std::string& filename);
+    ~HDF5Writer();
+
+    void WriteEvent(uint32_t eventNumber,
+                    const std::map<uint32_t, std::vector<float>>& waveforms,
+                    const std::map<uint32_t, double>& baselines,
+                    uint64_t timestamp);
+
+private:
+    H5::H5File file;
+    H5::Group eventsGroup;
+    std::string BuildDatasetName(uint32_t eventNumber, uint32_t channel);
+};

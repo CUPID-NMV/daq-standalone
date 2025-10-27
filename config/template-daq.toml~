@@ -1,0 +1,37 @@
+[digitizer]
+ConnectionType  = "ETH_V4718"
+IPAddress       = "192.168.99.105"
+LinkNumber      = 0
+ConetNode       = 0
+VMEBaseAddress  = 0x32100000
+
+ChannelList = [0, 1, 2, 3, 5, 9]
+
+RecordLength    = 1024
+PostTriggerSize = 100
+WaitTimeS       = 1.0
+
+# Trigger esterno da TRG IN (coincidenza scintillatori)
+SelfTrigger     = false
+ExternalTrigger = true
+ExtTriggerMode  = "NIM"
+TriggerPolarity = 1          # 0 = fronte rising, 1 = falling
+
+# Polarità segnale in ingresso (es: impulsi positivi = 0, negativi = 1)
+PulsePolarity   = 1
+
+# Soglie per il salvataggio eventi
+NRMSThreshold     = 2.0         # soglia su rumore relativo
+IntegralThreshold = 5.0         # soglia su somma integrale
+
+# Tempo e numero eventi
+Duration        = 00:10:00.000000
+NEvents         = 11
+NNoiseEvents    = 2000
+
+# Output
+SaveRaw = true  
+OutputFormat    = "HDF5"        # oppure "ROOT" o "ASCII"
+OutputDir       = "/home/daq/GAGG-DAQ-main/data"
+OutputFile      = "WC_proto"
+

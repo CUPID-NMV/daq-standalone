@@ -1,0 +1,45 @@
+#include "HDF5Writer.hpp"
+
+HDF5Writer::HDF5Writer(const std::string& filename)
+    : m_filename(filename)
+{
+    m_file = H5::H5File(m_filename, H5F_ACC_TRUNC);
+}
+
+HDF5Writer::~HDF5Writer()
+{
+    m_file.close();
+}
+
+void HDF5Writer::WriteEvent(uint32_t eventID,
+                             const std::map<uint32_t, std::vector<float>>& channelData,
+                             const std::map<uint32_t, double>& baselines,
+                             const std::map<uint32_t, double>& timestamps)
+{
+    std::string groupName = "/event_" + std::to_string(eventID);
+    H5::Group eventGroup = m_file.createGroup(groupName);
+
+    for (const auto& [ch, waveform] : channelData) {
+        const hsize_t dims[1] = { waveform.size() };
+        H5::DataSpace dataspace(1, dims);
+        std::string dsetName = "ch" + std::to_string(ch);
+
+        H5::DataSet dataset = eventGroup.createDataSet(
+            dsetName, H5::PredType::NATIVE_FLOAT, dataspace);
+        dataset.write(waveform.data(), H5::PredType::NATIVE_FLOAT);
+    }
+
+    for (const auto& [ch, baseline] : baselines) {
+        std::string name = "ch" + std::to_string(ch) + "_baseline";
+        H5::Attribute attr = eventGroup.createAttribute(
+            name, H5::PredType::NATIVE_DOUBLE, H5::DataSpace());
+        attr.write(H5::PredType::NATIVE_DOUBLE, &baseline);
+    }
+
+    for (const auto& [ch, ts] : timestamps) {
+        std::string name = "ch" + std::to_string(ch) + "_timestamp";
+        H5::Attribute attr = eventGroup.createAttribute(
+            name, H5::PredType::NATIVE_DOUBLE, H5::DataSpace());
+        attr.write(H5::PredType::NATIVE_DOUBLE, &ts);
+    }
+}

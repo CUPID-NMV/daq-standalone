@@ -53,10 +53,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/daq/GAGG-DAQ-main
+CMAKE_SOURCE_DIR = /home/daq/daq-standalone
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/daq/GAGG-DAQ-main/build
+CMAKE_BINARY_DIR = /home/daq/daq-standalone/build
 
 # Include any dependencies generated for this target.
 include src/CMakeFiles/daqcomponents.dir/depend.make
@@ -70,46 +70,46 @@ include src/CMakeFiles/daqcomponents.dir/progress.make
 include src/CMakeFiles/daqcomponents.dir/flags.make
 
 src/CMakeFiles/daqcomponents.dir/Digitizer.cpp.o: src/CMakeFiles/daqcomponents.dir/flags.make
-src/CMakeFiles/daqcomponents.dir/Digitizer.cpp.o: /home/daq/GAGG-DAQ-main/src/Digitizer.cpp
+src/CMakeFiles/daqcomponents.dir/Digitizer.cpp.o: /home/daq/daq-standalone/src/Digitizer.cpp
 src/CMakeFiles/daqcomponents.dir/Digitizer.cpp.o: src/CMakeFiles/daqcomponents.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/daq/GAGG-DAQ-main/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object src/CMakeFiles/daqcomponents.dir/Digitizer.cpp.o"
-	cd /home/daq/GAGG-DAQ-main/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT src/CMakeFiles/daqcomponents.dir/Digitizer.cpp.o -MF CMakeFiles/daqcomponents.dir/Digitizer.cpp.o.d -o CMakeFiles/daqcomponents.dir/Digitizer.cpp.o -c /home/daq/GAGG-DAQ-main/src/Digitizer.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/daq/daq-standalone/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object src/CMakeFiles/daqcomponents.dir/Digitizer.cpp.o"
+	cd /home/daq/daq-standalone/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT src/CMakeFiles/daqcomponents.dir/Digitizer.cpp.o -MF CMakeFiles/daqcomponents.dir/Digitizer.cpp.o.d -o CMakeFiles/daqcomponents.dir/Digitizer.cpp.o -c /home/daq/daq-standalone/src/Digitizer.cpp
 
 src/CMakeFiles/daqcomponents.dir/Digitizer.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/daqcomponents.dir/Digitizer.cpp.i"
-	cd /home/daq/GAGG-DAQ-main/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/daq/GAGG-DAQ-main/src/Digitizer.cpp > CMakeFiles/daqcomponents.dir/Digitizer.cpp.i
+	cd /home/daq/daq-standalone/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/daq/daq-standalone/src/Digitizer.cpp > CMakeFiles/daqcomponents.dir/Digitizer.cpp.i
 
 src/CMakeFiles/daqcomponents.dir/Digitizer.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/daqcomponents.dir/Digitizer.cpp.s"
-	cd /home/daq/GAGG-DAQ-main/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/daq/GAGG-DAQ-main/src/Digitizer.cpp -o CMakeFiles/daqcomponents.dir/Digitizer.cpp.s
+	cd /home/daq/daq-standalone/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/daq/daq-standalone/src/Digitizer.cpp -o CMakeFiles/daqcomponents.dir/Digitizer.cpp.s
 
 src/CMakeFiles/daqcomponents.dir/Bridge.cpp.o: src/CMakeFiles/daqcomponents.dir/flags.make
-src/CMakeFiles/daqcomponents.dir/Bridge.cpp.o: /home/daq/GAGG-DAQ-main/src/Bridge.cpp
+src/CMakeFiles/daqcomponents.dir/Bridge.cpp.o: /home/daq/daq-standalone/src/Bridge.cpp
 src/CMakeFiles/daqcomponents.dir/Bridge.cpp.o: src/CMakeFiles/daqcomponents.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/daq/GAGG-DAQ-main/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object src/CMakeFiles/daqcomponents.dir/Bridge.cpp.o"
-	cd /home/daq/GAGG-DAQ-main/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT src/CMakeFiles/daqcomponents.dir/Bridge.cpp.o -MF CMakeFiles/daqcomponents.dir/Bridge.cpp.o.d -o CMakeFiles/daqcomponents.dir/Bridge.cpp.o -c /home/daq/GAGG-DAQ-main/src/Bridge.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/daq/daq-standalone/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object src/CMakeFiles/daqcomponents.dir/Bridge.cpp.o"
+	cd /home/daq/daq-standalone/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT src/CMakeFiles/daqcomponents.dir/Bridge.cpp.o -MF CMakeFiles/daqcomponents.dir/Bridge.cpp.o.d -o CMakeFiles/daqcomponents.dir/Bridge.cpp.o -c /home/daq/daq-standalone/src/Bridge.cpp
 
 src/CMakeFiles/daqcomponents.dir/Bridge.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/daqcomponents.dir/Bridge.cpp.i"
-	cd /home/daq/GAGG-DAQ-main/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/daq/GAGG-DAQ-main/src/Bridge.cpp > CMakeFiles/daqcomponents.dir/Bridge.cpp.i
+	cd /home/daq/daq-standalone/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/daq/daq-standalone/src/Bridge.cpp > CMakeFiles/daqcomponents.dir/Bridge.cpp.i
 
 src/CMakeFiles/daqcomponents.dir/Bridge.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/daqcomponents.dir/Bridge.cpp.s"
-	cd /home/daq/GAGG-DAQ-main/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/daq/GAGG-DAQ-main/src/Bridge.cpp -o CMakeFiles/daqcomponents.dir/Bridge.cpp.s
+	cd /home/daq/daq-standalone/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/daq/daq-standalone/src/Bridge.cpp -o CMakeFiles/daqcomponents.dir/Bridge.cpp.s
 
 src/CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.o: src/CMakeFiles/daqcomponents.dir/flags.make
-src/CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.o: /home/daq/GAGG-DAQ-main/src/HDF5Writer.cpp
+src/CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.o: /home/daq/daq-standalone/src/HDF5Writer.cpp
 src/CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.o: src/CMakeFiles/daqcomponents.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/daq/GAGG-DAQ-main/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object src/CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.o"
-	cd /home/daq/GAGG-DAQ-main/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT src/CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.o -MF CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.o.d -o CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.o -c /home/daq/GAGG-DAQ-main/src/HDF5Writer.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/daq/daq-standalone/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object src/CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.o"
+	cd /home/daq/daq-standalone/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT src/CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.o -MF CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.o.d -o CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.o -c /home/daq/daq-standalone/src/HDF5Writer.cpp
 
 src/CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.i"
-	cd /home/daq/GAGG-DAQ-main/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/daq/GAGG-DAQ-main/src/HDF5Writer.cpp > CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.i
+	cd /home/daq/daq-standalone/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/daq/daq-standalone/src/HDF5Writer.cpp > CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.i
 
 src/CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.s"
-	cd /home/daq/GAGG-DAQ-main/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/daq/GAGG-DAQ-main/src/HDF5Writer.cpp -o CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.s
+	cd /home/daq/daq-standalone/build/src && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/daq/daq-standalone/src/HDF5Writer.cpp -o CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.s
 
 # Object files for target daqcomponents
 daqcomponents_OBJECTS = \
@@ -125,19 +125,19 @@ src/libdaqcomponents.a: src/CMakeFiles/daqcomponents.dir/Bridge.cpp.o
 src/libdaqcomponents.a: src/CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.o
 src/libdaqcomponents.a: src/CMakeFiles/daqcomponents.dir/build.make
 src/libdaqcomponents.a: src/CMakeFiles/daqcomponents.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/daq/GAGG-DAQ-main/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Linking CXX static library libdaqcomponents.a"
-	cd /home/daq/GAGG-DAQ-main/build/src && $(CMAKE_COMMAND) -P CMakeFiles/daqcomponents.dir/cmake_clean_target.cmake
-	cd /home/daq/GAGG-DAQ-main/build/src && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/daqcomponents.dir/link.txt --verbose=$(VERBOSE)
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/daq/daq-standalone/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Linking CXX static library libdaqcomponents.a"
+	cd /home/daq/daq-standalone/build/src && $(CMAKE_COMMAND) -P CMakeFiles/daqcomponents.dir/cmake_clean_target.cmake
+	cd /home/daq/daq-standalone/build/src && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/daqcomponents.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.
 src/CMakeFiles/daqcomponents.dir/build: src/libdaqcomponents.a
 .PHONY : src/CMakeFiles/daqcomponents.dir/build
 
 src/CMakeFiles/daqcomponents.dir/clean:
-	cd /home/daq/GAGG-DAQ-main/build/src && $(CMAKE_COMMAND) -P CMakeFiles/daqcomponents.dir/cmake_clean.cmake
+	cd /home/daq/daq-standalone/build/src && $(CMAKE_COMMAND) -P CMakeFiles/daqcomponents.dir/cmake_clean.cmake
 .PHONY : src/CMakeFiles/daqcomponents.dir/clean
 
 src/CMakeFiles/daqcomponents.dir/depend:
-	cd /home/daq/GAGG-DAQ-main/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/daq/GAGG-DAQ-main /home/daq/GAGG-DAQ-main/src /home/daq/GAGG-DAQ-main/build /home/daq/GAGG-DAQ-main/build/src /home/daq/GAGG-DAQ-main/build/src/CMakeFiles/daqcomponents.dir/DependInfo.cmake "--color=$(COLOR)"
+	cd /home/daq/daq-standalone/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/daq/daq-standalone /home/daq/daq-standalone/src /home/daq/daq-standalone/build /home/daq/daq-standalone/build/src /home/daq/daq-standalone/build/src/CMakeFiles/daqcomponents.dir/DependInfo.cmake "--color=$(COLOR)"
 .PHONY : src/CMakeFiles/daqcomponents.dir/depend
 

@@ -57,10 +57,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/daq/GAGG-DAQ-main
+CMAKE_SOURCE_DIR = /home/daq/daq-standalone
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/daq/GAGG-DAQ-main/build
+CMAKE_BINARY_DIR = /home/daq/daq-standalone/build
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -87,14 +87,14 @@ rebuild_cache/fast: rebuild_cache
 
 # The main all target
 all: cmake_check_build_system
-	cd /home/daq/GAGG-DAQ-main/build && $(CMAKE_COMMAND) -E cmake_progress_start /home/daq/GAGG-DAQ-main/build/CMakeFiles /home/daq/GAGG-DAQ-main/build/src//CMakeFiles/progress.marks
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/GAGG-DAQ-main/build/CMakeFiles 0
+	cd /home/daq/daq-standalone/build && $(CMAKE_COMMAND) -E cmake_progress_start /home/daq/daq-standalone/build/CMakeFiles /home/daq/daq-standalone/build/src//CMakeFiles/progress.marks
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/daq-standalone/build/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
 clean:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/clean
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/clean
 .PHONY : clean
 
 # The main clean target
@@ -103,22 +103,22 @@ clean/fast: clean
 
 # Prepare targets for installation.
 preinstall: all
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/preinstall
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/preinstall
 .PHONY : preinstall
 
 # Prepare targets for installation.
 preinstall/fast:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/preinstall
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/preinstall
 .PHONY : preinstall/fast
 
 # clear depends
 depend:
-	cd /home/daq/GAGG-DAQ-main/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 1
+	cd /home/daq/daq-standalone/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 1
 .PHONY : depend
 
 # Convenience name for target.
 src/CMakeFiles/daqcomponents.dir/rule:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/CMakeFiles/daqcomponents.dir/rule
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/CMakeFiles/daqcomponents.dir/rule
 .PHONY : src/CMakeFiles/daqcomponents.dir/rule
 
 # Convenience name for target.
@@ -127,7 +127,7 @@ daqcomponents: src/CMakeFiles/daqcomponents.dir/rule
 
 # fast build rule for target.
 daqcomponents/fast:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/build
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/build
 .PHONY : daqcomponents/fast
 
 Bridge.o: Bridge.cpp.o
@@ -135,7 +135,7 @@ Bridge.o: Bridge.cpp.o
 
 # target to build an object file
 Bridge.cpp.o:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/Bridge.cpp.o
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/Bridge.cpp.o
 .PHONY : Bridge.cpp.o
 
 Bridge.i: Bridge.cpp.i
@@ -143,7 +143,7 @@ Bridge.i: Bridge.cpp.i
 
 # target to preprocess a source file
 Bridge.cpp.i:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/Bridge.cpp.i
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/Bridge.cpp.i
 .PHONY : Bridge.cpp.i
 
 Bridge.s: Bridge.cpp.s
@@ -151,7 +151,7 @@ Bridge.s: Bridge.cpp.s
 
 # target to generate assembly for a file
 Bridge.cpp.s:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/Bridge.cpp.s
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/Bridge.cpp.s
 .PHONY : Bridge.cpp.s
 
 Digitizer.o: Digitizer.cpp.o
@@ -159,7 +159,7 @@ Digitizer.o: Digitizer.cpp.o
 
 # target to build an object file
 Digitizer.cpp.o:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/Digitizer.cpp.o
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/Digitizer.cpp.o
 .PHONY : Digitizer.cpp.o
 
 Digitizer.i: Digitizer.cpp.i
@@ -167,7 +167,7 @@ Digitizer.i: Digitizer.cpp.i
 
 # target to preprocess a source file
 Digitizer.cpp.i:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/Digitizer.cpp.i
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/Digitizer.cpp.i
 .PHONY : Digitizer.cpp.i
 
 Digitizer.s: Digitizer.cpp.s
@@ -175,7 +175,7 @@ Digitizer.s: Digitizer.cpp.s
 
 # target to generate assembly for a file
 Digitizer.cpp.s:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/Digitizer.cpp.s
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/Digitizer.cpp.s
 .PHONY : Digitizer.cpp.s
 
 HDF5Writer.o: HDF5Writer.cpp.o
@@ -183,7 +183,7 @@ HDF5Writer.o: HDF5Writer.cpp.o
 
 # target to build an object file
 HDF5Writer.cpp.o:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.o
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.o
 .PHONY : HDF5Writer.cpp.o
 
 HDF5Writer.i: HDF5Writer.cpp.i
@@ -191,7 +191,7 @@ HDF5Writer.i: HDF5Writer.cpp.i
 
 # target to preprocess a source file
 HDF5Writer.cpp.i:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.i
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.i
 .PHONY : HDF5Writer.cpp.i
 
 HDF5Writer.s: HDF5Writer.cpp.s
@@ -199,7 +199,7 @@ HDF5Writer.s: HDF5Writer.cpp.s
 
 # target to generate assembly for a file
 HDF5Writer.cpp.s:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.s
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/HDF5Writer.cpp.s
 .PHONY : HDF5Writer.cpp.s
 
 # Help Target
@@ -231,6 +231,6 @@ help:
 # No rule that depends on this can have commands that come from listfiles
 # because they might be regenerated.
 cmake_check_build_system:
-	cd /home/daq/GAGG-DAQ-main/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 0
+	cd /home/daq/daq-standalone/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 0
 .PHONY : cmake_check_build_system
 

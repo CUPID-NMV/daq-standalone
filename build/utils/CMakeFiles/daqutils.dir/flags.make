@@ -4,7 +4,7 @@
 # compile CXX with /usr/bin/c++
 CXX_DEFINES = -Ddaqutils_EXPORTS
 
-CXX_INCLUDES = -I/home/daq/GAGG-DAQ-main/utils -I/home/daq/GAGG-DAQ-main/toml
+CXX_INCLUDES = -I/home/daq/daq-standalone/utils -I/home/daq/daq-standalone/toml
 
 CXX_FLAGS = -std=gnu++17 -fPIC
 

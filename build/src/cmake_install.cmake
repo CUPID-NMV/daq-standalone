@@ -1,4 +1,4 @@
-# Install script for directory: /home/daq/GAGG-DAQ-main/src
+# Install script for directory: /home/daq/daq-standalone/src
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

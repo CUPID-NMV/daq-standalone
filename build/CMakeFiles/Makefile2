@@ -54,10 +54,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/daq/GAGG-DAQ-main
+CMAKE_SOURCE_DIR = /home/daq/daq-standalone
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/daq/GAGG-DAQ-main/build
+CMAKE_BINARY_DIR = /home/daq/daq-standalone/build
 
 #=============================================================================
 # Directory level rules for the build root directory
@@ -87,7 +87,7 @@ clean: main/clean
 # Directory level rules for directory main
 
 # Recursive "all" directory target.
-main/all: main/CMakeFiles/GAGG-DAQ.dir/all
+main/all: main/CMakeFiles/DAQ-WC.dir/all
 .PHONY : main/all
 
 # Recursive "preinstall" directory target.
@@ -95,7 +95,7 @@ main/preinstall:
 .PHONY : main/preinstall
 
 # Recursive "clean" directory target.
-main/clean: main/CMakeFiles/GAGG-DAQ.dir/clean
+main/clean: main/CMakeFiles/DAQ-WC.dir/clean
 .PHONY : main/clean
 
 #=============================================================================
@@ -150,14 +150,14 @@ utils/clean: utils/CMakeFiles/daqutils.dir/clean
 utils/CMakeFiles/daqutils.dir/all:
 	$(MAKE) $(MAKESILENT) -f utils/CMakeFiles/daqutils.dir/build.make utils/CMakeFiles/daqutils.dir/depend
 	$(MAKE) $(MAKESILENT) -f utils/CMakeFiles/daqutils.dir/build.make utils/CMakeFiles/daqutils.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/daq/GAGG-DAQ-main/build/CMakeFiles --progress-num=7,8,9 "Built target daqutils"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/daq/daq-standalone/build/CMakeFiles --progress-num=7,8,9 "Built target daqutils"
 .PHONY : utils/CMakeFiles/daqutils.dir/all
 
 # Build rule for subdir invocation for target.
 utils/CMakeFiles/daqutils.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/GAGG-DAQ-main/build/CMakeFiles 3
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/daq-standalone/build/CMakeFiles 3
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 utils/CMakeFiles/daqutils.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/GAGG-DAQ-main/build/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/daq-standalone/build/CMakeFiles 0
 .PHONY : utils/CMakeFiles/daqutils.dir/rule
 
 # Convenience name for target.
@@ -176,14 +176,14 @@ utils/CMakeFiles/daqutils.dir/clean:
 src/CMakeFiles/daqcomponents.dir/all: utils/CMakeFiles/daqutils.dir/all
 	$(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/depend
 	$(MAKE) $(MAKESILENT) -f src/CMakeFiles/daqcomponents.dir/build.make src/CMakeFiles/daqcomponents.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/daq/GAGG-DAQ-main/build/CMakeFiles --progress-num=3,4,5,6 "Built target daqcomponents"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/daq/daq-standalone/build/CMakeFiles --progress-num=3,4,5,6 "Built target daqcomponents"
 .PHONY : src/CMakeFiles/daqcomponents.dir/all
 
 # Build rule for subdir invocation for target.
 src/CMakeFiles/daqcomponents.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/GAGG-DAQ-main/build/CMakeFiles 7
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/daq-standalone/build/CMakeFiles 7
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 src/CMakeFiles/daqcomponents.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/GAGG-DAQ-main/build/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/daq-standalone/build/CMakeFiles 0
 .PHONY : src/CMakeFiles/daqcomponents.dir/rule
 
 # Convenience name for target.
@@ -196,31 +196,31 @@ src/CMakeFiles/daqcomponents.dir/clean:
 .PHONY : src/CMakeFiles/daqcomponents.dir/clean
 
 #=============================================================================
-# Target rules for target main/CMakeFiles/GAGG-DAQ.dir
+# Target rules for target main/CMakeFiles/DAQ-WC.dir
 
 # All Build rule for target.
-main/CMakeFiles/GAGG-DAQ.dir/all: utils/CMakeFiles/daqutils.dir/all
-main/CMakeFiles/GAGG-DAQ.dir/all: src/CMakeFiles/daqcomponents.dir/all
-	$(MAKE) $(MAKESILENT) -f main/CMakeFiles/GAGG-DAQ.dir/build.make main/CMakeFiles/GAGG-DAQ.dir/depend
-	$(MAKE) $(MAKESILENT) -f main/CMakeFiles/GAGG-DAQ.dir/build.make main/CMakeFiles/GAGG-DAQ.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/daq/GAGG-DAQ-main/build/CMakeFiles --progress-num=1,2 "Built target GAGG-DAQ"
-.PHONY : main/CMakeFiles/GAGG-DAQ.dir/all
+main/CMakeFiles/DAQ-WC.dir/all: utils/CMakeFiles/daqutils.dir/all
+main/CMakeFiles/DAQ-WC.dir/all: src/CMakeFiles/daqcomponents.dir/all
+	$(MAKE) $(MAKESILENT) -f main/CMakeFiles/DAQ-WC.dir/build.make main/CMakeFiles/DAQ-WC.dir/depend
+	$(MAKE) $(MAKESILENT) -f main/CMakeFiles/DAQ-WC.dir/build.make main/CMakeFiles/DAQ-WC.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/home/daq/daq-standalone/build/CMakeFiles --progress-num=1,2 "Built target DAQ-WC"
+.PHONY : main/CMakeFiles/DAQ-WC.dir/all
 
 # Build rule for subdir invocation for target.
-main/CMakeFiles/GAGG-DAQ.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/GAGG-DAQ-main/build/CMakeFiles 9
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 main/CMakeFiles/GAGG-DAQ.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/GAGG-DAQ-main/build/CMakeFiles 0
-.PHONY : main/CMakeFiles/GAGG-DAQ.dir/rule
+main/CMakeFiles/DAQ-WC.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/daq-standalone/build/CMakeFiles 9
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 main/CMakeFiles/DAQ-WC.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/daq-standalone/build/CMakeFiles 0
+.PHONY : main/CMakeFiles/DAQ-WC.dir/rule
 
 # Convenience name for target.
-GAGG-DAQ: main/CMakeFiles/GAGG-DAQ.dir/rule
-.PHONY : GAGG-DAQ
+DAQ-WC: main/CMakeFiles/DAQ-WC.dir/rule
+.PHONY : DAQ-WC
 
 # clean rule for target.
-main/CMakeFiles/GAGG-DAQ.dir/clean:
-	$(MAKE) $(MAKESILENT) -f main/CMakeFiles/GAGG-DAQ.dir/build.make main/CMakeFiles/GAGG-DAQ.dir/clean
-.PHONY : main/CMakeFiles/GAGG-DAQ.dir/clean
+main/CMakeFiles/DAQ-WC.dir/clean:
+	$(MAKE) $(MAKESILENT) -f main/CMakeFiles/DAQ-WC.dir/build.make main/CMakeFiles/DAQ-WC.dir/clean
+.PHONY : main/CMakeFiles/DAQ-WC.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.

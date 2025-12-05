@@ -1,11 +1,11 @@
-add_executable(GAGG-DAQ
-    GAGG-DAQ.cpp
+add_executable(DAQ-WC
+    DAQ-WC.cpp
 )
 
-target_include_directories(GAGG-DAQ PRIVATE
+target_include_directories(DAQ-WC PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/utils
     ${CMAKE_SOURCE_DIR}/toml
 )
 
-target_link_libraries(GAGG-DAQ PRIVATE daqcomponents)
+target_link_libraries(DAQ-WC PRIVATE daqcomponents)

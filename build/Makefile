@@ -57,10 +57,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/daq/GAGG-DAQ-main
+CMAKE_SOURCE_DIR = /home/daq/daq-standalone
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/daq/GAGG-DAQ-main/build
+CMAKE_BINARY_DIR = /home/daq/daq-standalone/build
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -87,9 +87,9 @@ rebuild_cache/fast: rebuild_cache
 
 # The main all target
 all: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/GAGG-DAQ-main/build/CMakeFiles /home/daq/GAGG-DAQ-main/build//CMakeFiles/progress.marks
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/daq-standalone/build/CMakeFiles /home/daq/daq-standalone/build//CMakeFiles/progress.marks
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/GAGG-DAQ-main/build/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/daq-standalone/build/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
@@ -143,17 +143,17 @@ daqcomponents/fast:
 .PHONY : daqcomponents/fast
 
 #=============================================================================
-# Target rules for targets named GAGG-DAQ
+# Target rules for targets named DAQ-WC
 
 # Build rule for target.
-GAGG-DAQ: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 GAGG-DAQ
-.PHONY : GAGG-DAQ
+DAQ-WC: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 DAQ-WC
+.PHONY : DAQ-WC
 
 # fast build rule for target.
-GAGG-DAQ/fast:
-	$(MAKE) $(MAKESILENT) -f main/CMakeFiles/GAGG-DAQ.dir/build.make main/CMakeFiles/GAGG-DAQ.dir/build
-.PHONY : GAGG-DAQ/fast
+DAQ-WC/fast:
+	$(MAKE) $(MAKESILENT) -f main/CMakeFiles/DAQ-WC.dir/build.make main/CMakeFiles/DAQ-WC.dir/build
+.PHONY : DAQ-WC/fast
 
 # Help Target
 help:
@@ -163,7 +163,7 @@ help:
 	@echo "... depend"
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
-	@echo "... GAGG-DAQ"
+	@echo "... DAQ-WC"
 	@echo "... daqcomponents"
 	@echo "... daqutils"
 .PHONY : help

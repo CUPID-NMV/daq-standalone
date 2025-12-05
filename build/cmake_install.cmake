@@ -1,4 +1,4 @@
-# Install script for directory: /home/daq/GAGG-DAQ-main
+# Install script for directory: /home/daq/daq-standalone
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -44,10 +44,10 @@ endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for each subdirectory.
-  include("/home/daq/GAGG-DAQ-main/build/utils/cmake_install.cmake")
-  include("/home/daq/GAGG-DAQ-main/build/toml/cmake_install.cmake")
-  include("/home/daq/GAGG-DAQ-main/build/src/cmake_install.cmake")
-  include("/home/daq/GAGG-DAQ-main/build/main/cmake_install.cmake")
+  include("/home/daq/daq-standalone/build/utils/cmake_install.cmake")
+  include("/home/daq/daq-standalone/build/toml/cmake_install.cmake")
+  include("/home/daq/daq-standalone/build/src/cmake_install.cmake")
+  include("/home/daq/daq-standalone/build/main/cmake_install.cmake")
 
 endif()
 
@@ -59,5 +59,5 @@ endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
-file(WRITE "/home/daq/GAGG-DAQ-main/build/${CMAKE_INSTALL_MANIFEST}"
+file(WRITE "/home/daq/daq-standalone/build/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")

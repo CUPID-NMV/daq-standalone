@@ -5,11 +5,14 @@ LinkNumber      = 0
 ConetNode       = 0
 VMEBaseAddress  = 0x32100000
 
-ChannelList = [0, 1, 2, 3]
+ChannelList = [0, 1, 2, 3, 4, 5, 6, 7]
+
+SamplingRate = "1GHz"    # Possibili valori: "5GHz", "2.5GHz", "1GHz"
 
 RecordLength    = 1024
-PostTriggerSize = 100
-WaitTimeS       = 1.0
+PostTriggerSize = -20
+RunNumber = 0
+WaitTimeS       = 0.1
 
 # Trigger esterno da TRG IN (coincidenza scintillatori)
 SelfTrigger     = false
@@ -26,12 +29,12 @@ IntegralThreshold = 5.0         # soglia su somma integrale
 
 # Tempo e numero eventi
 Duration        = 00:10:00.000000
-NEvents         = 100
+NEvents         = 10
 NNoiseEvents    = 2000
 
 # Output
 SaveRaw = true  
 OutputFormat    = "HDF5"        # oppure "ROOT" o "ASCII"
-OutputDir       = "/home/daq/GAGG-DAQ-main/data"
+OutputDir       = "/home/daq/daq-standalone/data"
 OutputFile      = "WC_proto"
 

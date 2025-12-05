@@ -90,12 +90,14 @@ private:
     CAEN_DGTZ_X742_EVENT_t* fEvent;
     char* fEventPtr;
 
-    double fWaitTimeS;
-    double fSamplingTime;
-    std::chrono::seconds fACQT;
-    double fDeadT;
-    uint32_t fNNoiseEvents;
-    uint32_t fNEvents;
+  double fWaitTimeS;
+  double fSamplingTime;
+  std::string fSamplingRateStr;
+  double fSamplingRateGHz;
+  std::chrono::seconds fACQT;
+  double fDeadT;
+  uint32_t fNNoiseEvents;
+  uint32_t fNEvents;
     uint32_t fDuration;
 
     OutputFormat fOutputFormat;

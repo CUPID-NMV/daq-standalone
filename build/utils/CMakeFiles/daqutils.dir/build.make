@@ -53,10 +53,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/daq/GAGG-DAQ-main
+CMAKE_SOURCE_DIR = /home/daq/daq-standalone
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/daq/GAGG-DAQ-main/build
+CMAKE_BINARY_DIR = /home/daq/daq-standalone/build
 
 # Include any dependencies generated for this target.
 include utils/CMakeFiles/daqutils.dir/depend.make
@@ -70,32 +70,32 @@ include utils/CMakeFiles/daqutils.dir/progress.make
 include utils/CMakeFiles/daqutils.dir/flags.make
 
 utils/CMakeFiles/daqutils.dir/Log.cpp.o: utils/CMakeFiles/daqutils.dir/flags.make
-utils/CMakeFiles/daqutils.dir/Log.cpp.o: /home/daq/GAGG-DAQ-main/utils/Log.cpp
+utils/CMakeFiles/daqutils.dir/Log.cpp.o: /home/daq/daq-standalone/utils/Log.cpp
 utils/CMakeFiles/daqutils.dir/Log.cpp.o: utils/CMakeFiles/daqutils.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/daq/GAGG-DAQ-main/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object utils/CMakeFiles/daqutils.dir/Log.cpp.o"
-	cd /home/daq/GAGG-DAQ-main/build/utils && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT utils/CMakeFiles/daqutils.dir/Log.cpp.o -MF CMakeFiles/daqutils.dir/Log.cpp.o.d -o CMakeFiles/daqutils.dir/Log.cpp.o -c /home/daq/GAGG-DAQ-main/utils/Log.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/daq/daq-standalone/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object utils/CMakeFiles/daqutils.dir/Log.cpp.o"
+	cd /home/daq/daq-standalone/build/utils && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT utils/CMakeFiles/daqutils.dir/Log.cpp.o -MF CMakeFiles/daqutils.dir/Log.cpp.o.d -o CMakeFiles/daqutils.dir/Log.cpp.o -c /home/daq/daq-standalone/utils/Log.cpp
 
 utils/CMakeFiles/daqutils.dir/Log.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/daqutils.dir/Log.cpp.i"
-	cd /home/daq/GAGG-DAQ-main/build/utils && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/daq/GAGG-DAQ-main/utils/Log.cpp > CMakeFiles/daqutils.dir/Log.cpp.i
+	cd /home/daq/daq-standalone/build/utils && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/daq/daq-standalone/utils/Log.cpp > CMakeFiles/daqutils.dir/Log.cpp.i
 
 utils/CMakeFiles/daqutils.dir/Log.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/daqutils.dir/Log.cpp.s"
-	cd /home/daq/GAGG-DAQ-main/build/utils && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/daq/GAGG-DAQ-main/utils/Log.cpp -o CMakeFiles/daqutils.dir/Log.cpp.s
+	cd /home/daq/daq-standalone/build/utils && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/daq/daq-standalone/utils/Log.cpp -o CMakeFiles/daqutils.dir/Log.cpp.s
 
 utils/CMakeFiles/daqutils.dir/Config.cpp.o: utils/CMakeFiles/daqutils.dir/flags.make
-utils/CMakeFiles/daqutils.dir/Config.cpp.o: /home/daq/GAGG-DAQ-main/utils/Config.cpp
+utils/CMakeFiles/daqutils.dir/Config.cpp.o: /home/daq/daq-standalone/utils/Config.cpp
 utils/CMakeFiles/daqutils.dir/Config.cpp.o: utils/CMakeFiles/daqutils.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/daq/GAGG-DAQ-main/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object utils/CMakeFiles/daqutils.dir/Config.cpp.o"
-	cd /home/daq/GAGG-DAQ-main/build/utils && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT utils/CMakeFiles/daqutils.dir/Config.cpp.o -MF CMakeFiles/daqutils.dir/Config.cpp.o.d -o CMakeFiles/daqutils.dir/Config.cpp.o -c /home/daq/GAGG-DAQ-main/utils/Config.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/daq/daq-standalone/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object utils/CMakeFiles/daqutils.dir/Config.cpp.o"
+	cd /home/daq/daq-standalone/build/utils && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT utils/CMakeFiles/daqutils.dir/Config.cpp.o -MF CMakeFiles/daqutils.dir/Config.cpp.o.d -o CMakeFiles/daqutils.dir/Config.cpp.o -c /home/daq/daq-standalone/utils/Config.cpp
 
 utils/CMakeFiles/daqutils.dir/Config.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/daqutils.dir/Config.cpp.i"
-	cd /home/daq/GAGG-DAQ-main/build/utils && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/daq/GAGG-DAQ-main/utils/Config.cpp > CMakeFiles/daqutils.dir/Config.cpp.i
+	cd /home/daq/daq-standalone/build/utils && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/daq/daq-standalone/utils/Config.cpp > CMakeFiles/daqutils.dir/Config.cpp.i
 
 utils/CMakeFiles/daqutils.dir/Config.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/daqutils.dir/Config.cpp.s"
-	cd /home/daq/GAGG-DAQ-main/build/utils && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/daq/GAGG-DAQ-main/utils/Config.cpp -o CMakeFiles/daqutils.dir/Config.cpp.s
+	cd /home/daq/daq-standalone/build/utils && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/daq/daq-standalone/utils/Config.cpp -o CMakeFiles/daqutils.dir/Config.cpp.s
 
 # Object files for target daqutils
 daqutils_OBJECTS = \
@@ -109,9 +109,9 @@ utils/libdaqutils.so.1.0: utils/CMakeFiles/daqutils.dir/Log.cpp.o
 utils/libdaqutils.so.1.0: utils/CMakeFiles/daqutils.dir/Config.cpp.o
 utils/libdaqutils.so.1.0: utils/CMakeFiles/daqutils.dir/build.make
 utils/libdaqutils.so.1.0: utils/CMakeFiles/daqutils.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/daq/GAGG-DAQ-main/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX shared library libdaqutils.so"
-	cd /home/daq/GAGG-DAQ-main/build/utils && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/daqutils.dir/link.txt --verbose=$(VERBOSE)
-	cd /home/daq/GAGG-DAQ-main/build/utils && $(CMAKE_COMMAND) -E cmake_symlink_library libdaqutils.so.1.0 libdaqutils.so.1.0 libdaqutils.so
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/daq/daq-standalone/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX shared library libdaqutils.so"
+	cd /home/daq/daq-standalone/build/utils && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/daqutils.dir/link.txt --verbose=$(VERBOSE)
+	cd /home/daq/daq-standalone/build/utils && $(CMAKE_COMMAND) -E cmake_symlink_library libdaqutils.so.1.0 libdaqutils.so.1.0 libdaqutils.so
 
 utils/libdaqutils.so: utils/libdaqutils.so.1.0
 	@$(CMAKE_COMMAND) -E touch_nocreate utils/libdaqutils.so
@@ -121,10 +121,10 @@ utils/CMakeFiles/daqutils.dir/build: utils/libdaqutils.so
 .PHONY : utils/CMakeFiles/daqutils.dir/build
 
 utils/CMakeFiles/daqutils.dir/clean:
-	cd /home/daq/GAGG-DAQ-main/build/utils && $(CMAKE_COMMAND) -P CMakeFiles/daqutils.dir/cmake_clean.cmake
+	cd /home/daq/daq-standalone/build/utils && $(CMAKE_COMMAND) -P CMakeFiles/daqutils.dir/cmake_clean.cmake
 .PHONY : utils/CMakeFiles/daqutils.dir/clean
 
 utils/CMakeFiles/daqutils.dir/depend:
-	cd /home/daq/GAGG-DAQ-main/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/daq/GAGG-DAQ-main /home/daq/GAGG-DAQ-main/utils /home/daq/GAGG-DAQ-main/build /home/daq/GAGG-DAQ-main/build/utils /home/daq/GAGG-DAQ-main/build/utils/CMakeFiles/daqutils.dir/DependInfo.cmake "--color=$(COLOR)"
+	cd /home/daq/daq-standalone/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/daq/daq-standalone /home/daq/daq-standalone/utils /home/daq/daq-standalone/build /home/daq/daq-standalone/build/utils /home/daq/daq-standalone/build/utils/CMakeFiles/daqutils.dir/DependInfo.cmake "--color=$(COLOR)"
 .PHONY : utils/CMakeFiles/daqutils.dir/depend
 

@@ -57,10 +57,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/daq/GAGG-DAQ-main
+CMAKE_SOURCE_DIR = /home/daq/daq-standalone
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/daq/GAGG-DAQ-main/build
+CMAKE_BINARY_DIR = /home/daq/daq-standalone/build
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -87,14 +87,14 @@ rebuild_cache/fast: rebuild_cache
 
 # The main all target
 all: cmake_check_build_system
-	cd /home/daq/GAGG-DAQ-main/build && $(CMAKE_COMMAND) -E cmake_progress_start /home/daq/GAGG-DAQ-main/build/CMakeFiles /home/daq/GAGG-DAQ-main/build/utils//CMakeFiles/progress.marks
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 utils/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/GAGG-DAQ-main/build/CMakeFiles 0
+	cd /home/daq/daq-standalone/build && $(CMAKE_COMMAND) -E cmake_progress_start /home/daq/daq-standalone/build/CMakeFiles /home/daq/daq-standalone/build/utils//CMakeFiles/progress.marks
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 utils/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/daq/daq-standalone/build/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
 clean:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 utils/clean
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 utils/clean
 .PHONY : clean
 
 # The main clean target
@@ -103,22 +103,22 @@ clean/fast: clean
 
 # Prepare targets for installation.
 preinstall: all
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 utils/preinstall
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 utils/preinstall
 .PHONY : preinstall
 
 # Prepare targets for installation.
 preinstall/fast:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 utils/preinstall
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 utils/preinstall
 .PHONY : preinstall/fast
 
 # clear depends
 depend:
-	cd /home/daq/GAGG-DAQ-main/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 1
+	cd /home/daq/daq-standalone/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 1
 .PHONY : depend
 
 # Convenience name for target.
 utils/CMakeFiles/daqutils.dir/rule:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 utils/CMakeFiles/daqutils.dir/rule
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 utils/CMakeFiles/daqutils.dir/rule
 .PHONY : utils/CMakeFiles/daqutils.dir/rule
 
 # Convenience name for target.
@@ -127,7 +127,7 @@ daqutils: utils/CMakeFiles/daqutils.dir/rule
 
 # fast build rule for target.
 daqutils/fast:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f utils/CMakeFiles/daqutils.dir/build.make utils/CMakeFiles/daqutils.dir/build
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f utils/CMakeFiles/daqutils.dir/build.make utils/CMakeFiles/daqutils.dir/build
 .PHONY : daqutils/fast
 
 Config.o: Config.cpp.o
@@ -135,7 +135,7 @@ Config.o: Config.cpp.o
 
 # target to build an object file
 Config.cpp.o:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f utils/CMakeFiles/daqutils.dir/build.make utils/CMakeFiles/daqutils.dir/Config.cpp.o
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f utils/CMakeFiles/daqutils.dir/build.make utils/CMakeFiles/daqutils.dir/Config.cpp.o
 .PHONY : Config.cpp.o
 
 Config.i: Config.cpp.i
@@ -143,7 +143,7 @@ Config.i: Config.cpp.i
 
 # target to preprocess a source file
 Config.cpp.i:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f utils/CMakeFiles/daqutils.dir/build.make utils/CMakeFiles/daqutils.dir/Config.cpp.i
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f utils/CMakeFiles/daqutils.dir/build.make utils/CMakeFiles/daqutils.dir/Config.cpp.i
 .PHONY : Config.cpp.i
 
 Config.s: Config.cpp.s
@@ -151,7 +151,7 @@ Config.s: Config.cpp.s
 
 # target to generate assembly for a file
 Config.cpp.s:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f utils/CMakeFiles/daqutils.dir/build.make utils/CMakeFiles/daqutils.dir/Config.cpp.s
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f utils/CMakeFiles/daqutils.dir/build.make utils/CMakeFiles/daqutils.dir/Config.cpp.s
 .PHONY : Config.cpp.s
 
 Log.o: Log.cpp.o
@@ -159,7 +159,7 @@ Log.o: Log.cpp.o
 
 # target to build an object file
 Log.cpp.o:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f utils/CMakeFiles/daqutils.dir/build.make utils/CMakeFiles/daqutils.dir/Log.cpp.o
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f utils/CMakeFiles/daqutils.dir/build.make utils/CMakeFiles/daqutils.dir/Log.cpp.o
 .PHONY : Log.cpp.o
 
 Log.i: Log.cpp.i
@@ -167,7 +167,7 @@ Log.i: Log.cpp.i
 
 # target to preprocess a source file
 Log.cpp.i:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f utils/CMakeFiles/daqutils.dir/build.make utils/CMakeFiles/daqutils.dir/Log.cpp.i
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f utils/CMakeFiles/daqutils.dir/build.make utils/CMakeFiles/daqutils.dir/Log.cpp.i
 .PHONY : Log.cpp.i
 
 Log.s: Log.cpp.s
@@ -175,7 +175,7 @@ Log.s: Log.cpp.s
 
 # target to generate assembly for a file
 Log.cpp.s:
-	cd /home/daq/GAGG-DAQ-main/build && $(MAKE) $(MAKESILENT) -f utils/CMakeFiles/daqutils.dir/build.make utils/CMakeFiles/daqutils.dir/Log.cpp.s
+	cd /home/daq/daq-standalone/build && $(MAKE) $(MAKESILENT) -f utils/CMakeFiles/daqutils.dir/build.make utils/CMakeFiles/daqutils.dir/Log.cpp.s
 .PHONY : Log.cpp.s
 
 # Help Target
@@ -204,6 +204,6 @@ help:
 # No rule that depends on this can have commands that come from listfiles
 # because they might be regenerated.
 cmake_check_build_system:
-	cd /home/daq/GAGG-DAQ-main/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 0
+	cd /home/daq/daq-standalone/build && $(CMAKE_COMMAND) -S$(CMAKE_SOURCE_DIR) -B$(CMAKE_BINARY_DIR) --check-build-system CMakeFiles/Makefile.cmake 0
 .PHONY : cmake_check_build_system
 

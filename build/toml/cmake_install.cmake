@@ -1,4 +1,4 @@
-# Install script for directory: /home/daq/GAGG-DAQ-main/toml
+# Install script for directory: /home/daq/daq-standalone/toml
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

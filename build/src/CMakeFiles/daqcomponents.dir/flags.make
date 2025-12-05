@@ -4,7 +4,7 @@
 # compile CXX with /usr/bin/c++
 CXX_DEFINES = 
 
-CXX_INCLUDES = -I/home/daq/GAGG-DAQ-main/src -I/home/daq/GAGG-DAQ-main/utils -I/home/daq/GAGG-DAQ-main/toml -I/home/daq/root_build/include -I/usr/include/hdf5/serial
+CXX_INCLUDES = -I/home/daq/daq-standalone/src -I/home/daq/daq-standalone/utils -I/home/daq/daq-standalone/toml -I/home/daq/root_build/include -I/usr/include/hdf5/serial
 
 CXX_FLAGS = -std=gnu++17 -Wall -Wextra -O2
 

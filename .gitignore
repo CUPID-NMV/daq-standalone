@@ -57,6 +57,11 @@ data/
 # macOS
 .DS_Store
 
+# Config di run locali alla macchina: si modificano liberamente durante i test
+# senza far divergere il template versionato (config/template-daq.toml)
+config/*-local.toml
+config/run-*.toml
+
 # Editor / manual backup files
 *~
 *_org

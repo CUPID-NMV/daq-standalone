@@ -1182,8 +1182,13 @@ void Digitizer::PrepareOutput() {
             if (name.find(".h5") == std::string::npos)
                 continue;
 
-            size_t pos = name.find("_");
-            if (pos == std::string::npos || name.size() < pos + 5)
+            // Il numero di run sta subito dopo il prefisso "base_", non dopo il
+            // primo underscore: se OutputFile contiene un underscore (es.
+            // "WC_proto") cercare il primo lo fa leggere dentro il nome stesso,
+            // scartare tutti i file e ripartire sempre da 0000, troncando la run
+            // precedente.
+            size_t pos = base.size();
+            if (name.size() < pos + 5)
                 continue;
 
             std::string runStr = name.substr(pos + 1, 4);
@@ -1200,6 +1205,11 @@ void Digitizer::PrepareOutput() {
     }
 
     fRunNumber = maxRun + 1;
+
+    if (fRunNumber < 0 || fRunNumber > 9999) {
+        Log::OutError("Computed run number out of range: " + std::to_string(fRunNumber));
+        exit(1);
+    }
 
     std::string rateTag = "_unkRate";
     if (fSamplingRateStr == "5GHz")         rateTag = "_5Gs";
@@ -1222,6 +1232,25 @@ void Digitizer::PrepareOutput() {
           << ".h5";
 
     fOutputPath = fname.str();
+
+    // Rete di sicurezza: il file viene aperto con H5F_ACC_TRUNC, quindi se il
+    // nome collidesse con una run esistente i dati sarebbero persi senza
+    // preavviso. Piuttosto si cerca il primo numero libero.
+    while (std::filesystem::exists(fOutputPath) ||
+           std::filesystem::exists(fOutputPath + ".gz")) {
+        Log::OutWarning("→ Run file already exists: " + fOutputPath +
+                        " — trying the next run number.");
+        if (++fRunNumber > 9999) {
+            Log::OutError("No free run number available in " + fOutputDir);
+            exit(1);
+        }
+        std::ostringstream retry;
+        retry << fOutputDir << "/" << base << "_"
+              << std::setw(4) << std::setfill('0') << fRunNumber
+              << rateTag << "_" << fPostTriggerSize << "PT" << ".h5";
+        fOutputPath = retry.str();
+    }
+
     Log::OutSummary("→ HDF5 output path selected: " + fOutputPath);
 
     try {

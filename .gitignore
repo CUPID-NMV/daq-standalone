@@ -70,3 +70,7 @@ config/run-*.toml
 *.weird
 *.bak
 *-dev
+
+# Grafici generati da tools/plot_waveforms.py
+plots/
+*.png

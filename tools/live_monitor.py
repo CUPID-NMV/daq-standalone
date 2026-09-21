@@ -15,6 +15,7 @@ Usa solo la libreria standard piu' numpy/h5py/matplotlib: niente Flask.
 """
 
 import argparse
+import errno
 import glob
 import io
 import json
@@ -426,8 +427,23 @@ def main():
                       min_interval=max(1.0, args.refresh / 2))
     defaults = {"n": args.nevents, "xmin": args.xmin, "xmax": args.xmax,
                 "ymin": args.ymin, "ymax": args.ymax}
-    server = ThreadingHTTPServer(("127.0.0.1", args.port),
-                                 make_handler(monitor, args.refresh, defaults))
+
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", args.port),
+                                     make_handler(monitor, args.refresh, defaults))
+    except OSError as exc:
+        if exc.errno != errno.EADDRINUSE:
+            raise
+        # Caso tipico: un'altra istanza del monitor e' gia' attiva, magari
+        # avviata da qualcun altro o lasciata in background.
+        sys.exit(
+            f"La porta {args.port} e' gia' in uso.\n\n"
+            "Di solito significa che un monitor e' gia' attivo: prova ad aprire\n"
+            f"  http://localhost:{args.port}\n"
+            "prima di lanciarne un altro.\n\n"
+            "Per vedere chi la occupa:   ss -ltnp | grep " + str(args.port) + "\n"
+            f"Per usare un'altra porta:   {os.path.basename(sys.argv[0])} -p {args.port + 1}"
+        )
 
     print(f"Monitor attivo su http://localhost:{args.port}")
     print("In VS Code Remote-SSH la porta viene inoltrata da sola: apri quel")

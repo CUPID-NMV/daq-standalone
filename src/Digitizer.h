@@ -139,9 +139,20 @@ private:
     std::map<uint32_t,double> fTransparentBaseline;      // baseline in Transparent Mode
     std::map<uint32_t,double> fTransparentRMS;
 
+    // Lette dal TOML nel costruttore (l'ordine deve combaciare con la lista
+    // di inizializzazione); i membri operativi sono piu' sotto, in ---- HDF5 ----
+    bool     fLiveMonitoringCfg;
+    uint32_t fFlushEveryCfg;
+
     // ---- UTILITIES ----
     bool CheckAccepted(std::map<uint32_t,uint32_t>& nAccepted);
     static long GetTime();
+
+    // ---- HDF5 HELPERS ----
+    void AppendEvent(H5::DataSet* ds,
+                     const void* data,
+                     const H5::DataType& type,
+                     hsize_t row);
 
     // ---- SELF-TRIGGER HELPERS ----
     void ConfigureSelfTrigger();
@@ -162,6 +173,17 @@ private:
     H5::H5File*  fH5File;
     H5::Group*   fH5Group;
 
+    // Formato v2: un unico dataset estendibile invece di un dataset per evento.
+    // E' il requisito per SWMR, che permette di leggere il file mentre la run
+    // e' ancora in corso (SWMR vieta di creare oggetti nuovi a file aperto).
+    H5::DataSet* fH5Waveforms;
+    H5::DataSet* fH5WaveformsRaw;
+    hsize_t      fH5Rows;         // eventi gia' scritti nel dataset
+    hsize_t      fEventWidth;     // campioni per evento = n_canali * (RecordLength - TailCut)
+    uint32_t     fSkippedEvents;  // eventi scartati perche' di dimensione inattesa
+    bool         fLiveMonitoring; // attiva SWMR + flush periodica
+    uint32_t     fFlushEvery;     // ogni quanti eventi fare flush per i lettori
+
     // ---- CONSTANTS ----
     // ---- V1742 REGISTERS (cfr. UM5698 - 742 Registers Description) ----
     static constexpr uint32_t REG_GROUP_CH_THRESHOLD = 0x0080;  // 0x1n80, offset nel gruppo
@@ -175,6 +197,12 @@ private:
     static constexpr uint32_t MONITOR_SHIFT          = 28;      // 0x8000[31:28]
     static constexpr uint32_t MONITOR_SELFTRG_TO_MB  = 0x4;     // 0100 = over-threshold -> motherboard
     static constexpr uint32_t MAX_THRESHOLD_COUNTS   = 0x0FFF;  // soglia a 12 bit
+
+    // Versione del formato di output, scritta in /config per i lettori:
+    //   1 = un dataset per evento (/events/eventN)   [storico]
+    //   2 = un dataset estendibile (/events/waveforms) + SWMR
+    static constexpr int      OUTPUT_FORMAT_VERSION = 2;
+    static constexpr hsize_t  H5_CHUNK_EVENTS = 8;   // eventi per chunk HDF5
 
     static constexpr uint32_t MAX_CHANNELS = 64;
     static constexpr uint32_t MAX_SAMPLES  = 100000;

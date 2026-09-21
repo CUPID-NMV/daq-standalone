@@ -89,8 +89,22 @@ Digitizer::Digitizer()
       fSelfTriggerThreshold(),
       fSelfTriggerThresholdOffset(fConfig.GetEntry<uint32_t>("digitizer","SelfTriggerThresholdOffset",100)),
       fTransparentBaseline(),
-      fTransparentRMS()
+      fTransparentRMS(),
+      fLiveMonitoringCfg(fConfig.GetEntry<bool>("digitizer","LiveMonitoring",true)),
+      fFlushEveryCfg(fConfig.GetEntry<uint32_t>("digitizer","LiveFlushEvery",10))
 {
+    // I puntatori HDF5 non erano inizializzati: PrepareOutput li assegna, ma
+    // CloseOutputFile e AcquireEvents li controllano contro nullptr.
+    fH5File         = nullptr;
+    fH5Group        = nullptr;
+    fH5Waveforms    = nullptr;
+    fH5WaveformsRaw = nullptr;
+    fH5Rows         = 0;
+    fEventWidth     = 0;
+    fSkippedEvents  = 0;
+    fLiveMonitoring = fLiveMonitoringCfg;
+    fFlushEvery     = (fFlushEveryCfg == 0) ? 1 : fFlushEveryCfg;
+
     // ===== Read ChannelList dal TOML =====
     std::vector<int64_t> tmpchlist =
         fConfig.GetEntryList<int64_t>("digitizer","ChannelList",-1,0);
@@ -1034,33 +1048,40 @@ void Digitizer::AcquireEvents() {
                       << std::setw(6) << (totalEvents + 1)
                       << "/" << maxEvents << std::flush;
 
-            if (fOutputFormat == kHDF5 && fH5File != nullptr && fH5Group != nullptr) {
-                try {
-                    std::string dsname = "/events/event" + std::to_string(totalEvents);
-                    hsize_t dim_corr = allSamplesCorr.size();
-                    DataSpace dspace_corr(1, &dim_corr);
-                    DataSet ds_corr = fH5Group->createDataSet(
-                        dsname,
-                        PredType::NATIVE_INT16,
-                        dspace_corr
-                    );
-                    ds_corr.write(allSamplesCorr.data(), PredType::NATIVE_INT16);
+            if (fOutputFormat == kHDF5 && fH5File != nullptr && fH5Waveforms != nullptr) {
 
-                    if (fSaveRaw) {
-                        std::string rawname = "/events_raw/event" + std::to_string(totalEvents);
-                        hsize_t dim_raw = allSamplesRaw.size();
-                        DataSpace dspace_raw(1, &dim_raw);
-                        Group rawGroup = fH5File->openGroup("/events_raw");
-                        DataSet ds_raw = rawGroup.createDataSet(
-                            rawname,
-                            PredType::NATIVE_UINT16,
-                            dspace_raw
-                        );
-                        ds_raw.write(allSamplesRaw.data(), PredType::NATIVE_UINT16);
+                // Il dataset ha larghezza fissa: un evento di dimensione diversa
+                // (es. un gruppo assente, quindi canali saltati) non ci entra e
+                // viene scartato con un avviso, invece di sfasare tutte le righe.
+                if (allSamplesCorr.size() != fEventWidth) {
+                    Log::OutWarning("Event " + std::to_string(totalEvents) +
+                                    " has unexpected size (" +
+                                    std::to_string(allSamplesCorr.size()) +
+                                    " samples, expected " + std::to_string(fEventWidth) +
+                                    "): skipped.");
+                    ++fSkippedEvents;
+                } else {
+                    try {
+                        AppendEvent(fH5Waveforms, allSamplesCorr.data(),
+                                    PredType::NATIVE_INT16, fH5Rows);
+
+                        if (fSaveRaw && fH5WaveformsRaw != nullptr &&
+                            allSamplesRaw.size() == fEventWidth)
+                            AppendEvent(fH5WaveformsRaw, allSamplesRaw.data(),
+                                        PredType::NATIVE_UINT16, fH5Rows);
+
+                        ++fH5Rows;
+
+                        // In SWMR i lettori vedono i dati solo dopo una flush.
+                        if (fLiveMonitoring && (fH5Rows % fFlushEvery) == 0) {
+                            H5Dflush(fH5Waveforms->getId());
+                            if (fH5WaveformsRaw != nullptr)
+                                H5Dflush(fH5WaveformsRaw->getId());
+                        }
+
+                    } catch (const H5::Exception& e) {
+                        Log::OutError("HDF5 write error: " + std::string(e.getDetailMsg()));
                     }
-
-                } catch (const H5::Exception& e) {
-                    Log::OutError("HDF5 write error: " + std::string(e.getDetailMsg()));
                 }
             }
 
@@ -1085,6 +1106,10 @@ void Digitizer::AcquireEvents() {
     Log::OutSummary("→ Total events recorded: " + std::to_string(totalEvents));
     Log::OutSummary("→ Acquisition time: " + std::to_string(elapsed_s) + " s");
     Log::OutSummary("→ Trigger rate: " + std::to_string(rate_kHz) + " kHz");
+    Log::OutSummary("→ Events written to file: " + std::to_string(fH5Rows));
+    if (fSkippedEvents > 0)
+        Log::OutWarning("→ Events skipped (unexpected size): " +
+                        std::to_string(fSkippedEvents));
 
     CloseOutputFile();
 }
@@ -1106,6 +1131,26 @@ bool Digitizer::CheckAccepted(std::map<uint32_t,uint32_t>& nAccepted) {
         if (nAccepted[c] < fNNoiseEvents)
             return false;
     return true;
+}
+
+// =======================================================================
+//  HDF5: append di un evento al dataset estendibile
+// =======================================================================
+void Digitizer::AppendEvent(H5::DataSet* ds,
+                            const void* data,
+                            const H5::DataType& type,
+                            hsize_t row)
+{
+    hsize_t newsize[2] = {row + 1, fEventWidth};
+    ds->extend(newsize);
+
+    H5::DataSpace fspace = ds->getSpace();
+    hsize_t offset[2] = {row, 0};
+    hsize_t count[2]  = {1, fEventWidth};
+    fspace.selectHyperslab(H5S_SELECT_SET, count, offset);
+
+    H5::DataSpace mspace(2, count);
+    ds->write(data, type, mspace, fspace);
 }
 
 // =======================================================================
@@ -1180,10 +1225,52 @@ void Digitizer::PrepareOutput() {
     Log::OutSummary("→ HDF5 output path selected: " + fOutputPath);
 
     try {
-        fH5File  = new H5::H5File(fOutputPath, H5F_ACC_TRUNC);
+        // SWMR richiede che il file sia scritto con il formato piu' recente.
+        // NOTA: i file risultanti non sono leggibili da libhdf5 < 1.10.
+        H5::FileAccPropList fapl;
+        fapl.setLibverBounds(H5F_LIBVER_LATEST, H5F_LIBVER_LATEST);
+
+        fH5File  = new H5::H5File(fOutputPath, H5F_ACC_TRUNC,
+                                  H5::FileCreatPropList::DEFAULT, fapl);
         fH5Group = new H5::Group(fH5File->createGroup("/events"));
-        fH5File->createGroup("/events_raw");
         H5::Group header = fH5File->createGroup("/config");
+
+        // Larghezza di una riga: i canali sono concatenati, come nel formato v1.
+        // Va fissata ora perche' il dataset viene creato prima di leggere il
+        // primo evento; gli eventi che non la rispettano vengono scartati con
+        // un avviso invece di corrompere il dataset.
+        const uint32_t samplesPerChannel =
+            (fRecordLength > fTailCut) ? (fRecordLength - fTailCut) : 0;
+        fEventWidth = static_cast<hsize_t>(fChannelList.size()) * samplesPerChannel;
+
+        if (fEventWidth == 0) {
+            Log::OutError("Event width is zero (RecordLength = " +
+                          std::to_string(fRecordLength) + ", TailCut = " +
+                          std::to_string(fTailCut) + "). Abort.");
+            exit(1);
+        }
+
+        auto MakeWaveformDataset = [&](const std::string& path,
+                                       const H5::DataType& type) {
+            hsize_t dims[2]    = {0, fEventWidth};
+            hsize_t maxdims[2] = {H5S_UNLIMITED, fEventWidth};
+            H5::DataSpace space(2, dims, maxdims);
+
+            H5::DSetCreatPropList dcpl;
+            hsize_t chunk[2] = {H5_CHUNK_EVENTS, fEventWidth};
+            dcpl.setChunk(2, chunk);
+
+            return new H5::DataSet(fH5File->createDataSet(path, type, space, dcpl));
+        };
+
+        fH5Waveforms = MakeWaveformDataset("/events/waveforms",
+                                           H5::PredType::NATIVE_INT16);
+        if (fSaveRaw) {
+            fH5File->createGroup("/events_raw");
+            fH5WaveformsRaw = MakeWaveformDataset("/events_raw/waveforms",
+                                                  H5::PredType::NATIVE_UINT16);
+        }
+        fH5Rows = 0;
 
         header.createAttribute("RunNumber", H5::PredType::NATIVE_INT,
                                H5::DataSpace()).write(H5::PredType::NATIVE_INT, &fRunNumber);
@@ -1193,6 +1280,17 @@ void Digitizer::PrepareOutput() {
 
         header.createAttribute("PostTriggerSize", H5::PredType::NATIVE_UINT,
                                H5::DataSpace()).write(H5::PredType::NATIVE_UINT, &fPostTriggerSize);
+
+        int fmtver = OUTPUT_FORMAT_VERSION;
+        header.createAttribute("FormatVersion", H5::PredType::NATIVE_INT,
+                               H5::DataSpace()).write(H5::PredType::NATIVE_INT, &fmtver);
+
+        header.createAttribute("TailCut", H5::PredType::NATIVE_UINT,
+                               H5::DataSpace()).write(H5::PredType::NATIVE_UINT, &fTailCut);
+
+        uint32_t spc = samplesPerChannel;
+        header.createAttribute("SamplesPerChannel", H5::PredType::NATIVE_UINT,
+                               H5::DataSpace()).write(H5::PredType::NATIVE_UINT, &spc);
 
         double sampling_ns = fSamplingTime;
         header.createAttribute("SamplingTime", H5::PredType::NATIVE_DOUBLE,
@@ -1251,6 +1349,21 @@ void Digitizer::PrepareOutput() {
             chattr.write(H5::PredType::NATIVE_UINT, fChannelList.data());
         }
 
+        // Da qui in poi nessun oggetto nuovo puo' essere creato nel file: SWMR
+        // lo vieta. Tutti i gruppi, i dataset e gli attributi sono gia' stati
+        // creati sopra.
+        if (fLiveMonitoring) {
+            if (H5Fstart_swmr_write(fH5File->getId()) < 0) {
+                Log::OutWarning("Cannot enable SWMR: the file will only be readable "
+                                "after the run ends.");
+                fLiveMonitoring = false;
+            } else {
+                Log::OutSummary("→ SWMR enabled: the file can be read while the run "
+                                "is ongoing (flush every " +
+                                std::to_string(fFlushEvery) + " events).");
+            }
+        }
+
     } catch (const H5::Exception& e) {
         Log::OutError("HDF5 file creation failed: " + std::string(e.getDetailMsg()));
         exit(1);
@@ -1265,6 +1378,16 @@ void Digitizer::CloseOutputFile() {
         return;
 
     try {
+        if (fH5Waveforms != nullptr) {
+            fH5Waveforms->close();
+            delete fH5Waveforms;
+            fH5Waveforms = nullptr;
+        }
+        if (fH5WaveformsRaw != nullptr) {
+            fH5WaveformsRaw->close();
+            delete fH5WaveformsRaw;
+            fH5WaveformsRaw = nullptr;
+        }
         if (fH5Group != nullptr) {
             fH5Group->close();
         }

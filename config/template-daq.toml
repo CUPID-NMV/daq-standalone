@@ -97,6 +97,16 @@ NEvents         = 3
 NNoiseEvents    = 2000
 
 # Output
+# ---------------------------------------------------------------------------
+#  Monitoraggio dal vivo (SWMR)
+#  Con LiveMonitoring = true il file HDF5 e' leggibile MENTRE la run e' in
+#  corso: gli eventi vengono resi visibili ai lettori ogni LiveFlushEvery
+#  eventi. Il file usa il formato HDF5 piu' recente, quindi richiede
+#  libhdf5 >= 1.10 per essere letto.
+# ---------------------------------------------------------------------------
+LiveMonitoring  = true
+LiveFlushEvery  = 10
+
 SaveRaw = false 
 OutputFormat    = "HDF5"        # oppure "ROOT" o "ASCII"
 OutputDir       = "/home/daq/daq-standalone/data"

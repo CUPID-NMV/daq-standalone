@@ -286,8 +286,11 @@ PAGE = """<!DOCTYPE html>
 </div>
 <table id="tab"><thead><tr><th>canale</th><th>baseline</th><th>rms</th>
 <th>ampiezza media</th><th>max</th></tr></thead><tbody></tbody></table>
+<div id="boot" class="err">JavaScript non eseguito: la pagina non puo' aggiornarsi.
+Apri la console del browser per vedere l'errore.</div>
 <img id="w" alt="forme d'onda"><img id="a" alt="media"><img id="h" alt="ampiezze">
 <script>
+document.getElementById('boot').style.display = 'none';
 const REFRESH = __REFRESH__ * 1000;
 const FIELDS = ['xmin','xmax','ymin','ymax','nev'];
 
@@ -316,12 +319,15 @@ document.getElementById('reset').onclick = () => {
 };
 for (const f of FIELDS)
   document.getElementById(f).addEventListener('change', tick);
+function show(id, v) {
+  document.getElementById(id).textContent = (v === null || v === undefined) ? '-' : v;
+}
 async function tick() {
   try {
-    const s = await (await fetch('stats.json', {cache:'no-store'})).json();
-    document.getElementById('rate').textContent   = s.rate ?? '–';
-    document.getElementById('events').textContent = s.events ?? '–';
-    document.getElementById('shown').textContent  = s.shown ?? '–';
+    const r = await fetch('stats.json', {cache:'no-store'});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const s = await r.json();
+    show('rate', s.rate); show('events', s.events); show('shown', s.shown);
     document.getElementById('err').textContent    = s.error || '';
     document.getElementById('file').textContent   =
       (s.file || 'nessun file') + (s.sampling ? ' · ' + s.sampling : '');
@@ -333,7 +339,10 @@ async function tick() {
     p.set('t', Date.now());
     for (const [id, name] of [['w','waveforms'],['a','average'],['h','amplitudes']])
       document.getElementById(id).src = name + '.png?' + p.toString();
-  } catch (e) { document.getElementById('err').textContent = 'server non raggiungibile'; }
+  } catch (e) {
+    // Meglio dire cosa e' fallito che un generico 'non raggiungibile'
+    document.getElementById('err').textContent = 'errore: ' + (e && e.message ? e.message : e);
+  }
 }
 tick(); setInterval(tick, REFRESH);
 </script></body></html>"""

@@ -184,6 +184,9 @@ def main():
     ap.add_argument("-w", "--watch", type=float, metavar="SEC", default=None,
                     help="monitor continuo: rilegge ogni SEC secondi e stampa "
                          "rate e statistiche (implica --live). Ctrl+C per uscire")
+    ap.add_argument("--plots", action="store_true",
+                    help="con --watch, rigenera anche i PNG a ogni giro "
+                         "(piu' lento; senza, il monitor e' solo testuale)")
     ap.add_argument("--show", action="store_true",
                     help="apre le finestre invece di salvare (richiede display)")
     args = ap.parse_args()
@@ -193,7 +196,7 @@ def main():
 
     live = args.live or (args.watch is not None)
 
-    def one_pass(previous=None):
+    def one_pass(previous=None, make_plots=True):
         """Legge, stampa il riepilogo e rigenera i grafici.
 
         previous e' (n_eventi, timestamp) della lettura precedente, usato per
@@ -219,6 +222,9 @@ def main():
                       f" {np.mean(amp[:, i]):>16.1f}")
         else:
             print_summary(hdr, data, base, amp, n_samp, tailcut)
+
+        if not make_plots:
+            return (data.shape[0], now), []
 
         dt_ns = float(hdr.get("SamplingTime", 1e-9)) * 1e9
         t_ns = np.arange(n_samp) * dt_ns
@@ -246,12 +252,20 @@ def main():
         return
 
     # --- monitor continuo ---
-    print(f"Monitor ogni {args.watch:g} s — Ctrl+C per uscire\n")
+    # Senza riconfigurare lo stream, l'output verso una pipe resta bufferizzato
+    # e un Ctrl+C fa perdere le ultime righe.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except AttributeError:
+        pass
+
+    print(f"Monitor ogni {args.watch:g} s — Ctrl+C per uscire"
+          + ("" if args.plots else "  (solo testo; --plots per i grafici)") + "\n")
     state = None
     try:
         while True:
             try:
-                state, produced = one_pass(state)
+                state, produced = one_pass(state, make_plots=args.plots)
             except DaqFileError as exc:
                 # A inizio run il file puo' non esistere o non avere eventi
                 print(f"[{time.strftime('%H:%M:%S')}]  in attesa di eventi… "

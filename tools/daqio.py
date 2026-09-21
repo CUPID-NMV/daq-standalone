@@ -1,0 +1,168 @@
+"""
+Lettura dei file HDF5 prodotti da DAQ-WC.
+
+Gestisce trasparentemente:
+  - i due formati di output
+      v1: un dataset per evento, /events/event0, /events/event1, ...
+      v2: un unico dataset estendibile /events/waveforms  (n_eventi, n_campioni)
+  - i file compressi (.h5.gz)
+  - la lettura a run in corso, via SWMR (solo formato v2)
+
+Uso tipico, anche da notebook:
+
+    from daqio import load
+    hdr, data = load("data/run.h5.gz")     # data: (n_eventi, n_canali, n_campioni)
+    for i, ch in enumerate(hdr["ChannelList"]):
+        ...
+"""
+
+import gzip
+import os
+import shutil
+import tempfile
+
+import numpy as np
+import h5py
+
+
+__all__ = ["load", "read_header", "open_file", "DaqFileError"]
+
+
+class DaqFileError(RuntimeError):
+    """Errore di lettura di un file di dati della DAQ."""
+
+
+# ----------------------------------------------------------------------
+
+def open_file(path, live=False):
+    """Apre il file HDF5. Ritorna (File, path_temporaneo_o_None).
+
+    Con live=True usa SWMR per leggere mentre la run e' in corso; richiede un
+    file scritto con LiveMonitoring = true (formato v2).
+    """
+    tmp = None
+
+    if path.endswith(".gz"):
+        if live:
+            raise DaqFileError("Un file .gz e' gia' chiuso: --live non ha senso.")
+        tmp = tempfile.NamedTemporaryFile(suffix=".h5", delete=False).name
+        with gzip.open(path, "rb") as fin, open(tmp, "wb") as fout:
+            shutil.copyfileobj(fin, fout)
+        path = tmp
+
+    try:
+        if live:
+            return h5py.File(path, "r", libver="latest", swmr=True), tmp
+        return h5py.File(path, "r"), tmp
+
+    except BlockingIOError:
+        _cleanup(tmp)
+        raise DaqFileError(
+            f"Il file '{path}' e' bloccato: la run e' ancora in corso.\n"
+            "Rilancia con --live (richiede LiveMonitoring = true nel TOML)."
+        )
+    except OSError as exc:
+        _cleanup(tmp)
+        if live:
+            raise DaqFileError(
+                f"Impossibile aprire '{path}' in modalita' SWMR.\n  ({exc})\n\n"
+                "Il file e' stato probabilmente scritto con LiveMonitoring = false,\n"
+                "oppure con una versione della DAQ precedente al formato v2.\n"
+                "In quel caso i dati sono leggibili solo a run terminata."
+            )
+        raise DaqFileError(f"Impossibile leggere '{path}': {exc}")
+
+
+def _cleanup(tmp):
+    if tmp and os.path.exists(tmp):
+        os.unlink(tmp)
+
+
+# ----------------------------------------------------------------------
+
+def read_header(f):
+    """Attributi di /config, con byte-string decodificate."""
+    if "/config" not in f:
+        raise DaqFileError("Nessun gruppo /config: non e' un output di DAQ-WC.")
+
+    hdr = {}
+    for k, v in f["/config"].attrs.items():
+        if isinstance(v, bytes):
+            v = v.decode()
+        elif isinstance(v, np.ndarray) and v.dtype.kind == "S":
+            v = [x.decode() for x in v]
+        hdr[k] = v
+
+    # I file v1 non dichiarano la versione del formato
+    hdr.setdefault("FormatVersion", 1 if "/events/waveforms" not in f else 2)
+    return hdr
+
+
+def _read_v2(f, hdr, max_events, live):
+    ds = f["/events/waveforms"]
+    if live:
+        ds.refresh()          # senza refresh si vede solo lo stato all'apertura
+
+    n_ev = ds.shape[0]
+    if n_ev == 0:
+        raise DaqFileError("Il file non contiene ancora eventi.")
+    if max_events:
+        n_ev = min(n_ev, max_events)
+
+    flat = np.asarray(ds[:n_ev], dtype=np.float64)
+    return flat, n_ev
+
+
+def _read_v1(f, hdr, max_events, live):
+    if live:
+        raise DaqFileError(
+            "La lettura a run in corso richiede il formato v2.\n"
+            "Questo file usa il formato storico (un dataset per evento), che non\n"
+            "e' compatibile con SWMR."
+        )
+    group = f["/events"]
+    keys = sorted(group.keys(), key=lambda x: int(x.replace("event", "")))
+    if not keys:
+        raise DaqFileError("Il file non contiene eventi.")
+    if max_events:
+        keys = keys[:max_events]
+
+    flat = np.stack([np.asarray(group[k][:], dtype=np.float64) for k in keys])
+    return flat, len(keys)
+
+
+def load(path, max_events=None, live=False):
+    """Carica un file di dati.
+
+    Ritorna (header, data) con data di forma (n_eventi, n_canali, n_campioni).
+    """
+    f, tmp = open_file(path, live=live)
+    try:
+        hdr = read_header(f)
+        reader = _read_v2 if hdr["FormatVersion"] >= 2 else _read_v1
+        flat, n_ev = reader(f, hdr, max_events, live)
+    finally:
+        f.close()
+        _cleanup(tmp)
+
+    n_ch = len(hdr["ChannelList"])
+    width = flat.shape[1]
+
+    if width % n_ch != 0:
+        raise DaqFileError(
+            f"Larghezza evento ({width}) non divisibile per il numero di canali "
+            f"({n_ch}): forse un gruppo del digitizer era assente."
+        )
+
+    n_samp = width // n_ch
+    # SamplesPerChannel esiste solo dal formato v2; sui file v1 si deduce
+    declared = int(hdr.get("SamplesPerChannel", n_samp))
+    if declared != n_samp:
+        raise DaqFileError(
+            f"Incoerenza: /config dichiara {declared} campioni per canale, "
+            f"ma i dati ne contengono {n_samp}."
+        )
+    hdr.setdefault("SamplesPerChannel", n_samp)
+    hdr.setdefault("TailCut", int(hdr.get("RecordLength", n_samp)) - n_samp)
+
+    return hdr, flat.reshape(n_ev, n_ch, n_samp)

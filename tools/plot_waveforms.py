@@ -19,11 +19,8 @@ Esempi:
 
 import argparse
 import glob
-import gzip
 import os
-import shutil
 import sys
-import tempfile
 
 import numpy as np
 
@@ -33,11 +30,12 @@ if not os.environ.get("DISPLAY"):
     matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-import h5py
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from daqio import load, DaqFileError
 
 
 # ----------------------------------------------------------------------
-#  Apertura del file
+#  Individuazione del file
 # ----------------------------------------------------------------------
 
 def find_latest(data_dir):
@@ -47,110 +45,6 @@ def find_latest(data_dir):
     if not files:
         sys.exit(f"Nessun file .h5/.h5.gz in {data_dir}")
     return max(files, key=os.path.getmtime)
-
-
-def open_h5(path, live=False):
-    """Apre il file, scompattandolo se e' gzippato.
-
-    Ritorna (h5py.File, path_temporaneo_da_rimuovere_o_None).
-    """
-    tmp = None
-
-    if path.endswith(".gz"):
-        tmp = tempfile.NamedTemporaryFile(suffix=".h5", delete=False).name
-        with gzip.open(path, "rb") as fin, open(tmp, "wb") as fout:
-            shutil.copyfileobj(fin, fout)
-        target = tmp
-    elif live:
-        # La DAQ tiene il file aperto durante la run: si lavora su una copia,
-        # disabilitando il lock HDF5. E' una lettura best-effort, i dati non
-        # ancora scaricati su disco non ci sono.
-        tmp = tempfile.NamedTemporaryFile(suffix=".h5", delete=False).name
-        shutil.copyfile(path, tmp)
-        target = tmp
-    else:
-        target = path
-
-    try:
-        kwargs = {"locking": False} if live else {}
-        return h5py.File(target, "r", **kwargs), tmp
-    except BlockingIOError:
-        if tmp:
-            os.unlink(tmp)
-        sys.exit(
-            f"Il file '{path}' e' bloccato: la run e' probabilmente ancora in corso.\n"
-            "Aspetta che finisca, oppure rilancia con --live per leggere una copia\n"
-            "parziale (non tutti gli eventi saranno gia' stati scritti su disco)."
-        )
-    except OSError as exc:
-        if tmp:
-            os.unlink(tmp)
-        if live:
-            sys.exit(
-                f"Impossibile leggere '{path}' mentre la run e' in corso.\n"
-                f"  ({exc})\n\n"
-                "DAQ-WC scrive gli eventi ma non fa flush dell'header HDF5 fino a\n"
-                "CloseOutputFile(), quindi finche' la run non termina il file su disco\n"
-                "non e' un HDF5 valido e nemmeno una copia e' leggibile.\n"
-                "Aspetta la fine della run. Per poter monitorare dal vivo servirebbe\n"
-                "una flush periodica in Digitizer::AcquireEvents()."
-            )
-        sys.exit(f"Impossibile leggere '{path}': {exc}")
-
-
-# ----------------------------------------------------------------------
-#  Lettura di header ed eventi
-# ----------------------------------------------------------------------
-
-def read_header(f):
-    """Attributi di /config, con i byte-string decodificati."""
-    if "/config" not in f:
-        sys.exit("Il file non contiene il gruppo /config: non e' un output di DAQ-WC.")
-
-    hdr = {}
-    for k, v in f["/config"].attrs.items():
-        if isinstance(v, bytes):
-            v = v.decode()
-        elif isinstance(v, np.ndarray) and v.dtype.kind == "S":
-            v = [x.decode() for x in v]
-        hdr[k] = v
-    return hdr
-
-
-def read_events(f, hdr, max_events=None):
-    """Gli eventi come array (n_eventi, n_canali, n_campioni).
-
-    Nel file ogni evento e' un singolo vettore piatto con i canali
-    concatenati nell'ordine di ChannelList.
-    """
-    group = f["/events"]
-    keys = sorted(group.keys(), key=lambda x: int(x.replace("event", "")))
-    if not keys:
-        sys.exit("Il file non contiene eventi.")
-    if max_events:
-        keys = keys[:max_events]
-
-    n_ch = len(hdr["ChannelList"])
-    flat = group[keys[0]][:]
-
-    if flat.size % n_ch != 0:
-        sys.exit(
-            f"Lunghezza evento ({flat.size}) non divisibile per il numero di\n"
-            f"canali ({n_ch}). Probabilmente un gruppo del digitizer non era\n"
-            "presente e alcuni canali sono stati saltati in scrittura."
-        )
-
-    n_samp = flat.size // n_ch
-    implied_tailcut = int(hdr.get("RecordLength", n_samp)) - n_samp
-
-    data = np.empty((len(keys), n_ch, n_samp), dtype=np.float64)
-    for i, k in enumerate(keys):
-        ev = group[k][:]
-        if ev.size != n_ch * n_samp:
-            sys.exit(f"Evento '{k}' di dimensione inattesa ({ev.size}).")
-        data[i] = ev.reshape(n_ch, n_samp)
-
-    return data, n_samp, implied_tailcut
 
 
 # ----------------------------------------------------------------------
@@ -184,6 +78,7 @@ def print_summary(hdr, data, base, amp, n_samp, tailcut):
         print(f"  {k:<24} = {hdr[k]}")
 
     print()
+    print(f"  formato file             = v{hdr.get('FormatVersion', 1)}")
     print(f"  eventi letti             = {data.shape[0]}")
     print(f"  campioni per canale      = {n_samp}"
           + (f"  (TailCut implicito = {tailcut})" if tailcut else ""))
@@ -284,7 +179,7 @@ def main():
     ap.add_argument("-o", "--outdir", default="plots",
                     help="directory dei PNG prodotti (default: plots)")
     ap.add_argument("--live", action="store_true",
-                    help="tenta di leggere una copia a run in corso (vedi note: richiede una flush periodica lato DAQ)")
+                    help="legge via SWMR mentre la run e' in corso (richiede LiveMonitoring = true)")
     ap.add_argument("--show", action="store_true",
                     help="apre le finestre invece di salvare (richiede display)")
     args = ap.parse_args()
@@ -292,14 +187,13 @@ def main():
     path = args.file or find_latest(args.data_dir)
     print(f"File: {path}\n")
 
-    f, tmp = open_h5(path, live=args.live)
     try:
-        hdr = read_header(f)
-        data, n_samp, tailcut = read_events(f, hdr, args.max_events)
-    finally:
-        f.close()
-        if tmp:
-            os.unlink(tmp)
+        hdr, data = load(path, max_events=args.max_events, live=args.live)
+    except DaqFileError as exc:
+        sys.exit(str(exc))
+
+    n_samp = data.shape[2]
+    tailcut = int(hdr.get("TailCut", 0))
 
     base, corr, amp = baseline_and_amplitude(data)
     print_summary(hdr, data, base, amp, n_samp, tailcut)

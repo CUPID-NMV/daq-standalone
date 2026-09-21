@@ -21,6 +21,7 @@ import argparse
 import glob
 import os
 import sys
+import time
 
 import numpy as np
 
@@ -180,6 +181,9 @@ def main():
                     help="directory dei PNG prodotti (default: plots)")
     ap.add_argument("--live", action="store_true",
                     help="legge via SWMR mentre la run e' in corso (richiede LiveMonitoring = true)")
+    ap.add_argument("-w", "--watch", type=float, metavar="SEC", default=None,
+                    help="monitor continuo: rilegge ogni SEC secondi e stampa "
+                         "rate e statistiche (implica --live). Ctrl+C per uscire")
     ap.add_argument("--show", action="store_true",
                     help="apre le finestre invece di salvare (richiede display)")
     args = ap.parse_args()
@@ -187,37 +191,76 @@ def main():
     path = args.file or find_latest(args.data_dir)
     print(f"File: {path}\n")
 
+    live = args.live or (args.watch is not None)
+
+    def one_pass(previous=None):
+        """Legge, stampa il riepilogo e rigenera i grafici.
+
+        previous e' (n_eventi, timestamp) della lettura precedente, usato per
+        calcolare il rate; ritorna la coppia aggiornata.
+        """
+        hdr, data = load(path, max_events=args.max_events, live=live)
+        now = time.time()
+
+        n_samp = data.shape[2]
+        tailcut = int(hdr.get("TailCut", 0))
+        base, corr, amp = baseline_and_amplitude(data)
+
+        if previous is not None:
+            prev_n, prev_t = previous
+            dt = now - prev_t
+            rate = (data.shape[0] - prev_n) / dt if dt > 0 else 0.0
+            print(f"\n[{time.strftime('%H:%M:%S')}]  eventi = {data.shape[0]}"
+                  f"   rate = {rate:.2f} Hz")
+            print(f"  {'canale':<8} {'baseline':>10} {'rms':>8} {'ampiezza media':>16}")
+            for i, ch in enumerate(hdr["ChannelList"]):
+                rms = float(np.std(data[:, i, :int(n_samp * 0.15)]))
+                print(f"  ch{ch:<6} {np.mean(base[:, i]):>10.1f} {rms:>8.2f}"
+                      f" {np.mean(amp[:, i]):>16.1f}")
+        else:
+            print_summary(hdr, data, base, amp, n_samp, tailcut)
+
+        dt_ns = float(hdr.get("SamplingTime", 1e-9)) * 1e9
+        t_ns = np.arange(n_samp) * dt_ns
+
+        os.makedirs(args.outdir, exist_ok=True)
+        stem = os.path.basename(path).replace(".h5.gz", "").replace(".h5", "")
+        produced = [
+            plot_waveforms(corr, hdr, t_ns, args.nevents,
+                           os.path.join(args.outdir, f"{stem}_waveforms.png")),
+            plot_average(corr, hdr, t_ns,
+                         os.path.join(args.outdir, f"{stem}_media.png")),
+            plot_amplitudes(amp, hdr,
+                            os.path.join(args.outdir, f"{stem}_ampiezze.png")),
+        ]
+        return (data.shape[0], now), produced
+
+    if args.watch is None:
+        try:
+            _, produced = one_pass()
+        except DaqFileError as exc:
+            sys.exit(str(exc))
+        print("\nGrafici salvati:")
+        for p in produced:
+            print(f"  {p}")
+        return
+
+    # --- monitor continuo ---
+    print(f"Monitor ogni {args.watch:g} s — Ctrl+C per uscire\n")
+    state = None
     try:
-        hdr, data = load(path, max_events=args.max_events, live=args.live)
-    except DaqFileError as exc:
-        sys.exit(str(exc))
-
-    n_samp = data.shape[2]
-    tailcut = int(hdr.get("TailCut", 0))
-
-    base, corr, amp = baseline_and_amplitude(data)
-    print_summary(hdr, data, base, amp, n_samp, tailcut)
-
-    dt_ns = float(hdr.get("SamplingTime", 1e-9)) * 1e9
-    t_ns = np.arange(n_samp) * dt_ns
-
-    if args.show:
-        matplotlib.use(matplotlib.get_backend())
-
-    os.makedirs(args.outdir, exist_ok=True)
-    stem = os.path.basename(path).replace(".h5.gz", "").replace(".h5", "")
-    produced = [
-        plot_waveforms(corr, hdr, t_ns, args.nevents,
-                       os.path.join(args.outdir, f"{stem}_waveforms.png")),
-        plot_average(corr, hdr, t_ns,
-                     os.path.join(args.outdir, f"{stem}_media.png")),
-        plot_amplitudes(amp, hdr,
-                        os.path.join(args.outdir, f"{stem}_ampiezze.png")),
-    ]
-
-    print("Grafici salvati:")
-    for p in produced:
-        print(f"  {p}")
+        while True:
+            try:
+                state, produced = one_pass(state)
+            except DaqFileError as exc:
+                # A inizio run il file puo' non esistere o non avere eventi
+                print(f"[{time.strftime('%H:%M:%S')}]  in attesa di eventi… "
+                      f"({str(exc).splitlines()[0]})")
+            time.sleep(args.watch)
+    except KeyboardInterrupt:
+        print("\nMonitor interrotto.")
+        if state:
+            print(f"Ultimi grafici in {args.outdir}/")
 
 
 if __name__ == "__main__":

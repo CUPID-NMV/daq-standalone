@@ -98,22 +98,28 @@ def read_header(f):
     return hdr
 
 
-def _read_v2(f, hdr, max_events, live):
+def _read_v2(f, hdr, max_events, live, last=None):
     ds = f["/events/waveforms"]
     if live:
         ds.refresh()          # senza refresh si vede solo lo stato all'apertura
 
-    n_ev = ds.shape[0]
-    if n_ev == 0:
+    total = ds.shape[0]
+    if total == 0:
         raise DaqFileError("Il file non contiene ancora eventi.")
-    if max_events:
-        n_ev = min(n_ev, max_events)
 
-    flat = np.asarray(ds[:n_ev], dtype=np.float64)
-    return flat, n_ev
+    if last:
+        # Solo la coda: il monitor si aggiorna a ritmo costante anche su run
+        # lunghe, invece di rileggere tutto il file a ogni giro.
+        n_ev = min(total, last)
+        flat = np.asarray(ds[total - n_ev:total], dtype=np.float64)
+    else:
+        n_ev = min(total, max_events) if max_events else total
+        flat = np.asarray(ds[:n_ev], dtype=np.float64)
+
+    return flat, n_ev, total
 
 
-def _read_v1(f, hdr, max_events, live):
+def _read_v1(f, hdr, max_events, live, last=None):
     if live:
         raise DaqFileError(
             "La lettura a run in corso richiede il formato v2.\n"
@@ -124,23 +130,29 @@ def _read_v1(f, hdr, max_events, live):
     keys = sorted(group.keys(), key=lambda x: int(x.replace("event", "")))
     if not keys:
         raise DaqFileError("Il file non contiene eventi.")
-    if max_events:
+    total = len(keys)
+    if last:
+        keys = keys[-last:]
+    elif max_events:
         keys = keys[:max_events]
 
     flat = np.stack([np.asarray(group[k][:], dtype=np.float64) for k in keys])
-    return flat, len(keys)
+    return flat, len(keys), total
 
 
-def load(path, max_events=None, live=False):
+def load(path, max_events=None, live=False, last=None):
     """Carica un file di dati.
 
     Ritorna (header, data) con data di forma (n_eventi, n_canali, n_campioni).
+    `last` legge solo gli ultimi N eventi, utile per il monitoraggio dal vivo:
+    il costo resta costante anche mentre il file cresce. Il numero totale di
+    eventi presenti nel file finisce comunque in hdr["NEventsInFile"].
     """
     f, tmp = open_file(path, live=live)
     try:
         hdr = read_header(f)
         reader = _read_v2 if hdr["FormatVersion"] >= 2 else _read_v1
-        flat, n_ev = reader(f, hdr, max_events, live)
+        flat, n_ev, total = reader(f, hdr, max_events, live, last)
     finally:
         f.close()
         _cleanup(tmp)
@@ -164,5 +176,6 @@ def load(path, max_events=None, live=False):
         )
     hdr.setdefault("SamplesPerChannel", n_samp)
     hdr.setdefault("TailCut", int(hdr.get("RecordLength", n_samp)) - n_samp)
+    hdr["NEventsInFile"] = int(total)
 
     return hdr, flat.reshape(n_ev, n_ch, n_samp)

@@ -75,6 +75,10 @@ class Monitor:
             raise DaqFileError(f"Nessun file .h5 in {self.data_dir}")
         return max(files, key=os.path.getmtime)
 
+    # NOTA: si cercano solo i .h5 non compressi. A run finita il file diventa
+    # .h5.gz e non e' piu' monitorabile dal vivo: e' il comportamento voluto,
+    # il monitor segue la run in corso.
+
     def refresh(self, force=False):
         now = time.time()
         if not force and (now - self._last_read) < self.min_interval:
@@ -83,7 +87,9 @@ class Monitor:
 
         try:
             path = self._latest_file()
-            hdr, data = load(path, max_events=None, live=True)
+            # Solo la coda del file: il costo di un aggiornamento non deve
+            # crescere con la durata della run.
+            hdr, data = load(path, last=self.max_events, live=True)
         except DaqFileError as exc:
             self.error = str(exc).splitlines()[0]
             return
@@ -93,7 +99,7 @@ class Monitor:
 
         self.error = None
         self.path = path
-        total = data.shape[0]
+        total = int(hdr.get("NEventsInFile", data.shape[0]))
 
         if self._prev is not None:
             prev_n, prev_t = self._prev
@@ -104,8 +110,7 @@ class Monitor:
 
         self.n_events = total
         self.hdr = hdr
-        # Per i grafici bastano gli ultimi eventi: il file puo' diventare grosso
-        self.data = data[-self.max_events:]
+        self.data = data          # gia' limitato alla coda da load(last=...)
 
     # -- analisi -------------------------------------------------------
 

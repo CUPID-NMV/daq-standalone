@@ -210,6 +210,24 @@ Digitizer::Digitizer()
         for (auto ch : fSelfTriggerChannels)
             chlist += " ch" + std::to_string(ch);
         Log::OutSummary("   trigger channels:" + chlist);
+
+        // Le due chiavi di soglia si escludono a vicenda: dire quale conta
+        // evita di modificare quella sbagliata e non vedere alcun effetto.
+        if (fSelfTriggerRelative) {
+            Log::OutSummary("   threshold driven by SelfTriggerThresholdOffset = " +
+                            std::to_string(fSelfTriggerThresholdOffset) + " counts");
+            Log::OutWarning("   SelfTriggerThreshold is IGNORED in \"relative\" mode "
+                            "(used only as fallback if the Transparent Mode "
+                            "measurement fails).");
+        } else {
+            std::string thrlist;
+            for (auto ch : fSelfTriggerChannels)
+                thrlist += " ch" + std::to_string(ch) + "=" +
+                           std::to_string(fSelfTriggerThreshold[ch]);
+            Log::OutSummary("   threshold driven by SelfTriggerThreshold:" + thrlist);
+            Log::OutWarning("   SelfTriggerThresholdOffset is IGNORED in "
+                            "\"absolute\" mode.");
+        }
     }
 }
 

@@ -1,4 +1,7 @@
 [digitizer]
+# NOTA: ConnectionType, LinkNumber e VMEBaseAddress NON sono letti dal codice.
+# I valori effettivi sono fissati nel costruttore di Digitizer.cpp
+# (CAEN_DGTZ_ETH_V4718, base address 0x32100000): modificarli qui non ha effetto.
 ConnectionType  = "ETH_V4718"
 IPAddress       = "192.168.99.105"
 LinkNumber      = 0
@@ -15,20 +18,45 @@ RunNumber = 0
 WaitTimeS       = 0.1
 TailCut = 12    # numero di sample da eliminare alla fine di ogni canale
 
-# Trigger esterno da TRG IN (coincidenza scintillatori)
-SelfTrigger     = false
-ExternalTrigger = true
-ExtTriggerMode  = "NIM"
-TriggerPolarity = 1          # 0 = fronte rising, 1 = falling
+# ===========================================================================
+#  TRIGGER
+#
+#  Le due sorgenti sono INDIPENDENTI e si abilitano separatamente:
+#
+#    SelfTrigger = false / ExternalTrigger = true   -> solo TRG-IN
+#    SelfTrigger = true  / ExternalTrigger = false  -> solo auto-trigger
+#    SelfTrigger = true  / ExternalTrigger = true   -> entrambi, in OR
+#    entrambi false                                 -> solo trigger software
+# ===========================================================================
+
+# --- Fronte di discriminazione, vale per TRn e per il self-trigger ---
+TriggerPolarity = 1          # 0 = rising, 1 = falling (impulsi negativi)
+
 
 # ---------------------------------------------------------------------------
-# Self-trigger (auto-trigger): il V1742 genera il trigger dall'OR logico dei
-# canali che superano la propria soglia. Attivo solo se SelfTrigger = true.
-#
-# ATTENZIONE: la logica di self-trigger legge l'ADC mentre il DRS4 e' in
-# "Transparent Mode" e introduce una latenza di ~320 ns (~420 ns in modo
-# "global"): non e' utilizzabile a 5 GHz (e nemmeno a 2.5 GHz in modo global).
+#  1) Trigger esterno da TRG-IN (es. coincidenza scintillatori)
 # ---------------------------------------------------------------------------
+ExternalTrigger = true       # <<< true = abilitato, false = disabilitato
+
+# NOTA: ExtTriggerMode non e' letto dal codice. Il livello di I/O e' fissato a
+# NIM in Digitizer::Configure() (CAEN_DGTZ_IOLevel_NIM).
+ExtTriggerMode  = "NIM"
+
+
+# ---------------------------------------------------------------------------
+#  2) Self-trigger (auto-trigger dai canali di input)
+#
+#  Il V1742 genera il trigger dall'OR logico dei canali che superano la propria
+#  soglia (discriminazione a leading edge). Tutte le opzioni che seguono sono
+#  ignorate se SelfTrigger = false.
+#
+#  ATTENZIONE: la logica di self-trigger legge l'ADC mentre il DRS4 e' in
+#  "Transparent Mode" e introduce una latenza di ~320 ns (~420 ns in modo
+#  "global"): non e' utilizzabile a 5 GHz (e nemmeno a 2.5 GHz in modo global).
+#  Inoltre l'ADC in Transparent Mode campiona a ~30 MHz, quindi impulsi piu'
+#  stretti di ~30 ns rischiano di non far scattare il trigger.
+# ---------------------------------------------------------------------------
+SelfTrigger     = false      # <<< true = abilitato, false = disabilitato
 
 # "paired" = l'OR dei canali fa acquisire le coppie di gruppi gr0/gr1 e gr2/gr3
 #            in modo indipendente (sempre disponibile, AMC >= 0.4)
@@ -54,6 +82,7 @@ SelfTriggerThreshold = [2000]
 # Distanza della soglia dalla baseline, in conteggi ADC (modo "relative")
 SelfTriggerThresholdOffset = 100
 
+
 # Polarità segnale in ingresso (es: impulsi positivi = 0, negativi = 1)
 PulsePolarity   = 0
 
@@ -62,6 +91,7 @@ NRMSThreshold     = 2.0         # soglia su rumore relativo
 IntegralThreshold = 5.0         # soglia su somma integrale
 
 # Tempo e numero eventi
+# NOTA: Duration non e' letto dal codice; la run termina dopo NEvents eventi.
 Duration        = 00:10:00.000000
 NEvents         = 3
 NNoiseEvents    = 2000

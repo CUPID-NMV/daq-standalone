@@ -85,6 +85,16 @@ def open_h5(path, live=False):
     except OSError as exc:
         if tmp:
             os.unlink(tmp)
+        if live:
+            sys.exit(
+                f"Impossibile leggere '{path}' mentre la run e' in corso.\n"
+                f"  ({exc})\n\n"
+                "DAQ-WC scrive gli eventi ma non fa flush dell'header HDF5 fino a\n"
+                "CloseOutputFile(), quindi finche' la run non termina il file su disco\n"
+                "non e' un HDF5 valido e nemmeno una copia e' leggibile.\n"
+                "Aspetta la fine della run. Per poter monitorare dal vivo servirebbe\n"
+                "una flush periodica in Digitizer::AcquireEvents()."
+            )
         sys.exit(f"Impossibile leggere '{path}': {exc}")
 
 
@@ -274,7 +284,7 @@ def main():
     ap.add_argument("-o", "--outdir", default="plots",
                     help="directory dei PNG prodotti (default: plots)")
     ap.add_argument("--live", action="store_true",
-                    help="legge una copia anche se la run e' in corso")
+                    help="tenta di leggere una copia a run in corso (vedi note: richiede una flush periodica lato DAQ)")
     ap.add_argument("--show", action="store_true",
                     help="apre le finestre invece di salvare (richiede display)")
     args = ap.parse_args()

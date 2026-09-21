@@ -5,14 +5,15 @@ LinkNumber      = 0
 ConetNode       = 0
 VMEBaseAddress  = 0x32100000
 
-ChannelList = [0, 1, 2, 3, 4, 5, 6, 7]
+ChannelList = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,  23, 24, 25, 26, 27, 28, 29, 30, 31]
 
 SamplingRate = "1GHz"    # Possibili valori: "5GHz", "2.5GHz", "1GHz"
 
 RecordLength    = 1024
-PostTriggerSize = -20
+PostTriggerSize = 50
 RunNumber = 0
 WaitTimeS       = 0.1
+TailCut = 12    # numero di sample da eliminare alla fine di ogni canale
 
 # Trigger esterno da TRG IN (coincidenza scintillatori)
 SelfTrigger     = false
@@ -20,8 +21,41 @@ ExternalTrigger = true
 ExtTriggerMode  = "NIM"
 TriggerPolarity = 1          # 0 = fronte rising, 1 = falling
 
+# ---------------------------------------------------------------------------
+# Self-trigger (auto-trigger): il V1742 genera il trigger dall'OR logico dei
+# canali che superano la propria soglia. Attivo solo se SelfTrigger = true.
+#
+# ATTENZIONE: la logica di self-trigger legge l'ADC mentre il DRS4 e' in
+# "Transparent Mode" e introduce una latenza di ~320 ns (~420 ns in modo
+# "global"): non e' utilizzabile a 5 GHz (e nemmeno a 2.5 GHz in modo global).
+# ---------------------------------------------------------------------------
+
+# "paired" = l'OR dei canali fa acquisire le coppie di gruppi gr0/gr1 e gr2/gr3
+#            in modo indipendente (sempre disponibile, AMC >= 0.4)
+# "global" = OR su tutta la board: un canale sopra soglia fa acquisire tutti i
+#            gruppi (richiede firmware >= 4.30_1.08)
+SelfTriggerMode = "global"
+
+# Canali che partecipano all'OR di trigger. Se omesso vengono usati tutti i
+# canali di ChannelList.
+# SelfTriggerChannels = [0, 1, 2, 3]
+
+# "absolute" = SelfTriggerThreshold e' in conteggi ADC assoluti (0..4095)
+# "relative" = la soglia viene calcolata come baseline misurata in Transparent
+#              Mode -/+ SelfTriggerThresholdOffset, secondo TriggerPolarity
+#              (falling -> baseline - offset, rising -> baseline + offset)
+SelfTriggerThresholdMode = "relative"
+
+# Soglie in conteggi ADC, una per canale di self-trigger (l'ultimo valore viene
+# replicato sui canali rimanenti). Usato in modo "absolute", e come fallback se
+# la misura in Transparent Mode fallisce.
+SelfTriggerThreshold = [2000]
+
+# Distanza della soglia dalla baseline, in conteggi ADC (modo "relative")
+SelfTriggerThresholdOffset = 100
+
 # Polarità segnale in ingresso (es: impulsi positivi = 0, negativi = 1)
-PulsePolarity   = 1
+PulsePolarity   = 0
 
 # Soglie per il salvataggio eventi
 NRMSThreshold     = 2.0         # soglia su rumore relativo
@@ -29,11 +63,11 @@ IntegralThreshold = 5.0         # soglia su somma integrale
 
 # Tempo e numero eventi
 Duration        = 00:10:00.000000
-NEvents         = 10
+NEvents         = 3
 NNoiseEvents    = 2000
 
 # Output
-SaveRaw = true  
+SaveRaw = false 
 OutputFormat    = "HDF5"        # oppure "ROOT" o "ASCII"
 OutputDir       = "/home/daq/daq-standalone/data"
 OutputFile      = "WC_proto"

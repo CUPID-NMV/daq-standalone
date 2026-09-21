@@ -10,7 +10,6 @@ Bridge::Bridge(Config& config)
   : fHandle(-1)
   , fConfig(config)
 {
-  //    fIPAddress = fConfig.GetString("bridge", "IPAddress", "192.168.99.105");
     fIPAddress = fConfig.GetEntry<std::string>("bridge", "IPAddress", "192.168.99.105");
     Log::OutDebug("Bridge IP address set to: " + fIPAddress);
 }
@@ -123,12 +122,5 @@ void Bridge::SetPulser()
 	    exit(1);
 	}
 
-    // Set pulser polarity
-    //re = CAENVME_SetOutputConf( fHandle,
-    //				fPulserChannel,
-    //				fPulserPolarity,
-    //				CVLEDPolarity::cvActiveHigh,
-    //				fIOSource );
-    
     return;
 }

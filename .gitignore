@@ -39,3 +39,29 @@
 
 # debug information files
 *.dwo
+
+# Build directory
+build/
+
+# Acquired data (kept out of git)
+data/
+*.h5
+*.h5.gz
+
+# Analysis outputs (rigenerabili dai notebook)
+*.csv
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# Editor / manual backup files
+*~
+*_org
+*_ok
+*_save
+*.weird
+*.bak
+*-dev

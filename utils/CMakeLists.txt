@@ -14,8 +14,8 @@ message( "source dir detector " ${CMAKE_SOURCE_DIR})
 # set top-level directory as include root
 target_include_directories(daqutils PUBLIC ${CMAKE_CURRENT_LIST_DIR})
 
-# link this library with ROOT libraries and other Octopus libraries
-target_link_libraries(daqutils ${ROOT_LIBRARIES} toml)
+# link this library with the toml parser library
+target_link_libraries(daqutils toml)
 
 # set shared library version equal to project version
 set_target_properties(daqutils PROPERTIES VERSION ${PROJECT_VERSION})

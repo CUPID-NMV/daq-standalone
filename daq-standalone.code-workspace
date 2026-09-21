@@ -1,0 +1,26 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"C_Cpp.default.cppStandard": "c++17",
+		"C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+		"cmake.buildDirectory": "${workspaceFolder}/build",
+		"cmake.configureArgs": [
+			"-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+		],
+		"cmake.configureOnOpen": true,
+		"files.associations": {
+			"*.h": "cpp",
+			"*.hpp": "cpp"
+		}
+	},
+	"extensions": {
+		"recommendations": [
+			"ms-vscode.cpptools",
+			"ms-vscode.cmake-tools"
+		]
+	}
+}

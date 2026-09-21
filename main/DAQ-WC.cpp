@@ -13,9 +13,8 @@ int main(int argc, char** argv)
         std::cout << "Usage: ./GAGG-DAQ /path/to/config-file.toml" << std::endl;
         return 1;
     }
-    
 
-    // Ottieni istanza singleton Config e leggi file
+    // --- Config ---
     Config& theConfig = Config::GetInstance();
     theConfig.Read(argv[1]);
 
@@ -27,44 +26,35 @@ int main(int argc, char** argv)
     Log::OutSummary("* * * * * * * * * * * * * * *");
     Log::OutSummary();
 
-    // Inizializza il bridge VME (V4718)
+    // --- Bridge VME (V4718) ---
     Bridge bridge(theConfig);
     bridge.Open();
 
+    // --- Digitizer V1742 ---
     Digitizer digitizer;
-    digitizer.SelectBoard();       // 1. Connessione al V1742
-    digitizer.Configure();         // 2. Configurazione base
-    digitizer.InitAcquisition();
+    digitizer.SelectBoard();    // 1. Connessione al V1742
+    digitizer.Configure();      // 2. Configurazione base (record length, gruppi, canali, offset, ecc.)
+    digitizer.InitAcquisition();// 3. Allocazione buffer/evento
+
+    // 4. Calcolo baseline UNA sola volta
     digitizer.SetTriggerThreshold(0.1);
 
+    // 5. Configurazione sorgenti di trigger (TRG-IN esterno e/o self-trigger
+    //    dai canali di input), secondo quanto richiesto dal file di config.
+    digitizer.ConfigureTrigger();
 
-    ///////////////////////////////////////  baseline////////////////////////////
-    CAEN_DGTZ_SetChannelSelfTrigger(digitizer.GetHandle(), CAEN_DGTZ_TRGMODE_ACQ_ONLY, 0xFF);  // Tutti i canali
-    CAEN_DGTZ_SetExtTriggerInputMode(digitizer.GetHandle(), CAEN_DGTZ_TRGMODE_DISABLED);
-    uint32_t trigStatus = 0;
-    CAEN_DGTZ_ReadRegister(digitizer.GetHandle(), 0x812C, &trigStatus);
-    //Log::OutDebug("Trigger Status Register (0x812C): " + std::to_string(trigStatus));
-    digitizer.SetTriggerThreshold(0.1);  
-    /////////////////////////////////////////////////////////////////////////////
-    
-    ////////////////// Main loop ...Acquire events with external trigger////////
-    CAEN_DGTZ_SetChannelSelfTrigger(digitizer.GetHandle(), CAEN_DGTZ_TRGMODE_DISABLED, 0xFF);
-    CAEN_DGTZ_SetExtTriggerInputMode(digitizer.GetHandle(), CAEN_DGTZ_TRGMODE_ACQ_ONLY);
-    //    Log::OutDebug("Trigger configuration: ExternalTrigger = ON, SelfTrigger = OFF (mode = NIM)");
+    // 6. Output HDF5 + acquisizione
+    digitizer.PrepareOutput();   // crea file HDF5, gruppo "/events" e "/config"
+    digitizer.AcquireEvents();   // legge eventi e li scrive in HDF5 (chiama anche CloseOutputFile() alla fine)
 
-    
-    //uint32_t trigStatus = 0;
-    CAEN_DGTZ_ReadRegister(digitizer.GetHandle(), 0x812C, &trigStatus);
-    //Log::OutDebug("Trigger Status Register (0x812C): " + std::to_string(trigStatus));
-    
-
-    digitizer.PrepareOutput();     // crea file HDF5, directory, gruppo "/events"
-    digitizer.AcquireEvents();     // scrive gli eventi nel file HDF5
-    digitizer.CloseOutputFile();   // chiude il gruppo e il file HDF5
-    digitizer.Close();             // 6. Cleanup
+    // 7. Reset del digitizer (su handle ancora aperto)
     digitizer.Reset();
 
-    bridge.Close();  // opzionale
+    // 8. Chiusura risorse CAEN (Close() libera buffer/eventi e chiude il digitizer)
+    digitizer.Close();
+
+    // 9. Bridge off
+    bridge.Close();
+
     return 0;
 }
-

@@ -2,17 +2,8 @@ cmake_minimum_required(VERSION 3.10)
 project(DAQ-WC)
 
 # ---------------------------------------------------------------
-# Ensure CMake can find ROOT’s FindVdt.cmake
-# ---------------------------------------------------------------
-list(APPEND CMAKE_MODULE_PATH
-    "/home/daq/root_install/cmake/modules"
-    "/home/daq/DAQ/packages/root_install/cmake/modules"
-)
-
-# ---------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------
-find_package(ROOT REQUIRED)
 find_package(HDF5 REQUIRED COMPONENTS C CXX)
 
 # ---------------------------------------------------------------
@@ -21,7 +12,6 @@ find_package(HDF5 REQUIRED COMPONENTS C CXX)
 add_library(daqcomponents
     Digitizer.cpp
     Bridge.cpp
-    HDF5Writer.cpp
 )
 
 # ---------------------------------------------------------------
@@ -31,7 +21,6 @@ target_include_directories(daqcomponents PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/utils
     ${CMAKE_SOURCE_DIR}/toml
-    ${ROOT_INCLUDE_DIRS}
     ${HDF5_INCLUDE_DIRS}
     /usr/include/hdf5/serial
 )
@@ -51,7 +40,6 @@ target_link_libraries(daqcomponents
     pthread
     dl
     z
-    ${ROOT_LIBRARIES}
 )
 
 # ---------------------------------------------------------------

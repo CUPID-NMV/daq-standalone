@@ -384,6 +384,14 @@ def make_handler(monitor, refresh, defaults):
             route = parsed.path.lstrip("/") or "index.html"
             qs = parse_qs(parsed.query)
 
+            if route == "favicon.ico":
+                # Il browser la chiede da solo: senza questa riga la console
+                # si riempie di 404 e nasconde gli errori veri.
+                self.send_response(204)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+
             if route == "index.html":
                 page = (PAGE.replace("__REFRESH__", str(refresh))
                             .replace("__NEVENTS__", str(defaults["n"]))

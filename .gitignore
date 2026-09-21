@@ -41,7 +41,7 @@
 *.dwo
 
 # Build directory
-build/
+build*/
 
 # Acquired data (kept out of git)
 data/

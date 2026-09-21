@@ -174,10 +174,37 @@ The filename encodes:
 - Sampling rate tag (`1Gs`, `2.5Gs`, `5Gs`)
 - Post-trigger percentage
 
-Each file contains two groups:
+Each file contains:
 
-- `/events` — baseline-corrected waveforms  
-- `/events_raw` — raw waveforms (if enabled)
+- `/events/waveforms` — a single extendable 2-D dataset, shape
+  `(n_events, n_channels × samples_per_channel)`, with the channels of one
+  event concatenated in `ChannelList` order
+- `/events_raw/waveforms` — the same, raw (only if `SaveRaw = true`)
+
+### Reading the data
+
+Use the helper in [tools/daqio.py](tools/daqio.py), which handles both the
+current format and the historical one (`/events/event0`, `event1`, …), the
+`.gz` compression and live reading:
+
+```python
+from daqio import load
+hdr, data = load("data/run.h5.gz")     # data: (n_events, n_channels, n_samples)
+```
+
+### Live monitoring (SWMR)
+
+With `LiveMonitoring = true` the file is readable **while the run is still
+going**: events become visible to readers every `LiveFlushEvery` events.
+
+```bash
+python3 tools/plot_waveforms.py data/run.h5 --live
+```
+
+This relies on HDF5 SWMR, which forbids creating new objects in an open file —
+that is why events live in one extendable dataset rather than one dataset per
+event. The files use the latest HDF5 format and need **libhdf5 ≥ 1.10** to be
+read. `/config/FormatVersion` tells the two layouts apart.
 
 Metadata is stored under:
 

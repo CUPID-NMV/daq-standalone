@@ -79,7 +79,12 @@ SelfTriggerThresholdMode = "relative"
 # la misura in Transparent Mode fallisce.
 SelfTriggerThreshold = [2000]
 
-# Distanza della soglia dalla baseline, in conteggi ADC (modo "relative")
+# Distanza della soglia dalla baseline, in conteggi ADC (modo "relative").
+# Accetta uno scalare, applicato a tutti i canali, oppure una lista con un
+# valore per canale nell'ordine di SelfTriggerChannels (l'ultimo viene
+# replicato sui rimanenti). Esempi:
+#   SelfTriggerThresholdOffset = 12         -> 12 su tutti
+#   SelfTriggerThresholdOffset = [12, 20]   -> 12 sul primo canale, 20 sul secondo
 SelfTriggerThresholdOffset = 100
 
 

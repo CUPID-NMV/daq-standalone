@@ -88,6 +88,7 @@ Digitizer::Digitizer()
       fSelfTriggerChannels(),
       fSelfTriggerThreshold(),
       fSelfTriggerThresholdOffset(fConfig.GetEntry<uint32_t>("digitizer","SelfTriggerThresholdOffset",100)),
+      fSelfTriggerOffset(),
       fTransparentBaseline(),
       fTransparentRMS(),
       fLiveMonitoringCfg(fConfig.GetEntry<bool>("digitizer","LiveMonitoring",true)),
@@ -196,11 +197,32 @@ Digitizer::Digitizer()
         fSelfTriggerThreshold[fSelfTriggerChannels[i]] = static_cast<uint32_t>(thr);
     }
 
-    if (fSelfTriggerThresholdOffset > MAX_THRESHOLD_COUNTS) {
-        Log::OutError("SelfTriggerThresholdOffset = " +
-                      std::to_string(fSelfTriggerThresholdOffset) + " out of range (0-" +
-                      std::to_string(MAX_THRESHOLD_COUNTS) + ")");
-        exit(1);
+    // Offset per canale: la chiave accetta sia uno scalare, applicato a tutti i
+    // canali, sia una lista con un valore per canale (l'ultimo viene replicato).
+    {
+        toml::array* offarr =
+            fConfig.GetTbl()["digitizer"]["SelfTriggerThresholdOffset"].as_array();
+
+        std::vector<int64_t> offlist;
+        if (offarr != nullptr)
+            offlist = fConfig.GetEntryList<int64_t>("digitizer","SelfTriggerThresholdOffset",
+                                                    static_cast<int64_t>(100),
+                                                    fSelfTriggerChannels.size());
+
+        for (size_t i = 0; i < fSelfTriggerChannels.size(); ++i) {
+            int64_t off = (offarr != nullptr && i < offlist.size())
+                            ? offlist[i]
+                            : static_cast<int64_t>(fSelfTriggerThresholdOffset);
+
+            if (off < 0 || off > static_cast<int64_t>(MAX_THRESHOLD_COUNTS)) {
+                Log::OutError("SelfTriggerThresholdOffset for ch" +
+                              std::to_string(fSelfTriggerChannels[i]) + " = " +
+                              std::to_string(off) + " out of range (0-" +
+                              std::to_string(MAX_THRESHOLD_COUNTS) + ")");
+                exit(1);
+            }
+            fSelfTriggerOffset[fSelfTriggerChannels[i]] = static_cast<uint32_t>(off);
+        }
     }
 
     if (fSelfTrigger) {
@@ -214,8 +236,12 @@ Digitizer::Digitizer()
         // Le due chiavi di soglia si escludono a vicenda: dire quale conta
         // evita di modificare quella sbagliata e non vedere alcun effetto.
         if (fSelfTriggerRelative) {
-            Log::OutSummary("   threshold driven by SelfTriggerThresholdOffset = " +
-                            std::to_string(fSelfTriggerThresholdOffset) + " counts");
+            std::string offlist;
+            for (auto ch : fSelfTriggerChannels)
+                offlist += " ch" + std::to_string(ch) + "=" +
+                           std::to_string(fSelfTriggerOffset[ch]);
+            Log::OutSummary("   threshold driven by SelfTriggerThresholdOffset "
+                            "[counts]:" + offlist);
             Log::OutWarning("   SelfTriggerThreshold is IGNORED in \"relative\" mode "
                             "(used only as fallback if the Transparent Mode "
                             "measurement fails).");
@@ -660,14 +686,16 @@ void Digitizer::ComputeSelfTriggerThresholds() {
             continue;
         }
 
-        double base = fTransparentBaseline[ch];
-        double thr  = falling ? base - static_cast<double>(fSelfTriggerThresholdOffset)
-                              : base + static_cast<double>(fSelfTriggerThresholdOffset);
+        double base   = fTransparentBaseline[ch];
+        double offset = static_cast<double>(fSelfTriggerOffset.count(ch)
+                                            ? fSelfTriggerOffset[ch]
+                                            : fSelfTriggerThresholdOffset);
+        double thr    = falling ? base - offset : base + offset;
 
         if (thr < 0.0) {
             Log::OutWarning("ch" + std::to_string(ch) + ": threshold clipped to 0 (baseline = " +
                             std::to_string(base) + ", offset = " +
-                            std::to_string(fSelfTriggerThresholdOffset) + ")");
+                            std::to_string(offset) + ")");
             thr = 0.0;
         }
         if (thr > static_cast<double>(MAX_THRESHOLD_COUNTS)) {

@@ -27,6 +27,16 @@
 
 using namespace H5;
 
+// Un decimale, senza gli zeri inutili di std::to_string
+static std::string FmtOffset(double v) {
+    std::ostringstream os;
+    os << std::fixed << std::setprecision(1) << v;
+    std::string s = os.str();
+    if (s.size() > 2 && s.substr(s.size() - 2) == ".0") s.erase(s.size() - 2);
+    return s;
+}
+
+
 // =============================================================
 //  CTOR
 // =============================================================
@@ -1678,15 +1688,6 @@ void Digitizer::CloseOutputFile() {
 // =======================================================================
 //  HEX UTILITY
 // =======================================================================
-// Un decimale, senza gli zeri inutili di std::to_string
-static std::string FmtOffset(double v) {
-    std::ostringstream os;
-    os << std::fixed << std::setprecision(1) << v;
-    std::string s = os.str();
-    if (s.size() > 2 && s.substr(s.size() - 2) == ".0") s.erase(s.size() - 2);
-    return s;
-}
-
 std::string Digitizer::IntToHex(uint32_t val) {
     std::stringstream stream;
     stream << "0x" << std::hex << std::uppercase << val;

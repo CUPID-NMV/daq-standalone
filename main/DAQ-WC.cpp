@@ -45,7 +45,12 @@ int main(int argc, char** argv)
 
     // 6. Output HDF5 + acquisizione
     digitizer.PrepareOutput();   // crea file HDF5, gruppo "/events" e "/config"
-    digitizer.AcquireEvents();   // legge eventi e li scrive in HDF5 (chiama anche CloseOutputFile() alla fine)
+
+    if (digitizer.TransparentDumpRequested())
+        // Diagnostica: registra cio' che vede il discriminatore, poi termina.
+        digitizer.AcquireTransparent();
+    else
+        digitizer.AcquireEvents();   // legge eventi e li scrive in HDF5
 
     // 7. Reset del digitizer (su handle ancora aperto)
     digitizer.Reset();

@@ -104,7 +104,9 @@ Digitizer::Digitizer()
       fTransparentRMS(),
       fLiveMonitoringCfg(fConfig.GetEntry<bool>("digitizer","LiveMonitoring",true)),
       fFlushEveryCfg(fConfig.GetEntry<uint32_t>("digitizer","LiveFlushEvery",10)),
-      fLiveThresholdFileCfg(fConfig.GetEntry<std::string>("digitizer","LiveThresholdFile",""))
+      fLiveThresholdFileCfg(fConfig.GetEntry<std::string>("digitizer","LiveThresholdFile","")),
+      fTransparentDump(fConfig.GetEntry<bool>("digitizer","TransparentDump",false)),
+      fTransparentDumpEvents(fConfig.GetEntry<uint32_t>("digitizer","TransparentDumpEvents",200))
 {
     // I puntatori HDF5 non erano inizializzati: PrepareOutput li assegna, ma
     // CloseOutputFile e AcquireEvents li controllano contro nullptr.
@@ -161,6 +163,13 @@ Digitizer::Digitizer()
     else {
         Log::OutError("Unknown output format: " + format);
         exit(1);
+    }
+
+    if (fTransparentDump) {
+        fOutputFileName += "_TM";       // numerazione separata dalle run di fisica
+        Log::OutSummary("→ TRANSPARENT MODE DUMP: " +
+                        std::to_string(fTransparentDumpEvents) +
+                        " events, no acquisition will follow.");
     }
 
     // ===== Self-trigger (auto-trigger dai canali di input) =====
@@ -1376,6 +1385,124 @@ void Digitizer::AcquireEvents() {
 }
 
 // =======================================================================
+//  DIAGNOSTICA: acquisizione in Transparent Mode
+// =======================================================================
+void Digitizer::AcquireTransparent()
+{
+    if (!fBuffer || !fVoidEvent) {
+        Log::OutError("AcquireTransparent called before InitAcquisition().");
+        return;
+    }
+
+    const uint32_t channelsPerGroup = 8;
+    const uint32_t hwGroups = (fNChannels + channelsPerGroup - 1) / channelsPerGroup;
+
+    Log::OutSummary("=====================================================");
+    Log::OutSummary(" TRANSPARENT MODE DUMP");
+    Log::OutSummary(" Registra cio' che vede il discriminatore del");
+    Log::OutSummary(" self-trigger, non le forme d'onda ricostruite.");
+    Log::OutSummary("=====================================================");
+
+    // Le tabelle di correzione DRS4 sono tarate sull'Output Mode: applicarle
+    // qui altererebbe proprio i valori che vogliamo osservare, che sono quelli
+    // grezzi su cui lavora il comparatore.
+    if (CAEN_DGTZ_DisableDRS4Correction(fHandle) == CAEN_DGTZ_Success)
+        Log::OutSummary("→ DRS4 corrections DISABLED: raw ADC values.");
+    else
+        Log::OutWarning("→ Cannot disable DRS4 corrections: the values may be altered "
+                        "with respect to what the comparator sees.");
+
+    SetTransparentMode(true);
+
+    CAEN_DGTZ_ErrorCode re = CAEN_DGTZ_SWStartAcquisition(fHandle);
+    if (re != CAEN_DGTZ_Success) {
+        Log::OutError("Start acquisition failed in AcquireTransparent. Code: " +
+                      std::to_string(re));
+        SetTransparentMode(false);
+        return;
+    }
+    fAcqRunning = true;
+
+    uint32_t written = 0, skipped = 0;
+
+    for (uint32_t n = 0; n < fTransparentDumpEvents; ++n) {
+
+        if (CAEN_DGTZ_SendSWtrigger(fHandle) != CAEN_DGTZ_Success) break;
+
+        fBufferSize = 0;
+        if (CAEN_DGTZ_ReadData(fHandle, CAEN_DGTZ_SLAVE_TERMINATED_READOUT_MBLT,
+                               fBuffer, &fBufferSize) != CAEN_DGTZ_Success)
+            break;
+        if (fBufferSize == 0) continue;
+
+        uint32_t nEvents = 0;
+        if (CAEN_DGTZ_GetNumEvents(fHandle, fBuffer, fBufferSize, &nEvents)
+                != CAEN_DGTZ_Success)
+            continue;
+
+        for (uint32_t j = 0; j < nEvents; ++j) {
+            if (CAEN_DGTZ_GetEventInfo(fHandle, fBuffer, fBufferSize, j,
+                                       &fEventInfo, &fEventPtr) != CAEN_DGTZ_Success
+                || !fEventPtr)
+                continue;
+            if (CAEN_DGTZ_DecodeEvent(fHandle, fEventPtr, &fVoidEvent)
+                    != CAEN_DGTZ_Success || !fVoidEvent)
+                continue;
+
+            fEvent = reinterpret_cast<CAEN_DGTZ_X742_EVENT_t*>(fVoidEvent);
+
+            std::vector<int16_t> samples;
+            samples.reserve(fEventWidth);
+
+            for (uint32_t ch : fChannelList) {
+                uint32_t group    = ch / channelsPerGroup;
+                uint32_t local_ch = ch % channelsPerGroup;
+                if (group >= hwGroups || fEvent->GrPresent[group] == 0) continue;
+
+                uint32_t ns     = fEvent->DataGroup[group].ChSize[local_ch];
+                float*   wave   = fEvent->DataGroup[group].DataChannel[local_ch];
+                if (ns < MIN_SAMPLES || ns > MAX_SAMPLES || wave == nullptr) continue;
+
+                uint32_t usable = (ns > fTailCut) ? (ns - fTailCut) : 0;
+                for (uint32_t k = 0; k < usable; ++k)
+                    samples.push_back(static_cast<int16_t>(wave[k]));
+            }
+
+            if (samples.size() != fEventWidth) { ++skipped; continue; }
+
+            try {
+                AppendEvent(fH5Waveforms, samples.data(), PredType::NATIVE_INT16, fH5Rows);
+                ++fH5Rows;
+                ++written;
+                if (fLiveMonitoring && (fH5Rows % fFlushEvery) == 0)
+                    H5Dflush(fH5Waveforms->getId());
+            } catch (const H5::Exception& e) {
+                Log::OutError("HDF5 write error: " + std::string(e.getDetailMsg()));
+            }
+        }
+
+        std::cout << "\r→ Transparent events: " << std::setw(6) << written
+                  << "/" << fTransparentDumpEvents << std::flush;
+
+        // Trigger software ravvicinati campionerebbero sempre la stessa fase
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+
+    std::cout << std::endl;
+
+    CAEN_DGTZ_SWStopAcquisition(fHandle);
+    fAcqRunning = false;
+    SetTransparentMode(false);
+
+    Log::OutSummary("→ Transparent Mode events written: " + std::to_string(written));
+    if (skipped)
+        Log::OutWarning("→ Events skipped (unexpected size): " + std::to_string(skipped));
+    Log::OutSummary("→ File: " + fOutputPath);
+
+    CloseOutputFile();
+}
+
+// =======================================================================
 //  GET TIME (ms)
 // =======================================================================
 long Digitizer::GetTime() {
@@ -1570,6 +1697,10 @@ void Digitizer::PrepareOutput() {
 
         header.createAttribute("PostTriggerSize", H5::PredType::NATIVE_UINT,
                                H5::DataSpace()).write(H5::PredType::NATIVE_UINT, &fPostTriggerSize);
+
+        int tmflag = fTransparentDump ? 1 : 0;
+        header.createAttribute("TransparentMode", H5::PredType::NATIVE_INT,
+                               H5::DataSpace()).write(H5::PredType::NATIVE_INT, &tmflag);
 
         int fmtver = OUTPUT_FORMAT_VERSION;
         header.createAttribute("FormatVersion", H5::PredType::NATIVE_INT,

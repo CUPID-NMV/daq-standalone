@@ -28,6 +28,8 @@ public:
     void InitAcquisition();
     void SetTriggerThreshold(double offset = 0.1);
     void ConfigureTrigger();
+    void AcquireTransparent();
+    bool TransparentDumpRequested() const { return fTransparentDump; }
     void PrepareOutput();
     void AcquireEvents();
     void CloseOutputFile();
@@ -145,6 +147,12 @@ private:
     bool     fLiveMonitoringCfg;
     uint32_t fFlushEveryCfg;
     std::string fLiveThresholdFileCfg;   // vuoto = <OutputDir>/live-threshold.txt
+
+    // ---- DIAGNOSTICA TRANSPARENT MODE ----
+    // Acquisisce con trigger software cio' che vede il discriminatore del
+    // self-trigger, invece delle forme d'onda ricostruite in Output Mode.
+    bool     fTransparentDump;
+    uint32_t fTransparentDumpEvents;
 
     // ---- SOGLIE MODIFICABILI A RUN IN CORSO ----
     std::string fLiveThresholdPath;      // file di comando, riletto se cambia

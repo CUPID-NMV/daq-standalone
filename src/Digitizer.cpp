@@ -88,7 +88,7 @@ Digitizer::Digitizer()
       fSelfTriggerRelative(false),
       fSelfTriggerChannels(),
       fSelfTriggerThreshold(),
-      fSelfTriggerThresholdOffset(fConfig.GetEntry<uint32_t>("digitizer","SelfTriggerThresholdOffset",100)),
+      fSelfTriggerThresholdOffset(fConfig.GetEntry<double>("digitizer","SelfTriggerThresholdOffset",100.0)),
       fSelfTriggerOffset(),
       fTransparentBaseline(),
       fTransparentRMS(),
@@ -213,25 +213,42 @@ Digitizer::Digitizer()
         toml::array* offarr =
             fConfig.GetTbl()["digitizer"]["SelfTriggerThresholdOffset"].as_array();
 
-        std::vector<int64_t> offlist;
-        if (offarr != nullptr)
-            offlist = fConfig.GetEntryList<int64_t>("digitizer","SelfTriggerThresholdOffset",
-                                                    static_cast<int64_t>(100),
-                                                    fSelfTriggerChannels.size());
+        // value<double>() converte anche gli interi, mentre get_as<int64_t>()
+        // su un valore decimale restituisce nullptr: dereferenziarlo era un
+        // segfault silenzioso.
+        std::vector<double> offlist;
+        if (offarr != nullptr) {
+            for (size_t i = 0; i < offarr->size(); ++i) {
+                auto v = offarr->get(i)->value<double>();
+                if (!v) {
+                    Log::OutError("SelfTriggerThresholdOffset: element " +
+                                  std::to_string(i) + " is not a number.");
+                    exit(1);
+                }
+                offlist.push_back(*v);
+            }
+            if (offlist.empty()) {
+                Log::OutError("SelfTriggerThresholdOffset: empty list.");
+                exit(1);
+            }
+            // l'ultimo valore vale per i canali rimanenti
+            while (offlist.size() < fSelfTriggerChannels.size())
+                offlist.push_back(offlist.back());
+        }
 
         for (size_t i = 0; i < fSelfTriggerChannels.size(); ++i) {
-            int64_t off = (offarr != nullptr && i < offlist.size())
+            double off = (offarr != nullptr && i < offlist.size())
                             ? offlist[i]
-                            : static_cast<int64_t>(fSelfTriggerThresholdOffset);
+                            : fSelfTriggerThresholdOffset;
 
-            if (off < 0 || off > static_cast<int64_t>(MAX_THRESHOLD_COUNTS)) {
+            if (off < 0.0 || off > static_cast<double>(MAX_THRESHOLD_COUNTS)) {
                 Log::OutError("SelfTriggerThresholdOffset for ch" +
                               std::to_string(fSelfTriggerChannels[i]) + " = " +
                               std::to_string(off) + " out of range (0-" +
                               std::to_string(MAX_THRESHOLD_COUNTS) + ")");
                 exit(1);
             }
-            fSelfTriggerOffset[fSelfTriggerChannels[i]] = static_cast<uint32_t>(off);
+            fSelfTriggerOffset[fSelfTriggerChannels[i]] = off;
         }
     }
 
@@ -249,7 +266,7 @@ Digitizer::Digitizer()
             std::string offlist;
             for (auto ch : fSelfTriggerChannels)
                 offlist += " ch" + std::to_string(ch) + "=" +
-                           std::to_string(fSelfTriggerOffset[ch]);
+                           FmtOffset(fSelfTriggerOffset[ch]);
             Log::OutSummary("   threshold driven by SelfTriggerThresholdOffset "
                             "[counts]:" + offlist);
             Log::OutWarning("   SelfTriggerThreshold is IGNORED in \"relative\" mode "
@@ -705,7 +722,7 @@ void Digitizer::ComputeSelfTriggerThresholds() {
         if (thr < 0.0) {
             Log::OutWarning("ch" + std::to_string(ch) + ": threshold clipped to 0 (baseline = " +
                             std::to_string(base) + ", offset = " +
-                            std::to_string(offset) + ")");
+                            FmtOffset(offset) + ")");
             thr = 0.0;
         }
         if (thr > static_cast<double>(MAX_THRESHOLD_COUNTS)) {
@@ -954,8 +971,20 @@ void Digitizer::CheckLiveThresholds()
         if (line.empty() || line[0] == '#') continue;
 
         std::istringstream ss(line);
-        long ch = -1, off = -1;
-        if (!(ss >> ch >> off)) continue;
+        long   ch  = -1;
+        double off = -1.0;
+        if (!(ss >> ch >> off)) {
+            Log::OutWarning("Live threshold: cannot parse \"" + line + "\", ignored.");
+            continue;
+        }
+        // Un resto sulla riga di solito e' un errore di battitura: meglio dirlo
+        // che applicare qualcosa di diverso da quello che l'utente intendeva.
+        std::string rest;
+        if (ss >> rest) {
+            Log::OutWarning("Live threshold: unexpected text \"" + rest +
+                            "\" in \"" + line + "\", line ignored.");
+            continue;
+        }
 
         if (std::find(fSelfTriggerChannels.begin(), fSelfTriggerChannels.end(),
                       static_cast<uint32_t>(ch)) == fSelfTriggerChannels.end()) {
@@ -963,8 +992,8 @@ void Digitizer::CheckLiveThresholds()
                             " does not take part in the trigger, ignored.");
             continue;
         }
-        if (off < 0 || off > static_cast<long>(MAX_THRESHOLD_COUNTS)) {
-            Log::OutWarning("Live threshold: offset " + std::to_string(off) +
+        if (off < 0.0 || off > static_cast<double>(MAX_THRESHOLD_COUNTS)) {
+            Log::OutWarning("Live threshold: offset " + FmtOffset(off) +
                             " for ch" + std::to_string(ch) + " out of range, ignored.");
             continue;
         }
@@ -984,12 +1013,12 @@ void Digitizer::CheckLiveThresholds()
         if (fSelfTriggerThreshold.count(c) && fSelfTriggerThreshold[c] == newthr)
             continue;                            // nessuna variazione effettiva
 
-        fSelfTriggerOffset[c] = static_cast<uint32_t>(off);
+        fSelfTriggerOffset[c] = off;
         ApplyChannelThreshold(c, newthr);
         changed = true;
 
         Log::OutSummary("→ Live threshold: ch" + std::to_string(c) +
-                        " offset = " + std::to_string(off) +
+                        " offset = " + FmtOffset(off) +
                         " → threshold = " + std::to_string(newthr) +
                         " (event " + std::to_string(fH5Rows) + ")");
     }
@@ -1023,7 +1052,7 @@ void Digitizer::WriteStatusFile()
     for (size_t i = 0; i < fSelfTriggerChannels.size(); ++i) {
         uint32_t ch = fSelfTriggerChannels[i];
         out << "    {\"ch\": " << ch
-            << ", \"offset\": " << (fSelfTriggerOffset.count(ch) ? fSelfTriggerOffset[ch] : 0)
+            << ", \"offset\": " << (fSelfTriggerOffset.count(ch) ? fSelfTriggerOffset[ch] : 0.0)
             << ", \"threshold\": " << (fSelfTriggerThreshold.count(ch) ? fSelfTriggerThreshold[ch] : 0)
             << ", \"baseline\": " << (fTransparentBaseline.count(ch) ? fTransparentBaseline[ch] : 0.0)
             << "}" << (i + 1 < fSelfTriggerChannels.size() ? "," : "") << "\n";
@@ -1649,6 +1678,15 @@ void Digitizer::CloseOutputFile() {
 // =======================================================================
 //  HEX UTILITY
 // =======================================================================
+// Un decimale, senza gli zeri inutili di std::to_string
+static std::string FmtOffset(double v) {
+    std::ostringstream os;
+    os << std::fixed << std::setprecision(1) << v;
+    std::string s = os.str();
+    if (s.size() > 2 && s.substr(s.size() - 2) == ".0") s.erase(s.size() - 2);
+    return s;
+}
+
 std::string Digitizer::IntToHex(uint32_t val) {
     std::stringstream stream;
     stream << "0x" << std::hex << std::uppercase << val;

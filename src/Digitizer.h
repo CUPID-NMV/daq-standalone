@@ -135,8 +135,8 @@ private:
     bool fSelfTriggerRelative;
     std::vector<uint32_t> fSelfTriggerChannels;
     std::map<uint32_t,uint32_t> fSelfTriggerThreshold;   // per canale, 12 bit (0..4095)
-    uint32_t fSelfTriggerThresholdOffset;                // conteggi ADC, modo "relative"
-    std::map<uint32_t,uint32_t> fSelfTriggerOffset;      // stesso, ma per canale
+    double fSelfTriggerThresholdOffset;                  // conteggi ADC, modo "relative"
+    std::map<uint32_t,double> fSelfTriggerOffset;        // stesso, ma per canale
     std::map<uint32_t,double> fTransparentBaseline;      // baseline in Transparent Mode
     std::map<uint32_t,double> fTransparentRMS;
 

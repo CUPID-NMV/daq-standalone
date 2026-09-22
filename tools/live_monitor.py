@@ -161,7 +161,7 @@ class Monitor:
     # -- grafici -------------------------------------------------------
 
     def figure(self, kind, n_show=1, xlim=(None, None), ylim=(None, None),
-               hxlim=(None, None), hlog=False):
+               hset=None):
         res = self.analysis()
         if res is None:
             return self._placeholder()
@@ -211,24 +211,27 @@ class Monitor:
                 ax = axes[0][i]
                 values = amp[:, i]
 
+                # Ogni canale ha i propri limiti e la propria scala
+                xlo, xhi, logy = (hset or {}).get(int(ch), (None, None, False))
+
                 # Con un intervallo esplicito i bin vanno calcolati dentro quello,
                 # altrimenti si vedrebbe solo una fetta di un istogramma costruito
                 # su tutto il range e la risoluzione sarebbe sprecata.
                 kw = {}
-                if hxlim[0] is not None or hxlim[1] is not None:
-                    lo = hxlim[0] if hxlim[0] is not None else float(np.min(values))
-                    hi = hxlim[1] if hxlim[1] is not None else float(np.max(values))
+                if xlo is not None or xhi is not None:
+                    lo = xlo if xlo is not None else float(np.min(values))
+                    hi = xhi if xhi is not None else float(np.max(values))
                     if hi > lo:
                         kw["range"] = (lo, hi)
 
                 ax.hist(values, bins=min(80, max(10, values.size // 3)), **kw)
                 if "range" in kw:
                     ax.set_xlim(*kw["range"])
-                if hlog:
+                if logy:
                     ax.set_yscale("log")
 
                 ax.set_xlabel("ampiezza di picco [ADC]")
-                ax.set_ylabel("eventi" + (" (log)" if hlog else ""))
+                ax.set_ylabel("eventi" + (" (log)" if logy else ""))
                 ax.set_title(f"ch{ch}", fontsize=10)
                 ax.grid(alpha=0.25)
 
@@ -287,6 +290,7 @@ PAGE = """<!DOCTYPE html>
   .ctl label.chk { flex-direction:row; align-items:center; gap:6px; font-size:13px;
                    color:var(--fg); padding-bottom:5px; }
   .ctl label.chk input { width:auto; }
+  .ctl .grp { font-weight:600; font-size:13px; padding-bottom:5px; min-width:46px; }
 </style></head><body>
 <h1>DAQ V1742 — monitor online</h1>
 <div class="sub" id="file">…</div>
@@ -305,13 +309,7 @@ PAGE = """<!DOCTYPE html>
   <button id="reset">Autoscale</button>
   <span class="hint">forme d'onda · campi vuoti = autoscale</span>
 </div>
-<div class="ctl">
-  <label>istogramma x min [ADC]<input id="hxmin" value="__HXMIN__" placeholder="auto"></label>
-  <label>istogramma x max [ADC]<input id="hxmax" value="__HXMAX__" placeholder="auto"></label>
-  <label class="chk"><input type="checkbox" id="hlog" __HLOG__> log y</label>
-  <button id="hreset">Autoscale</button>
-  <span class="hint">istogramma delle ampiezze · i bin si ricalcolano nell'intervallo scelto</span>
-</div>
+<div id="hctl"></div>
 <table id="tab"><thead><tr><th>canale</th><th>baseline</th><th>rms</th>
 <th>ampiezza media</th><th>max</th></tr></thead><tbody></tbody></table>
 <div id="boot" class="err">JavaScript non eseguito: la pagina non puo' aggiornarsi.
@@ -320,8 +318,7 @@ Apri la console del browser per vedere l'errore.</div>
 <script>
 document.getElementById('boot').style.display = 'none';
 const REFRESH = __REFRESH__ * 1000;
-const FIELDS = ['xmin','xmax','ymin','ymax','nev','hxmin','hxmax'];
-const CHECKS = ['hlog'];
+const FIELDS = ['xmin','xmax','ymin','ymax','nev'];
 
 // I limiti scelti sopravvivono a un reload della pagina. localStorage puo'
 // essere inaccessibile (finestra privata, cookie bloccati): mai fatale.
@@ -330,11 +327,50 @@ try {
     const v = localStorage.getItem('daqmon.' + f);
     if (v !== null) document.getElementById(f).value = v;
   }
-  for (const c of CHECKS) {
-    const v = localStorage.getItem('daqmon.' + c);
-    if (v !== null) document.getElementById(c).checked = (v === '1');
-  }
 } catch (e) {}
+
+// I controlli dell'istogramma sono uno per canale e la lista dei canali si
+// conosce solo da stats.json, quindi vengono costruiti al primo giro e
+// ricostruiti solo se i canali cambiano: rifarli a ogni aggiornamento
+// cancellerebbe quello che si sta digitando.
+let builtChannels = null;
+
+function store(k, v) { try { localStorage.setItem('daqmon.' + k, v); } catch (e) {} }
+function recall(k)   { try { return localStorage.getItem('daqmon.' + k); } catch (e) { return null; } }
+
+function buildHistControls(channels) {
+  const key = channels.join(',');
+  if (key === builtChannels) return;
+  builtChannels = key;
+
+  document.getElementById('hctl').innerHTML = channels.map(ch => `
+    <div class="ctl">
+      <span class="grp">ch${ch}</span>
+      <label>istogramma x min [ADC]<input id="hxmin_${ch}" placeholder="auto"></label>
+      <label>istogramma x max [ADC]<input id="hxmax_${ch}" placeholder="auto"></label>
+      <label class="chk"><input type="checkbox" id="hlog_${ch}"> log y</label>
+      <button class="hreset" data-ch="${ch}">Autoscale</button>
+    </div>`).join('');
+
+  for (const ch of channels) {
+    for (const k of ['hxmin_' + ch, 'hxmax_' + ch]) {
+      const v = recall(k);
+      if (v !== null) document.getElementById(k).value = v;
+      document.getElementById(k).addEventListener('change', tick);
+    }
+    const lg = document.getElementById('hlog_' + ch);
+    if (recall('hlog_' + ch) !== null) lg.checked = (recall('hlog_' + ch) === '1');
+    lg.addEventListener('change', tick);
+  }
+
+  document.querySelectorAll('#hctl button.hreset').forEach(b => b.onclick = () => {
+    const ch = b.dataset.ch;
+    document.getElementById('hxmin_' + ch).value = '';
+    document.getElementById('hxmax_' + ch).value = '';
+    document.getElementById('hlog_' + ch).checked = false;
+    tick();
+  });
+}
 
 function params() {
   const p = new URLSearchParams();
@@ -343,10 +379,15 @@ function params() {
     try { localStorage.setItem('daqmon.' + f, v); } catch (e) {}
     if (v !== '') p.set(f === 'nev' ? 'n' : f, v);
   }
-  for (const c of CHECKS) {
-    const on = document.getElementById(c).checked;
-    try { localStorage.setItem('daqmon.' + c, on ? '1' : '0'); } catch (e) {}
-    p.set(c, on ? '1' : '0');
+  if (builtChannels) for (const ch of builtChannels.split(',')) {
+    for (const k of ['hxmin_' + ch, 'hxmax_' + ch]) {
+      const v = document.getElementById(k).value.trim();
+      store(k, v);
+      if (v !== '') p.set(k, v);
+    }
+    const on = document.getElementById('hlog_' + ch).checked;
+    store('hlog_' + ch, on ? '1' : '0');
+    p.set('hlog_' + ch, on ? '1' : '0');
   }
   return p;
 }
@@ -362,8 +403,6 @@ document.getElementById('hreset').onclick = () => {
 };
 for (const f of FIELDS)
   document.getElementById(f).addEventListener('change', tick);
-for (const c of CHECKS)
-  document.getElementById(c).addEventListener('change', tick);
 function show(id, v) {
   document.getElementById(id).textContent = (v === null || v === undefined) ? '-' : v;
 }
@@ -376,6 +415,7 @@ async function tick() {
     document.getElementById('err').textContent    = s.error || '';
     document.getElementById('file').textContent   =
       (s.file || 'nessun file') + (s.sampling ? ' · ' + s.sampling : '');
+    buildHistControls((s.channels || []).map(c => c.ch));
     const tb = document.querySelector('#tab tbody');
     tb.innerHTML = (s.channels||[]).map(c =>
       `<tr><td>ch${c.ch}</td><td>${c.baseline}</td><td>${c.rms}</td>
@@ -444,9 +484,7 @@ def make_handler(monitor, refresh, defaults):
                             .replace("__XMAX__", _fmt(defaults["xmax"]))
                             .replace("__YMIN__", _fmt(defaults["ymin"]))
                             .replace("__YMAX__", _fmt(defaults["ymax"]))
-                            .replace("__HXMIN__", _fmt(defaults["hxmin"]))
-                            .replace("__HXMAX__", _fmt(defaults["hxmax"]))
-                            .replace("__HLOG__", "checked" if defaults["hlog"] else ""))
+)
                 return self._send(200, "text/html; charset=utf-8", page.encode())
 
             # I valori della pagina hanno la precedenza su quelli da riga di comando
@@ -456,9 +494,7 @@ def make_handler(monitor, refresh, defaults):
                     self._num(qs, "ymax", defaults["ymax"]))
             n = int(self._num(qs, "n", defaults["n"]) or defaults["n"])
 
-            hxlim = (self._num(qs, "hxmin", defaults["hxmin"]),
-                     self._num(qs, "hxmax", defaults["hxmax"]))
-            hlog = qs.get("hlog", ["1" if defaults["hlog"] else "0"])[0] == "1"
+
 
             with monitor.lock:
                 monitor.refresh()
@@ -471,9 +507,19 @@ def make_handler(monitor, refresh, defaults):
                          "average.png": "average",
                          "amplitudes.png": "amplitudes"}
                 if route in kinds:
+                    # I limiti dell'istogramma sono per canale: hxmin_8, hlog_9, ...
+                    # I valori da riga di comando fanno da default per tutti.
+                    hset = {}
+                    for ch in (monitor.hdr or {}).get("ChannelList", []):
+                        ch = int(ch)
+                        hset[ch] = (
+                            self._num(qs, f"hxmin_{ch}", defaults["hxmin"]),
+                            self._num(qs, f"hxmax_{ch}", defaults["hxmax"]),
+                            qs.get(f"hlog_{ch}",
+                                   ["1" if defaults["hlog"] else "0"])[0] == "1",
+                        )
                     return self._send(200, "image/png",
-                                      monitor.figure(kinds[route], n, xlim, ylim,
-                                                     hxlim, hlog))
+                                      monitor.figure(kinds[route], n, xlim, ylim, hset))
 
             self._send(404, "text/plain", b"not found")
 

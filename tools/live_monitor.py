@@ -62,6 +62,13 @@ class Monitor:
 
         self.n_events = 0
         self.rate = 0.0
+
+        self.status = None        # live-status.json pubblicato dalla DAQ
+        self.gen = None           # generazione delle soglie gia' vista
+        self.offsets = {}         # offset correnti, per canale
+        self.frozen = {}          # ampiezze prima dell'ultimo cambio di soglia
+        self.frozen_offsets = {}  # offset a cui si riferiscono
+        self._ana = None          # analisi gia' calcolata per questo refresh
         self._last_read = 0.0
         self._prev = None                 # (n_eventi, timestamp)
 
@@ -78,6 +85,15 @@ class Monitor:
     # NOTA: si cercano solo i .h5 non compressi. A run finita il file diventa
     # .h5.gz e non e' piu' monitorabile dal vivo: e' il comportamento voluto,
     # il monitor segue la run in corso.
+
+    def _read_status(self):
+        """live-status.json, scritto dalla DAQ. Assente = nessuna informazione."""
+        path = os.path.join(self.data_dir, "live-status.json")
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return None
 
     def refresh(self, force=False):
         now = time.time()
@@ -111,13 +127,51 @@ class Monitor:
         self.n_events = total
         self.hdr = hdr
         self.data = data          # gia' limitato alla coda da load(last=...)
+        self._ana = None          # ricalcolata sotto, una volta sola
+
+        res = self.analysis()
+        if res is None:
+            return
+        _, _, _, amp, _ = res
+
+        st = self._read_status()
+        if st and st.get("file") not in (None, os.path.basename(path)):
+            st = None                      # stato di un'altra run, non pertinente
+        self.status = st
+
+        if st is None:
+            return
+
+        gen = st.get("generation")
+        changed_at = int(st.get("changed_at_event", 0))
+        channels = [int(c) for c in hdr["ChannelList"]]
+
+        # Indice assoluto di ogni evento della coda, per sapere quali sono stati
+        # acquisiti prima e quali dopo l'ultimo cambio di soglia.
+        first = total - data.shape[0]
+        is_new = (np.arange(first, total) >= changed_at)
+
+        if gen != self.gen:
+            # Congela la distribuzione precedente: senza questo, scorrendo la
+            # coda gli eventi vecchi sparirebbero e il confronto con loro.
+            if (~is_new).any():
+                self.frozen = {ch: amp[~is_new, i].copy()
+                               for i, ch in enumerate(channels)}
+                self.frozen_offsets = dict(self.offsets)
+            self.gen = gen
+
+        self.offsets = {int(c["ch"]): c.get("offset")
+                        for c in st.get("channels", [])}
+        self._is_new = is_new
 
     # -- analisi -------------------------------------------------------
 
     def analysis(self):
-        """(hdr, corr, amp, t_ns) oppure None se non ci sono ancora dati."""
+        """(hdr, base, corr, amp, t_ns) oppure None se non ci sono ancora dati."""
         if self.data is None or self.data.shape[0] == 0:
             return None
+        if self._ana is not None:
+            return self._ana
 
         data = self.data
         n_pre = max(4, int(data.shape[2] * 0.15))
@@ -129,7 +183,24 @@ class Monitor:
 
         dt_ns = float(self.hdr.get("SamplingTime", 1e-9)) * 1e9
         t_ns = np.arange(data.shape[2]) * dt_ns
-        return self.hdr, base, corr, amp, t_ns
+        self._ana = (self.hdr, base, corr, amp, t_ns)
+        return self._ana
+
+    def effective_threshold(self, values, rms):
+        """Ampiezza del piu' piccolo impulso che ha fatto scattare il trigger.
+
+        La soglia impostata e' in conteggi Transparent Mode e non e' confrontabile
+        con queste tracce, che sono in Output Mode e su scala diversa. Il bordo
+        inferiore della distribuzione degli eventi triggerati e' invece la soglia
+        vera *in questa* scala. Si usa un percentile basso anziche' il minimo,
+        che sarebbe troppo sensibile a un singolo evento.
+        """
+        mag = np.abs(values)
+        real = mag[mag > 3 * max(rms, 0.5)]
+        if real.size < 20:
+            return None
+        sign = -1.0 if np.median(values[mag > 3 * max(rms, 0.5)]) < 0 else 1.0
+        return sign * float(np.percentile(real, 5))
 
     def stats(self):
         out = {
@@ -148,13 +219,20 @@ class Monitor:
         n_pre = int(self.data.shape[2] * 0.15)
         out["shown"] = int(self.data.shape[0])
         out["sampling"] = str(hdr.get("SamplingRate", "?"))
+        by_ch = {int(c["ch"]): c for c in (self.status or {}).get("channels", [])}
         for i, ch in enumerate(hdr["ChannelList"]):
+            rms = float(np.std(self.data[:, i, :n_pre]))
+            eff = self.effective_threshold(amp[:, i], rms)
+            info = by_ch.get(int(ch), {})
             out["channels"].append({
                 "ch": int(ch),
                 "baseline": round(float(np.mean(base[:, i])), 1),
-                "rms": round(float(np.std(self.data[:, i, :n_pre])), 2),
+                "rms": round(rms, 2),
                 "amp_mean": round(float(np.mean(amp[:, i])), 1),
                 "amp_max": round(float(np.max(np.abs(amp[:, i]))), 1),
+                "offset": info.get("offset"),
+                "threshold": info.get("threshold"),
+                "eff": None if eff is None else round(eff, 1),
             })
         return out
 
@@ -185,6 +263,16 @@ class Monitor:
                     ax.plot(t_ns, corr[e, i], lw=0.9 if n == 1 else 0.6,
                             alpha=1.0 if n == 1 else 0.5)
                 ax.axhline(0, color="k", lw=0.8, ls=":")
+
+                rms = float(np.std(self.data[:, i, :max(4, int(corr.shape[2] * .15))]))
+                eff = self.effective_threshold(amp[:, i], rms)
+                if eff is not None:
+                    off = self.offsets.get(int(ch))
+                    ax.axhline(eff, color="#d62728", lw=1.1, ls="--",
+                               label=f"soglia efficace {eff:.0f} ADC"
+                                     + (f"  (offset {off})" if off is not None else ""))
+                    ax.legend(fontsize=8, loc="lower right")
+
                 label = ("ultimo evento" if n == 1 else f"ultimi {n} eventi")
                 ax.set_title(f"ch{ch} — {label}", fontsize=10)
                 ax.set_ylabel("ADC − baseline")
@@ -195,7 +283,13 @@ class Monitor:
         elif kind == "average":
             fig, ax = plt.subplots(figsize=(9, 4))
             for i, ch in enumerate(channels):
-                ax.plot(t_ns, corr[:, i].mean(axis=0), lw=1.4, label=f"ch{ch}")
+                line, = ax.plot(t_ns, corr[:, i].mean(axis=0), lw=1.4, label=f"ch{ch}")
+
+                rms = float(np.std(self.data[:, i, :max(4, int(corr.shape[2] * .15))]))
+                eff = self.effective_threshold(amp[:, i], rms)
+                if eff is not None:
+                    ax.axhline(eff, color=line.get_color(), lw=1.0, ls="--", alpha=.7,
+                               label=f"soglia efficace ch{ch} ({eff:.0f})")
             ax.axhline(0, color="k", lw=0.8, ls=":")
             ax.set_xlabel("tempo [ns]")
             ax.set_ylabel("ADC − baseline")
@@ -224,9 +318,30 @@ class Monitor:
                     if hi > lo:
                         kw["range"] = (lo, hi)
 
-                ax.hist(values, bins=min(80, max(10, values.size // 3)), **kw)
-                if "range" in kw:
-                    ax.set_xlim(*kw["range"])
+                old = self.frozen.get(int(ch))
+                is_new = getattr(self, "_is_new", None)
+                cur = values[is_new] if (is_new is not None and old is not None
+                                         and is_new.shape[0] == values.shape[0]) else values
+
+                # I bin devono essere gli stessi per le due distribuzioni,
+                # altrimenti il confronto visivo non significa nulla.
+                if "range" not in kw:
+                    allv = np.concatenate([cur, old]) if old is not None and old.size else cur
+                    kw["range"] = (float(np.min(allv)), float(np.max(allv)))
+                nb = min(80, max(10, max(cur.size, 1) // 3))
+                bins = np.linspace(kw["range"][0], kw["range"][1], nb + 1)
+
+                if old is not None and old.size:
+                    lo = self.frozen_offsets.get(int(ch))
+                    ax.hist(old, bins=bins, color="#888888", alpha=.55,
+                            label=f"prima (offset {lo})" if lo is not None else "prima")
+                cn = self.offsets.get(int(ch))
+                ax.hist(cur, bins=bins, color="#1f77b4", alpha=.85,
+                        label=f"ora (offset {cn})" if cn is not None else "ora")
+                if old is not None and old.size:
+                    ax.legend(fontsize=8)
+
+                ax.set_xlim(*kw["range"])
                 if logy:
                     ax.set_yscale("log")
 
@@ -318,7 +433,8 @@ PAGE = """<!DOCTYPE html>
 </div>
 <div id="hctl"></div>
 <table id="tab"><thead><tr><th>canale</th><th>baseline</th><th>rms</th>
-<th>ampiezza media</th><th>max</th></tr></thead><tbody></tbody></table>
+<th>ampiezza media</th><th>max</th><th>offset</th><th>soglia</th>
+<th>soglia efficace</th></tr></thead><tbody></tbody></table>
 <div id="boot" class="err">JavaScript non eseguito: la pagina non puo' aggiornarsi.
 Apri la console del browser per vedere l'errore.</div>
 <img id="w" alt="forme d'onda"><img id="a" alt="media"><img id="h" alt="ampiezze">
@@ -432,9 +548,12 @@ async function tick() {
       (s.file || 'nessun file') + (s.sampling ? ' · ' + s.sampling : '');
     buildHistControls((s.channels || []).map(c => c.ch));
     const tb = document.querySelector('#tab tbody');
+    const na = v => (v === null || v === undefined) ? '-' : v;
     tb.innerHTML = (s.channels||[]).map(c =>
       `<tr><td>ch${c.ch}</td><td>${c.baseline}</td><td>${c.rms}</td>
-       <td>${c.amp_mean}</td><td>${c.amp_max}</td></tr>`).join('');
+       <td>${c.amp_mean}</td><td>${c.amp_max}</td>
+       <td>${na(c.offset)}</td><td>${na(c.threshold)}</td>
+       <td>${na(c.eff)}</td></tr>`).join('');
     const p = params();
     p.set('t', Date.now());
     for (const [id, name] of [['w','waveforms'],['a','average'],['h','amplitudes']])

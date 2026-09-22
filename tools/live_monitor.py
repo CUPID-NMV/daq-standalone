@@ -187,20 +187,36 @@ class Monitor:
         return self._ana
 
     def effective_threshold(self, values, rms):
-        """Ampiezza del piu' piccolo impulso che ha fatto scattare il trigger.
+        """(soglia efficace, avvertimento).
 
-        La soglia impostata e' in conteggi Transparent Mode e non e' confrontabile
-        con queste tracce, che sono in Output Mode e su scala diversa. Il bordo
-        inferiore della distribuzione degli eventi triggerati e' invece la soglia
-        vera *in questa* scala. Si usa un percentile basso anziche' il minimo,
-        che sarebbe troppo sensibile a un singolo evento.
+        Ampiezza del piu' piccolo impulso che ha fatto scattare il trigger. La
+        soglia impostata e' in conteggi Transparent Mode e non e' confrontabile
+        con queste tracce, che sono in Output Mode e su scala diversa; il bordo
+        inferiore della distribuzione degli eventi triggerati e' invece la
+        soglia vera *in questa* scala. Si usa un percentile basso anziche' il
+        minimo, troppo sensibile a un singolo evento.
+
+        Quando la soglia scende sotto il rumore la stima perde significato: la
+        maggior parte degli eventi non contiene un impulso e l'"ampiezza"
+        diventa la massima escursione del rumore, positiva tanto quanto
+        negativa. In quel caso si restituisce un avvertimento invece di un
+        numero: e' proprio il sintomo che interessa vedere.
         """
-        mag = np.abs(values)
-        real = mag[mag > 3 * max(rms, 0.5)]
-        if real.size < 20:
-            return None
-        sign = -1.0 if np.median(values[mag > 3 * max(rms, 0.5)]) < 0 else 1.0
-        return sign * float(np.percentile(real, 5))
+        cut = 5 * max(rms, 0.5)
+        sel = np.abs(values) > cut
+        if sel.sum() < 20:
+            return None, "troppi pochi impulsi per stimarla"
+
+        frac = sel.sum() / values.size
+        neg  = float(np.mean(values[sel] < 0))
+
+        if frac < 0.30:
+            return None, f"trigger sul rumore: solo {100*frac:.0f}% degli eventi ha un impulso"
+        if 0.25 < neg < 0.75:
+            return None, "trigger sul rumore: segno delle ampiezze incoerente"
+
+        sign = -1.0 if neg > 0.5 else 1.0
+        return sign * float(np.percentile(np.abs(values[sel]), 5)), None
 
     def stats(self):
         out = {
@@ -222,7 +238,7 @@ class Monitor:
         by_ch = {int(c["ch"]): c for c in (self.status or {}).get("channels", [])}
         for i, ch in enumerate(hdr["ChannelList"]):
             rms = float(np.std(self.data[:, i, :n_pre]))
-            eff = self.effective_threshold(amp[:, i], rms)
+            eff, note = self.effective_threshold(amp[:, i], rms)
             info = by_ch.get(int(ch), {})
             out["channels"].append({
                 "ch": int(ch),
@@ -233,6 +249,7 @@ class Monitor:
                 "offset": info.get("offset"),
                 "threshold": info.get("threshold"),
                 "eff": None if eff is None else round(eff, 1),
+                "eff_note": note,
             })
         return out
 
@@ -265,13 +282,19 @@ class Monitor:
                 ax.axhline(0, color="k", lw=0.8, ls=":")
 
                 rms = float(np.std(self.data[:, i, :max(4, int(corr.shape[2] * .15))]))
-                eff = self.effective_threshold(amp[:, i], rms)
+                eff, note = self.effective_threshold(amp[:, i], rms)
+                off = self.offsets.get(int(ch))
                 if eff is not None:
-                    off = self.offsets.get(int(ch))
                     ax.axhline(eff, color="#d62728", lw=1.1, ls="--",
                                label=f"soglia efficace {eff:.0f} ADC"
                                      + (f"  (offset {off})" if off is not None else ""))
                     ax.legend(fontsize=8, loc="lower right")
+                elif note:
+                    # Nessuna riga: disegnarne una qui vorrebbe dire inventarsi
+                    # un valore che i dati non sostengono.
+                    ax.text(0.99, 0.04, note + (f"  (offset {off})" if off is not None else ""),
+                            transform=ax.transAxes, ha="right", va="bottom",
+                            fontsize=8, color="#d62728")
 
                 label = ("ultimo evento" if n == 1 else f"ultimi {n} eventi")
                 ax.set_title(f"ch{ch} — {label}", fontsize=10)
@@ -286,7 +309,7 @@ class Monitor:
                 line, = ax.plot(t_ns, corr[:, i].mean(axis=0), lw=1.4, label=f"ch{ch}")
 
                 rms = float(np.std(self.data[:, i, :max(4, int(corr.shape[2] * .15))]))
-                eff = self.effective_threshold(amp[:, i], rms)
+                eff, _ = self.effective_threshold(amp[:, i], rms)
                 if eff is not None:
                     ax.axhline(eff, color=line.get_color(), lw=1.0, ls="--", alpha=.7,
                                label=f"soglia efficace ch{ch} ({eff:.0f})")
@@ -557,7 +580,7 @@ async function tick() {
       `<tr><td>ch${c.ch}</td><td>${c.baseline}</td><td>${c.rms}</td>
        <td>${c.amp_mean}</td><td>${c.amp_max}</td>
        <td>${na(c.offset)}</td><td>${na(c.threshold)}</td>
-       <td>${na(c.eff)}</td></tr>`).join('');
+       <td>${c.eff_note ? '<span class="err">'+c.eff_note+'</span>' : na(c.eff)}</td></tr>`).join('');
     const p = params();
     p.set('t', Date.now());
     for (const [id, name] of [['w','waveforms'],['a','average'],['h','amplitudes']])

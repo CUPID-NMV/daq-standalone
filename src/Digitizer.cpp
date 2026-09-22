@@ -1783,6 +1783,13 @@ void Digitizer::PrepareOutput() {
             chattr.write(H5::PredType::NATIVE_UINT, fChannelList.data());
         }
 
+        // ConfigureTrigger() gira prima di PrepareOutput(), quindi il primo
+        // stato pubblicato aveva il nome del file vuoto e il monitor lo
+        // scartava credendolo di un'altra run. Ora che fOutputPath esiste, si
+        // ripubblica.
+        if (fSelfTrigger)
+            WriteStatusFile();
+
         // Da qui in poi nessun oggetto nuovo puo' essere creato nel file: SWMR
         // lo vieta. Tutti i gruppi, i dataset e gli attributi sono gia' stati
         // creati sopra.

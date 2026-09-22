@@ -135,8 +135,12 @@ class Monitor:
         _, _, _, amp, _ = res
 
         st = self._read_status()
-        if st and st.get("file") not in (None, os.path.basename(path)):
-            st = None                      # stato di un'altra run, non pertinente
+        # Un nome vuoto o assente significa "non ancora noto", non "altra run":
+        # scartare lo stato lascerebbe in mostra gli offset di una run passata,
+        # che e' l'errore peggiore fra i due.
+        name = (st or {}).get("file") or ""
+        if st and name and name != os.path.basename(path):
+            st = None
         self.status = st
 
         if st is None:

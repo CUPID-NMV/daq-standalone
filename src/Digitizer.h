@@ -144,6 +144,14 @@ private:
     // di inizializzazione); i membri operativi sono piu' sotto, in ---- HDF5 ----
     bool     fLiveMonitoringCfg;
     uint32_t fFlushEveryCfg;
+    std::string fLiveThresholdFileCfg;   // vuoto = <OutputDir>/live-threshold.txt
+
+    // ---- SOGLIE MODIFICABILI A RUN IN CORSO ----
+    std::string fLiveThresholdPath;      // file di comando, riletto se cambia
+    std::string fStatusPath;             // stato pubblicato per il monitor
+    long        fLiveThresholdMtime;     // per accorgersi delle modifiche
+    uint64_t    fThresholdGen;           // incrementa a ogni cambio di soglia
+    uint64_t    fThresholdGenRow;        // evento in cui e' avvenuto il cambio
 
     // ---- UTILITIES ----
     bool CheckAccepted(std::map<uint32_t,uint32_t>& nAccepted);
@@ -160,6 +168,9 @@ private:
     void ClearSelfTrigger(bool verbose = true);
     void ComputeSelfTriggerThresholds();
     void ApplySelfTriggerThresholds();
+    void ApplyChannelThreshold(uint32_t ch, uint32_t thr);
+    void CheckLiveThresholds();
+    void WriteStatusFile();
     void SetTransparentMode(bool enable);
     void DumpSelfTriggerRegisters();
     bool HasGlobalTriggerFirmware() const;

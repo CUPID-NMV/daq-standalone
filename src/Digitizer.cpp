@@ -17,6 +17,7 @@
 #include <iostream>
 #include <algorithm>   // <-- per std::all_of, std::remove_if
 #include <cstdio>      // <-- per std::sscanf
+#include <sys/stat.h>  // <-- per stat() sul file delle soglie live
 
 #include "Digitizer.h"
 #include "Log.h"
@@ -92,7 +93,8 @@ Digitizer::Digitizer()
       fTransparentBaseline(),
       fTransparentRMS(),
       fLiveMonitoringCfg(fConfig.GetEntry<bool>("digitizer","LiveMonitoring",true)),
-      fFlushEveryCfg(fConfig.GetEntry<uint32_t>("digitizer","LiveFlushEvery",10))
+      fFlushEveryCfg(fConfig.GetEntry<uint32_t>("digitizer","LiveFlushEvery",10)),
+      fLiveThresholdFileCfg(fConfig.GetEntry<std::string>("digitizer","LiveThresholdFile",""))
 {
     // I puntatori HDF5 non erano inizializzati: PrepareOutput li assegna, ma
     // CloseOutputFile e AcquireEvents li controllano contro nullptr.
@@ -105,6 +107,14 @@ Digitizer::Digitizer()
     fSkippedEvents  = 0;
     fLiveMonitoring = fLiveMonitoringCfg;
     fFlushEvery     = (fFlushEveryCfg == 0) ? 1 : fFlushEveryCfg;
+
+    fLiveThresholdPath = fLiveThresholdFileCfg.empty()
+                           ? fOutputDir + "/live-threshold.txt"
+                           : fLiveThresholdFileCfg;
+    fStatusPath        = fOutputDir + "/live-status.json";
+    fLiveThresholdMtime = 0;
+    fThresholdGen       = 0;
+    fThresholdGenRow    = 0;
 
     // ===== Read ChannelList dal TOML =====
     std::vector<int64_t> tmpchlist =
@@ -731,23 +741,9 @@ void Digitizer::ApplySelfTriggerThresholds() {
     }
 
     // Soglie: 0x1n80, bits[11:0] = soglia, bits[15:12] = indice canale nel gruppo
-    for (auto ch : fSelfTriggerChannels) {
-        uint32_t group    = ch / channelsPerGroup;
-        uint32_t local_ch = ch % channelsPerGroup;
-        if (group >= hwGroups) continue;
-
-        uint32_t thr  = fSelfTriggerThreshold.count(ch) ? fSelfTriggerThreshold[ch] : 0;
-        uint32_t addr = GroupBaseAddress(group) + REG_GROUP_CH_THRESHOLD;
-        uint32_t val  = ((local_ch & 0xFu) << 12) | (thr & MAX_THRESHOLD_COUNTS);
-
-        CAEN_DGTZ_ErrorCode re = CAEN_DGTZ_WriteRegister(fHandle, addr, val);
-        if (re != CAEN_DGTZ_Success)
-            Log::OutWarning("Cannot write threshold for ch" + std::to_string(ch) +
-                            " at " + IntToHex(addr) + " (code = " + std::to_string(re) + ")");
-        else
-            Log::OutDebug("  → ch" + std::to_string(ch) + ": wrote " + IntToHex(val) +
-                          " at " + IntToHex(addr) + " (threshold = " + std::to_string(thr) + ")");
-    }
+    for (auto ch : fSelfTriggerChannels)
+        ApplyChannelThreshold(ch, fSelfTriggerThreshold.count(ch)
+                                    ? fSelfTriggerThreshold[ch] : 0);
 
     // Maschere di trigger: 0x1nA8 (scritte su TUTTI i gruppi, cosi' i gruppi non
     // usati vengono esplicitamente azzerati)
@@ -761,6 +757,31 @@ void Digitizer::ApplySelfTriggerThresholds() {
             Log::OutDebug("  → group " + std::to_string(group) + ": trigger mask = " +
                           IntToHex(trgMask[group]) + " at " + IntToHex(addr));
     }
+}
+
+// =======================================================================
+//  SELF-TRIGGER: scrittura della soglia di un singolo canale
+// =======================================================================
+void Digitizer::ApplyChannelThreshold(uint32_t ch, uint32_t thr)
+{
+    const uint32_t channelsPerGroup = 8;
+    uint32_t group    = ch / channelsPerGroup;
+    uint32_t local_ch = ch % channelsPerGroup;
+    if (group >= (fNChannels + channelsPerGroup - 1) / channelsPerGroup)
+        return;
+
+    uint32_t addr = GroupBaseAddress(group) + REG_GROUP_CH_THRESHOLD;
+    uint32_t val  = ((local_ch & 0xFu) << 12) | (thr & MAX_THRESHOLD_COUNTS);
+
+    CAEN_DGTZ_ErrorCode re = CAEN_DGTZ_WriteRegister(fHandle, addr, val);
+    if (re != CAEN_DGTZ_Success)
+        Log::OutWarning("Cannot write threshold for ch" + std::to_string(ch) +
+                        " at " + IntToHex(addr) + " (code = " + std::to_string(re) + ")");
+    else
+        Log::OutDebug("  → ch" + std::to_string(ch) + ": wrote " + IntToHex(val) +
+                      " at " + IntToHex(addr) + " (threshold = " + std::to_string(thr) + ")");
+
+    fSelfTriggerThreshold[ch] = thr;
 }
 
 // =======================================================================
@@ -908,6 +929,115 @@ void Digitizer::ConfigureSelfTrigger() {
 }
 
 // =======================================================================
+//  SOGLIE A RUN IN CORSO: rilettura del file di comando
+// =======================================================================
+void Digitizer::CheckLiveThresholds()
+{
+    // Il file contiene una riga per canale: "<canale> <offset>". L'offset e'
+    // riferito alla baseline in Transparent Mode misurata all'avvio, che resta
+    // valida: non serve fermare l'acquisizione ne' rimisurare.
+    struct stat st;
+    if (::stat(fLiveThresholdPath.c_str(), &st) != 0)
+        return;                                  // nessun comando in attesa
+    if (st.st_mtime == fLiveThresholdMtime)
+        return;                                  // gia' applicato
+    fLiveThresholdMtime = st.st_mtime;
+
+    std::ifstream in(fLiveThresholdPath);
+    if (!in) return;
+
+    const bool falling = (fTriggerPolarity == CAEN_DGTZ_TriggerOnFallingEdge);
+    bool changed = false;
+    std::string line;
+
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
+
+        std::istringstream ss(line);
+        long ch = -1, off = -1;
+        if (!(ss >> ch >> off)) continue;
+
+        if (std::find(fSelfTriggerChannels.begin(), fSelfTriggerChannels.end(),
+                      static_cast<uint32_t>(ch)) == fSelfTriggerChannels.end()) {
+            Log::OutWarning("Live threshold: ch" + std::to_string(ch) +
+                            " does not take part in the trigger, ignored.");
+            continue;
+        }
+        if (off < 0 || off > static_cast<long>(MAX_THRESHOLD_COUNTS)) {
+            Log::OutWarning("Live threshold: offset " + std::to_string(off) +
+                            " for ch" + std::to_string(ch) + " out of range, ignored.");
+            continue;
+        }
+
+        uint32_t c = static_cast<uint32_t>(ch);
+        if (fTransparentBaseline.count(c) == 0) {
+            Log::OutWarning("Live threshold: no Transparent Mode baseline for ch" +
+                            std::to_string(c) + ", ignored.");
+            continue;
+        }
+
+        double base = fTransparentBaseline[c];
+        double thr  = falling ? base - off : base + off;
+        thr = std::max(0.0, std::min(thr, static_cast<double>(MAX_THRESHOLD_COUNTS)));
+
+        uint32_t newthr = static_cast<uint32_t>(std::lround(thr));
+        if (fSelfTriggerThreshold.count(c) && fSelfTriggerThreshold[c] == newthr)
+            continue;                            // nessuna variazione effettiva
+
+        fSelfTriggerOffset[c] = static_cast<uint32_t>(off);
+        ApplyChannelThreshold(c, newthr);
+        changed = true;
+
+        Log::OutSummary("→ Live threshold: ch" + std::to_string(c) +
+                        " offset = " + std::to_string(off) +
+                        " → threshold = " + std::to_string(newthr) +
+                        " (event " + std::to_string(fH5Rows) + ")");
+    }
+
+    if (changed) {
+        ++fThresholdGen;
+        fThresholdGenRow = fH5Rows;
+        WriteStatusFile();
+    }
+}
+
+// =======================================================================
+//  SOGLIE A RUN IN CORSO: stato pubblicato per il monitor
+// =======================================================================
+void Digitizer::WriteStatusFile()
+{
+    // Scritto su file temporaneo e rinominato: il monitor legge sempre un file
+    // completo, mai uno a meta'.
+    std::string tmp = fStatusPath + ".tmp";
+    std::ofstream out(tmp);
+    if (!out) return;
+
+    out << "{\n";
+    out << "  \"file\": \"" << std::filesystem::path(fOutputPath).filename().string() << "\",\n";
+    out << "  \"generation\": " << fThresholdGen << ",\n";
+    out << "  \"changed_at_event\": " << fThresholdGenRow << ",\n";
+    out << "  \"polarity\": \""
+        << (fTriggerPolarity == CAEN_DGTZ_TriggerOnFallingEdge ? "falling" : "rising")
+        << "\",\n";
+    out << "  \"channels\": [\n";
+    for (size_t i = 0; i < fSelfTriggerChannels.size(); ++i) {
+        uint32_t ch = fSelfTriggerChannels[i];
+        out << "    {\"ch\": " << ch
+            << ", \"offset\": " << (fSelfTriggerOffset.count(ch) ? fSelfTriggerOffset[ch] : 0)
+            << ", \"threshold\": " << (fSelfTriggerThreshold.count(ch) ? fSelfTriggerThreshold[ch] : 0)
+            << ", \"baseline\": " << (fTransparentBaseline.count(ch) ? fTransparentBaseline[ch] : 0.0)
+            << "}" << (i + 1 < fSelfTriggerChannels.size() ? "," : "") << "\n";
+    }
+    out << "  ]\n}\n";
+    out.close();
+
+    std::error_code ec;
+    std::filesystem::rename(tmp, fStatusPath, ec);
+    if (ec)
+        Log::OutWarning("Cannot publish the status file: " + ec.message());
+}
+
+// =======================================================================
 //  DUMP dei registri di self-trigger (readback)
 // =======================================================================
 void Digitizer::DumpSelfTriggerRegisters() {
@@ -966,6 +1096,19 @@ void Digitizer::ConfigureTrigger() {
                         "the board will only acquire on software triggers.");
 
     DumpSelfTriggerRegisters();
+
+    // Il monitor legge da qui le soglie correnti. Il file di comando eventualmente
+    // rimasto da una run precedente viene ignorato: se ne registra il timestamp
+    // senza applicarlo, cosi' vale solo quello che scrivi da adesso.
+    if (fSelfTrigger) {
+        struct stat st;
+        if (::stat(fLiveThresholdPath.c_str(), &st) == 0)
+            fLiveThresholdMtime = st.st_mtime;
+        WriteStatusFile();
+        Log::OutSummary("→ Live thresholds: write \"<channel> <offset>\" lines into " +
+                        fLiveThresholdPath + " to change them while running.");
+    }
+
     Log::OutSummary("Trigger configuration complete.");
 }
 
@@ -1023,9 +1166,21 @@ void Digitizer::AcquireEvents() {
         }
 
         if (fBufferSize == 0) {
+            if (fSelfTrigger) CheckLiveThresholds();
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             ++retry;
             continue;
+        }
+
+        // Anche con trigger frequenti il file va controllato, ma non a ogni
+        // ciclo: una stat al secondo e' abbastanza reattiva e non pesa.
+        if (fSelfTrigger) {
+            static auto lastcheck = std::chrono::steady_clock::now();
+            auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastcheck).count() > 1000) {
+                lastcheck = now;
+                CheckLiveThresholds();
+            }
         }
 
         uint32_t nEvents = 0;

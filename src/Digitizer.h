@@ -154,8 +154,9 @@ private:
     // ---- DIAGNOSTICA TRANSPARENT MODE ----
     // Acquisisce con trigger software cio' che vede il discriminatore del
     // self-trigger, invece delle forme d'onda ricostruite in Output Mode.
-    bool     fTransparentDump;
-    uint32_t fTransparentDumpEvents;
+    bool        fTransparentDump;
+    uint32_t    fTransparentDumpEvents;
+    std::string fTransparentDumpTrigger;   // "software" oppure "self"
 
     // ---- SOGLIE MODIFICABILI A RUN IN CORSO ----
     std::string fLiveThresholdPath;      // file di comando, riletto se cambia

@@ -197,7 +197,13 @@ class Monitor:
         return self._ana
 
     def effective_threshold(self, values, rms):
-        """(soglia efficace, avvertimento).
+        """(ampiezza minima osservata, avvertimento).
+
+        NON e' la soglia. A parita' di soglia nei registri questo valore varia
+        di un fattore 2 fra run diverse, perche' dipende da quanti impulsi
+        piccoli contiene il campione e dalla fortuna del campionamento a 30 MHz
+        del Transparent Mode, non solo dalla soglia. Serve come riferimento
+        visivo di dove comincia la distribuzione, niente di piu'.
 
         Ampiezza del piu' piccolo impulso che ha fatto scattare il trigger. La
         soglia impostata e' in conteggi Transparent Mode e non e' confrontabile
@@ -300,8 +306,8 @@ class Monitor:
                 off = self.offsets.get(int(ch))
                 if eff is not None:
                     ax.axhline(eff, color="#d62728", lw=1.1, ls="--",
-                               label=f"soglia {eff * self.mv_per_count():.1f} mV"
-                                     f"  ({eff:.0f} ADC)"
+                               label=f"ampiezza minima osservata {eff:.0f} ADC"
+                                     f"  ({eff * self.mv_per_count():.1f} mV)"
                                      + (f"  offset {off}" if off is not None else ""))
                     ax.legend(fontsize=8, loc="lower right")
                 elif note:
@@ -327,7 +333,7 @@ class Monitor:
                 eff, _ = self.effective_threshold(amp[:, i], rms)
                 if eff is not None:
                     ax.axhline(eff, color=line.get_color(), lw=1.0, ls="--", alpha=.7,
-                               label=f"soglia ch{ch}: {eff * self.mv_per_count():.1f} mV")
+                               label=f"amp. minima ch{ch}: {eff:.0f} ADC")
             ax.axhline(0, color="k", lw=0.8, ls=":")
             ax.set_xlabel("tempo [ns]")
             ax.set_ylabel("ADC − baseline")
@@ -476,7 +482,7 @@ PAGE = """<!DOCTYPE html>
 <div id="hctl"></div>
 <table id="tab"><thead><tr><th>canale</th><th>baseline</th><th>rms</th>
 <th>ampiezza media</th><th>max</th><th>offset</th><th>soglia</th>
-<th>soglia [mV]</th><th>soglia [ADC]</th></tr></thead><tbody></tbody></table>
+<th>amp. minima [mV]</th><th>amp. minima [ADC]</th></tr></thead><tbody></tbody></table>
 <div id="boot" class="err">JavaScript non eseguito: la pagina non puo' aggiornarsi.
 Apri la console del browser per vedere l'errore.</div>
 <img id="w" alt="forme d'onda"><img id="a" alt="media"><img id="h" alt="ampiezze">

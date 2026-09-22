@@ -106,7 +106,8 @@ Digitizer::Digitizer()
       fFlushEveryCfg(fConfig.GetEntry<uint32_t>("digitizer","LiveFlushEvery",10)),
       fLiveThresholdFileCfg(fConfig.GetEntry<std::string>("digitizer","LiveThresholdFile","")),
       fTransparentDump(fConfig.GetEntry<bool>("digitizer","TransparentDump",false)),
-      fTransparentDumpEvents(fConfig.GetEntry<uint32_t>("digitizer","TransparentDumpEvents",200))
+      fTransparentDumpEvents(fConfig.GetEntry<uint32_t>("digitizer","TransparentDumpEvents",200)),
+      fTransparentDumpTrigger(fConfig.GetEntry<std::string>("digitizer","TransparentDumpTrigger","software"))
 {
     // I puntatori HDF5 non erano inizializzati: PrepareOutput li assegna, ma
     // CloseOutputFile e AcquireEvents li controllano contro nullptr.
@@ -162,6 +163,13 @@ Digitizer::Digitizer()
     else if (format == "HDF5")  fOutputFormat = kHDF5;
     else {
         Log::OutError("Unknown output format: " + format);
+        exit(1);
+    }
+
+    if (fTransparentDump &&
+        fTransparentDumpTrigger != "software" && fTransparentDumpTrigger != "self") {
+        Log::OutError("Unknown TransparentDumpTrigger: '" + fTransparentDumpTrigger +
+                      "' (valid: \"software\", \"self\")");
         exit(1);
     }
 
@@ -1430,6 +1438,20 @@ void Digitizer::AcquireTransparent()
         Log::OutWarning("→ Cannot disable DRS4 corrections: the values may be altered "
                         "with respect to what the comparator sees.");
 
+    // Con "self" il board triggera sui propri ingressi mentre il DRS4 e' in
+    // Transparent Mode: le tracce registrate sono quelle su cui lavora il
+    // comparatore, con dentro l'impulso che ha fatto scattare il trigger. E'
+    // l'unico modo di leggere l'ampiezza degli impulsi nel dominio della soglia.
+    const bool selftrig = (fTransparentDumpTrigger == "self");
+    if (selftrig && !fSelfTrigger) {
+        Log::OutError("TransparentDumpTrigger = \"self\" requires SelfTrigger = true.");
+        SetTransparentMode(false);
+        return;
+    }
+    Log::OutSummary(std::string("→ Trigger: ") +
+                    (selftrig ? "SELF (impulsi veri, come li vede il comparatore)"
+                              : "software (solo piedistallo e rumore)"));
+
     SetTransparentMode(true);
 
     CAEN_DGTZ_ErrorCode re = CAEN_DGTZ_SWStartAcquisition(fHandle);
@@ -1442,16 +1464,26 @@ void Digitizer::AcquireTransparent()
     fAcqRunning = true;
 
     uint32_t written = 0, skipped = 0;
+    int idle = 0;
+    const int maxidle = 600;            // ~60 s senza trigger e si rinuncia
 
-    for (uint32_t n = 0; n < fTransparentDumpEvents; ++n) {
+    while (written < fTransparentDumpEvents) {
 
-        if (CAEN_DGTZ_SendSWtrigger(fHandle) != CAEN_DGTZ_Success) break;
+        if (!selftrig && CAEN_DGTZ_SendSWtrigger(fHandle) != CAEN_DGTZ_Success) break;
 
         fBufferSize = 0;
         if (CAEN_DGTZ_ReadData(fHandle, CAEN_DGTZ_SLAVE_TERMINATED_READOUT_MBLT,
                                fBuffer, &fBufferSize) != CAEN_DGTZ_Success)
             break;
-        if (fBufferSize == 0) continue;
+        if (fBufferSize == 0) {
+            if (selftrig && ++idle > maxidle) {
+                Log::OutWarning("No self-trigger for 60 s: giving up.");
+                break;
+            }
+            if (selftrig) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
+        }
+        idle = 0;
 
         uint32_t nEvents = 0;
         if (CAEN_DGTZ_GetNumEvents(fHandle, fBuffer, fBufferSize, &nEvents)
@@ -1503,7 +1535,8 @@ void Digitizer::AcquireTransparent()
                   << "/" << fTransparentDumpEvents << std::flush;
 
         // Trigger software ravvicinati campionerebbero sempre la stessa fase
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        if (!selftrig)
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
 
     std::cout << std::endl;

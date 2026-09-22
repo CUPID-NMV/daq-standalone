@@ -132,7 +132,7 @@ class Monitor:
         res = self.analysis()
         if res is None:
             return
-        _, _, _, amp, _ = res
+        _, _, _, amp, _, _ = res
 
         st = self._read_status()
         # Un nome vuoto o assente significa "non ancora noto", non "altra run":
@@ -232,7 +232,7 @@ class Monitor:
         if res is None:
             return out
 
-        hdr, base, corr, amp, _ = res
+        hdr, base, corr, amp, _, noise = res
         out["shown"] = int(self.data.shape[0])
         out["sampling"] = str(hdr.get("SamplingRate", "?"))
         by_ch = {int(c["ch"]): c for c in (self.status or {}).get("channels", [])}

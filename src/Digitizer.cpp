@@ -711,9 +711,22 @@ void Digitizer::ComputeSelfTriggerThresholds() {
     // indicato da TriggerPolarity.
     Log::OutSummary("Measuring Transparent Mode baseline for self-trigger thresholds...");
 
+    // Le tabelle di correzione DRS4 sono calibrate sull'Output Mode. Applicarle
+    // ai dati in Transparent Mode lascia il piedistallo corretto ma gonfia
+    // l'RMS di circa un fattore 40 (0.7 conteggi diventano ~28), e quell'RMS e'
+    // proprio il numero che si guarda per scegliere la soglia.
+    bool corr_off = (CAEN_DGTZ_DisableDRS4Correction(fHandle) == CAEN_DGTZ_Success);
+    if (!corr_off)
+        Log::OutWarning("Cannot disable DRS4 corrections: the measured RMS will be "
+                        "overestimated.");
+
     SetTransparentMode(true);
     bool ok = MeasureBaseline(fTransparentBaseline, fTransparentRMS, 10, "transparent");
     SetTransparentMode(false);
+
+    if (corr_off && CAEN_DGTZ_EnableDRS4Correction(fHandle) != CAEN_DGTZ_Success)
+        Log::OutWarning("Cannot re-enable DRS4 corrections: the acquired waveforms "
+                        "will not be corrected.");
 
     if (!ok) {
         Log::OutError("Transparent Mode baseline measurement failed: "

@@ -53,7 +53,12 @@ class Monitor:
     def mv_per_count(self):
         return 1000.0 * self.vpp / 4096.0
 
-    def __init__(self, data_dir, path=None, max_events=200, min_interval=2.0,
+    # Il primo percentile su poche centinaia di eventi e' di fatto il secondo
+    # valore piu' piccolo e fluttua di +-8 conteggi fra un aggiornamento e
+    # l'altro. Serve qualche migliaio di eventi perche' converga.
+    MIN_EVENTS_FOR_THRESHOLD = 1000
+
+    def __init__(self, data_dir, path=None, max_events=2000, min_interval=2.0,
                  vpp=1.0):
         self.data_dir = data_dir
         self.fixed_path = path
@@ -209,8 +214,9 @@ class Monitor:
         """
         nz  = max(rms, 0.5)
         sel = np.abs(values) > 5 * nz
-        if sel.sum() < 20:
-            return None, "troppi pochi impulsi per stimarla"
+        if sel.sum() < self.MIN_EVENTS_FOR_THRESHOLD:
+            return None, (f"statistica insufficiente: {sel.sum()} eventi con impulso, "
+                          f"ne servono {self.MIN_EVENTS_FOR_THRESHOLD}")
 
         # In modo "paired" il trigger di un canale fa acquisire anche l'altro,
         # quindi molti eventi senza impulso sono del tutto normali e non
@@ -726,8 +732,9 @@ def main():
                     help="limite superiore dell'istogramma delle ampiezze [ADC]")
     ap.add_argument("--hlog", action="store_true",
                     help="asse y logaritmico nell'istogramma delle ampiezze")
-    ap.add_argument("-m", "--max-events", type=int, default=200,
-                    help="eventi piu' recenti usati per le statistiche (default 200)")
+    ap.add_argument("-m", "--max-events", type=int, default=2000,
+                    help="eventi piu' recenti usati per le statistiche (default 2000; "
+                         "sotto il migliaio la stima della soglia non e' stabile)")
     ap.add_argument("--vpp", type=float, default=1.0,
                     help="range di ingresso del digitizer in Vpp (default 1.0; "
                          "2.0 per la versione VPERS1742)")

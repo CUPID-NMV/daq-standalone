@@ -25,7 +25,8 @@ import numpy as np
 import h5py
 
 
-__all__ = ["load", "read_header", "open_file", "DaqFileError"]
+__all__ = ["load", "read_header", "open_file", "DaqFileError",
+           "baseline_amplitude"]
 
 
 class DaqFileError(RuntimeError):
@@ -179,3 +180,32 @@ def load(path, max_events=None, live=False, last=None):
     hdr["NEventsInFile"] = int(total)
 
     return hdr, flat.reshape(n_ev, n_ch, n_samp)
+
+
+# ----------------------------------------------------------------------
+#  Analisi di base, condivisa fra gli strumenti
+# ----------------------------------------------------------------------
+
+def baseline_amplitude(data):
+    """(baseline, corr, amp, noise) per un array (n_eventi, n_canali, n_campioni).
+
+    Il piedistallo e' la mediana dell'INTERA traccia, non del tratto iniziale:
+    gli impulsi occupano poche decine di campioni su oltre mille, quindi non la
+    spostano, e la stima resta valida anche con PostTriggerSize basso, quando la
+    finestra pre-impulso e' troppo corta per contenere solo baseline. Con
+    PostTriggerSize = 10 a 2.5 GS/s l'impulso cade a ~50 ns, cioe' dentro il
+    primo 15% della traccia: stimando li' il piedistallo si ottiene un rumore
+    gonfiato di un fattore 4 e ampiezze sottostimate.
+
+    Il rumore si stima con la MAD riscalata, che per la stessa ragione e'
+    insensibile agli impulsi.
+    """
+    base = np.median(data, axis=2)
+    corr = data - base[:, :, None]
+    noise = np.median(np.abs(corr), axis=2) * 1.4826
+
+    hi = corr.max(axis=2)
+    lo = corr.min(axis=2)
+    amp = np.where(np.abs(lo) > np.abs(hi), lo, hi)
+
+    return base, corr, amp, noise

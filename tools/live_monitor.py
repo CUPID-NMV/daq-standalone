@@ -328,7 +328,11 @@ class Monitor:
                 if "range" not in kw:
                     allv = np.concatenate([cur, old]) if old is not None and old.size else cur
                     kw["range"] = (float(np.min(allv)), float(np.max(allv)))
-                nb = min(80, max(10, max(cur.size, 1) // 3))
+                # Il numero di bin va sul campione complessivo: subito dopo un
+                # cambio di soglia gli eventi nuovi sono pochi e l'istogramma
+                # risulterebbe grossolano anche per la parte congelata.
+                ntot = cur.size + (old.size if old is not None else 0)
+                nb = min(80, max(20, ntot // 8))
                 bins = np.linspace(kw["range"][0], kw["range"][1], nb + 1)
 
                 if old is not None and old.size:

@@ -86,6 +86,9 @@ private:
     double fIntegralThreshold;
 
     // ---- BASELINE ----
+    // Misurata in Output Mode all'avvio e stampata nel log come diagnostica
+    // degli ingressi. Non viene sottratta alle forme d'onda salvate: l'analisi
+    // ricava il piedistallo evento per evento.
     std::map<uint32_t,double> fBaselineMean;
 
     // ---- BUFFERS ----

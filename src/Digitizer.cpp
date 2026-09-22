@@ -271,6 +271,11 @@ Digitizer::Digitizer()
         }
     }
 
+    if (fSaveRaw)
+        Log::OutWarning("SaveRaw = true duplicates identical data: the waveforms in "
+                        "/events are already stored uncorrected, so /events_raw only "
+                        "doubles the file size.");
+
     if (fSelfTrigger) {
         Log::OutSummary("→ Self-trigger ENABLED (mode = " + fSelfTriggerModeStr +
                         ", threshold = " + fSelfTriggerThresholdMode + ")");
@@ -1313,14 +1318,14 @@ void Digitizer::AcquireEvents() {
                     continue;
                 }
 
-                double baseline = fBaselineMean.count(ch) ? fBaselineMean[ch] : 0.0;
-
+                // Le forme d'onda si salvano GREZZE, senza sottrarre la
+                // baseline. L'analisi la ricava evento per evento dalla
+                // porzione pre-impulso, cosa piu' accurata di un unico valore
+                // misurato all'avvio, e cosi' il dato originale resta intatto.
                 uint32_t usable = (nsamples > fTailCut) ? (nsamples - fTailCut) : 0;
 
                 for (uint32_t i = 0; i < usable; ++i) {
- //                    float corrected = waveform[i] - baseline;
-                    float corrected = waveform[i];
-                    allSamplesCorr.push_back(static_cast<int16_t>(corrected));
+                    allSamplesCorr.push_back(static_cast<int16_t>(waveform[i]));
 
                     if (fSaveRaw)
                         allSamplesRaw.push_back(static_cast<uint16_t>(waveform[i]));

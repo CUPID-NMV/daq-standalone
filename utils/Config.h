@@ -4,6 +4,7 @@
 #include <string>
 #include <iostream>
 #include <fstream>
+#include <optional>
 
 #include "Log.h"
 #include "toml.hpp"
@@ -191,6 +192,29 @@ public:
 	return value;
     }
 
+    // Legge un elemento di una lista del TOML.
+    //
+    // get_as<T>() richiede che il tipo del nodo coincida esattamente e
+    // restituisce nullptr altrimenti: dereferenziarlo, come si faceva prima,
+    // significa che un semplice [8.0, 9] al posto di [8, 9] fa crashare il
+    // programma senza dire niente. value<T>() invece converte fra interi e
+    // decimali quando la conversione e' lecita, e quando non lo e' si ottiene
+    // un messaggio comprensibile invece di un segfault.
+    template <typename T>
+    T GetArrayElement( toml::array* arr, size_t i, const std::string& where )
+    {
+	auto node = arr->get(i);
+	std::optional<T> v = node ? node->value<T>() : std::nullopt;
+	if( !v )
+	    {
+		Log::OutError( "Option " + where + ": element " + std::to_string(i) +
+			       " has an unexpected type (check integers, decimals and"
+			       " quotes). Abort." );
+		exit(1);
+	    }
+	return *v;
+    }
+
     template <typename T>
     void CheckDefault( std::string category,
 		       std::string key,
@@ -219,7 +243,7 @@ public:
 	if( arr != nullptr )
 	    {
 		for( size_t i=0; i<arr->size(); i++ )
-		    value.emplace_back( static_cast<T>( *(arr->get_as<T>(i))) );
+		    value.emplace_back( GetArrayElement<T>( arr, i, category + "." + key ) );
 		if( arr->size() < size )
 		    {
 			Log::OutDebug( "[" + category + "][" + key + "]: Defaulting last " +
@@ -269,7 +293,8 @@ public:
 	if( arr != nullptr )
 	    {
 		for( size_t i=0; i<arr->size(); i++ )
-		    value.emplace_back( static_cast<T>( *(arr->get_as<T>(i))) );
+		    value.emplace_back( GetArrayElement<T>( arr, i,
+							    category + "." + subcategory + "." + key ) );
 		if( arr->size() < size )
 		    {
 			Log::OutDebug( "[" + category + "][" + subcategory + "][" + key + "]: Defaulting last " +
@@ -327,7 +352,7 @@ public:
 		T last;
 		for( size_t i=0; i<arr->size(); i++ )
 		    {
-			last = static_cast<T>( *(arr->get_as<T>(i)));
+			last = GetArrayElement<T>( arr, i, category + "." + key );
 			value[channels[i]] = last;
 		    }
 		
@@ -390,7 +415,7 @@ public:
 		T last;
 		for( size_t i=0; i<arr->size(); i++ )
 		    {
-			last = static_cast<T>( *(arr->get_as<T>(i)));
+			last = GetArrayElement<T>( arr, i, category + "." + key );
 			value[channels[i]] = last;
 		    }
 		

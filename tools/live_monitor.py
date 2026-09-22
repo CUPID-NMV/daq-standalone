@@ -160,7 +160,8 @@ class Monitor:
 
     # -- grafici -------------------------------------------------------
 
-    def figure(self, kind, n_show=1, xlim=(None, None), ylim=(None, None)):
+    def figure(self, kind, n_show=1, xlim=(None, None), ylim=(None, None),
+               hxlim=(None, None), hlog=False):
         res = self.analysis()
         if res is None:
             return self._placeholder()
@@ -208,9 +209,26 @@ class Monitor:
                                      squeeze=False)
             for i, ch in enumerate(channels):
                 ax = axes[0][i]
-                ax.hist(amp[:, i], bins=min(50, max(10, amp.shape[0] // 3)))
+                values = amp[:, i]
+
+                # Con un intervallo esplicito i bin vanno calcolati dentro quello,
+                # altrimenti si vedrebbe solo una fetta di un istogramma costruito
+                # su tutto il range e la risoluzione sarebbe sprecata.
+                kw = {}
+                if hxlim[0] is not None or hxlim[1] is not None:
+                    lo = hxlim[0] if hxlim[0] is not None else float(np.min(values))
+                    hi = hxlim[1] if hxlim[1] is not None else float(np.max(values))
+                    if hi > lo:
+                        kw["range"] = (lo, hi)
+
+                ax.hist(values, bins=min(80, max(10, values.size // 3)), **kw)
+                if "range" in kw:
+                    ax.set_xlim(*kw["range"])
+                if hlog:
+                    ax.set_yscale("log")
+
                 ax.set_xlabel("ampiezza di picco [ADC]")
-                ax.set_ylabel("eventi")
+                ax.set_ylabel("eventi" + (" (log)" if hlog else ""))
                 ax.set_title(f"ch{ch}", fontsize=10)
                 ax.grid(alpha=0.25)
 
@@ -266,6 +284,9 @@ PAGE = """<!DOCTYPE html>
   .ctl button { padding:6px 14px; font:13px inherit; border-radius:5px; cursor:pointer;
                 border:1px solid var(--line); background:var(--bg); color:var(--fg); }
   .ctl .hint { color:var(--mut); font-size:12px; }
+  .ctl label.chk { flex-direction:row; align-items:center; gap:6px; font-size:13px;
+                   color:var(--fg); padding-bottom:5px; }
+  .ctl label.chk input { width:auto; }
 </style></head><body>
 <h1>DAQ V1742 — monitor online</h1>
 <div class="sub" id="file">…</div>
@@ -282,7 +303,14 @@ PAGE = """<!DOCTYPE html>
   <label>y max [ADC]<input id="ymax" value="__YMAX__" placeholder="auto"></label>
   <label>eventi<input id="nev" value="__NEVENTS__" style="width:60px"></label>
   <button id="reset">Autoscale</button>
-  <span class="hint">campi vuoti = autoscale · si applica al giro successivo</span>
+  <span class="hint">forme d'onda · campi vuoti = autoscale</span>
+</div>
+<div class="ctl">
+  <label>istogramma x min [ADC]<input id="hxmin" value="__HXMIN__" placeholder="auto"></label>
+  <label>istogramma x max [ADC]<input id="hxmax" value="__HXMAX__" placeholder="auto"></label>
+  <label class="chk"><input type="checkbox" id="hlog" __HLOG__> log y</label>
+  <button id="hreset">Autoscale</button>
+  <span class="hint">istogramma delle ampiezze · i bin si ricalcolano nell'intervallo scelto</span>
 </div>
 <table id="tab"><thead><tr><th>canale</th><th>baseline</th><th>rms</th>
 <th>ampiezza media</th><th>max</th></tr></thead><tbody></tbody></table>
@@ -292,7 +320,8 @@ Apri la console del browser per vedere l'errore.</div>
 <script>
 document.getElementById('boot').style.display = 'none';
 const REFRESH = __REFRESH__ * 1000;
-const FIELDS = ['xmin','xmax','ymin','ymax','nev'];
+const FIELDS = ['xmin','xmax','ymin','ymax','nev','hxmin','hxmax'];
+const CHECKS = ['hlog'];
 
 // I limiti scelti sopravvivono a un reload della pagina. localStorage puo'
 // essere inaccessibile (finestra privata, cookie bloccati): mai fatale.
@@ -300,6 +329,10 @@ try {
   for (const f of FIELDS) {
     const v = localStorage.getItem('daqmon.' + f);
     if (v !== null) document.getElementById(f).value = v;
+  }
+  for (const c of CHECKS) {
+    const v = localStorage.getItem('daqmon.' + c);
+    if (v !== null) document.getElementById(c).checked = (v === '1');
   }
 } catch (e) {}
 
@@ -310,6 +343,11 @@ function params() {
     try { localStorage.setItem('daqmon.' + f, v); } catch (e) {}
     if (v !== '') p.set(f === 'nev' ? 'n' : f, v);
   }
+  for (const c of CHECKS) {
+    const on = document.getElementById(c).checked;
+    try { localStorage.setItem('daqmon.' + c, on ? '1' : '0'); } catch (e) {}
+    p.set(c, on ? '1' : '0');
+  }
   return p;
 }
 
@@ -317,8 +355,15 @@ document.getElementById('reset').onclick = () => {
   for (const f of ['xmin','xmax','ymin','ymax']) document.getElementById(f).value = '';
   tick();
 };
+document.getElementById('hreset').onclick = () => {
+  for (const f of ['hxmin','hxmax']) document.getElementById(f).value = '';
+  document.getElementById('hlog').checked = false;
+  tick();
+};
 for (const f of FIELDS)
   document.getElementById(f).addEventListener('change', tick);
+for (const c of CHECKS)
+  document.getElementById(c).addEventListener('change', tick);
 function show(id, v) {
   document.getElementById(id).textContent = (v === null || v === undefined) ? '-' : v;
 }
@@ -398,7 +443,10 @@ def make_handler(monitor, refresh, defaults):
                             .replace("__XMIN__", _fmt(defaults["xmin"]))
                             .replace("__XMAX__", _fmt(defaults["xmax"]))
                             .replace("__YMIN__", _fmt(defaults["ymin"]))
-                            .replace("__YMAX__", _fmt(defaults["ymax"])))
+                            .replace("__YMAX__", _fmt(defaults["ymax"]))
+                            .replace("__HXMIN__", _fmt(defaults["hxmin"]))
+                            .replace("__HXMAX__", _fmt(defaults["hxmax"]))
+                            .replace("__HLOG__", "checked" if defaults["hlog"] else ""))
                 return self._send(200, "text/html; charset=utf-8", page.encode())
 
             # I valori della pagina hanno la precedenza su quelli da riga di comando
@@ -407,6 +455,10 @@ def make_handler(monitor, refresh, defaults):
             ylim = (self._num(qs, "ymin", defaults["ymin"]),
                     self._num(qs, "ymax", defaults["ymax"]))
             n = int(self._num(qs, "n", defaults["n"]) or defaults["n"])
+
+            hxlim = (self._num(qs, "hxmin", defaults["hxmin"]),
+                     self._num(qs, "hxmax", defaults["hxmax"]))
+            hlog = qs.get("hlog", ["1" if defaults["hlog"] else "0"])[0] == "1"
 
             with monitor.lock:
                 monitor.refresh()
@@ -420,7 +472,8 @@ def make_handler(monitor, refresh, defaults):
                          "amplitudes.png": "amplitudes"}
                 if route in kinds:
                     return self._send(200, "image/png",
-                                      monitor.figure(kinds[route], n, xlim, ylim))
+                                      monitor.figure(kinds[route], n, xlim, ylim,
+                                                     hxlim, hlog))
 
             self._send(404, "text/plain", b"not found")
 
@@ -440,6 +493,12 @@ def main():
     ap.add_argument("--xmax", type=float, default=None, help="limite superiore asse tempi [ns]")
     ap.add_argument("--ymin", type=float, default=None, help="limite inferiore asse ampiezze [ADC]")
     ap.add_argument("--ymax", type=float, default=None, help="limite superiore asse ampiezze [ADC]")
+    ap.add_argument("--hxmin", type=float, default=None,
+                    help="limite inferiore dell'istogramma delle ampiezze [ADC]")
+    ap.add_argument("--hxmax", type=float, default=None,
+                    help="limite superiore dell'istogramma delle ampiezze [ADC]")
+    ap.add_argument("--hlog", action="store_true",
+                    help="asse y logaritmico nell'istogramma delle ampiezze")
     ap.add_argument("-m", "--max-events", type=int, default=200,
                     help="eventi piu' recenti usati per le statistiche (default 200)")
     ap.add_argument("-r", "--refresh", type=float, default=5,
@@ -464,7 +523,8 @@ def main():
     monitor = Monitor(data_dir, args.file, args.max_events,
                       min_interval=max(1.0, args.refresh / 2))
     defaults = {"n": args.nevents, "xmin": args.xmin, "xmax": args.xmax,
-                "ymin": args.ymin, "ymax": args.ymax}
+                "ymin": args.ymin, "ymax": args.ymax,
+                "hxmin": args.hxmin, "hxmax": args.hxmax, "hlog": args.hlog}
 
     try:
         server = ThreadingHTTPServer(("127.0.0.1", args.port),

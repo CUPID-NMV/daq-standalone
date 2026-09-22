@@ -33,7 +33,7 @@ matplotlib.use("Agg")          # nessun display: si generano solo PNG
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from daqio import load, DaqFileError
+from daqio import load, baseline_amplitude, DaqFileError
 
 
 # ----------------------------------------------------------------------
@@ -177,17 +177,11 @@ class Monitor:
         if self._ana is not None:
             return self._ana
 
-        data = self.data
-        n_pre = max(4, int(data.shape[2] * 0.15))
-        base = np.median(data[:, :, :n_pre], axis=2)
-        corr = data - base[:, :, None]
-
-        imax, imin = np.max(corr, axis=2), np.min(corr, axis=2)
-        amp = np.where(np.abs(imin) > np.abs(imax), imin, imax)
+        base, corr, amp, noise = baseline_amplitude(self.data)
 
         dt_ns = float(self.hdr.get("SamplingTime", 1e-9)) * 1e9
-        t_ns = np.arange(data.shape[2]) * dt_ns
-        self._ana = (self.hdr, base, corr, amp, t_ns)
+        t_ns = np.arange(self.data.shape[2]) * dt_ns
+        self._ana = (self.hdr, base, corr, amp, t_ns, noise)
         return self._ana
 
     def effective_threshold(self, values, rms):
@@ -206,21 +200,24 @@ class Monitor:
         negativa. In quel caso si restituisce un avvertimento invece di un
         numero: e' proprio il sintomo che interessa vedere.
         """
-        cut = 5 * max(rms, 0.5)
-        sel = np.abs(values) > cut
+        nz  = max(rms, 0.5)
+        sel = np.abs(values) > 5 * nz
         if sel.sum() < 20:
             return None, "troppi pochi impulsi per stimarla"
 
-        frac = sel.sum() / values.size
-        neg  = float(np.mean(values[sel] < 0))
-
-        if frac < 0.30:
-            return None, f"trigger sul rumore: solo {100*frac:.0f}% degli eventi ha un impulso"
+        # In modo "paired" il trigger di un canale fa acquisire anche l'altro,
+        # quindi molti eventi senza impulso sono del tutto normali e non
+        # indicano affatto che si stia triggerando sul rumore.
+        neg = float(np.mean(values[sel] < 0))
         if 0.25 < neg < 0.75:
             return None, "trigger sul rumore: segno delle ampiezze incoerente"
 
+        edge = float(np.percentile(np.abs(values[sel]), 1))
+        if edge < 6 * nz:
+            return None, "soglia dentro il rumore: le due popolazioni si confondono"
+
         sign = -1.0 if neg > 0.5 else 1.0
-        return sign * float(np.percentile(np.abs(values[sel]), 5)), None
+        return sign * edge, None
 
     def stats(self):
         out = {
@@ -236,12 +233,11 @@ class Monitor:
             return out
 
         hdr, base, corr, amp, _ = res
-        n_pre = int(self.data.shape[2] * 0.15)
         out["shown"] = int(self.data.shape[0])
         out["sampling"] = str(hdr.get("SamplingRate", "?"))
         by_ch = {int(c["ch"]): c for c in (self.status or {}).get("channels", [])}
         for i, ch in enumerate(hdr["ChannelList"]):
-            rms = float(np.std(self.data[:, i, :n_pre]))
+            rms = float(np.median(noise[:, i]))
             eff, note = self.effective_threshold(amp[:, i], rms)
             info = by_ch.get(int(ch), {})
             out["channels"].append({
@@ -264,7 +260,7 @@ class Monitor:
         res = self.analysis()
         if res is None:
             return self._placeholder()
-        hdr, _, corr, amp, t_ns = res
+        hdr, _, corr, amp, t_ns, noise = res
         channels = hdr["ChannelList"]
 
         def apply_limits(ax):
@@ -285,12 +281,12 @@ class Monitor:
                             alpha=1.0 if n == 1 else 0.5)
                 ax.axhline(0, color="k", lw=0.8, ls=":")
 
-                rms = float(np.std(self.data[:, i, :max(4, int(corr.shape[2] * .15))]))
+                rms = float(np.median(noise[:, i]))
                 eff, note = self.effective_threshold(amp[:, i], rms)
                 off = self.offsets.get(int(ch))
                 if eff is not None:
                     ax.axhline(eff, color="#d62728", lw=1.1, ls="--",
-                               label=f"soglia efficace {eff:.0f} ADC"
+                               label=f"bordo del turn-on {eff:.0f} ADC"
                                      + (f"  (offset {off})" if off is not None else ""))
                     ax.legend(fontsize=8, loc="lower right")
                 elif note:
@@ -312,11 +308,11 @@ class Monitor:
             for i, ch in enumerate(channels):
                 line, = ax.plot(t_ns, corr[:, i].mean(axis=0), lw=1.4, label=f"ch{ch}")
 
-                rms = float(np.std(self.data[:, i, :max(4, int(corr.shape[2] * .15))]))
+                rms = float(np.median(noise[:, i]))
                 eff, _ = self.effective_threshold(amp[:, i], rms)
                 if eff is not None:
                     ax.axhline(eff, color=line.get_color(), lw=1.0, ls="--", alpha=.7,
-                               label=f"soglia efficace ch{ch} ({eff:.0f})")
+                               label=f"bordo turn-on ch{ch} ({eff:.0f})")
             ax.axhline(0, color="k", lw=0.8, ls=":")
             ax.set_xlabel("tempo [ns]")
             ax.set_ylabel("ADC − baseline")
@@ -465,7 +461,7 @@ PAGE = """<!DOCTYPE html>
 <div id="hctl"></div>
 <table id="tab"><thead><tr><th>canale</th><th>baseline</th><th>rms</th>
 <th>ampiezza media</th><th>max</th><th>offset</th><th>soglia</th>
-<th>soglia efficace</th></tr></thead><tbody></tbody></table>
+<th>bordo turn-on</th></tr></thead><tbody></tbody></table>
 <div id="boot" class="err">JavaScript non eseguito: la pagina non puo' aggiornarsi.
 Apri la console del browser per vedere l'errore.</div>
 <img id="w" alt="forme d'onda"><img id="a" alt="media"><img id="h" alt="ampiezze">

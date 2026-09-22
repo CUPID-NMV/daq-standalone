@@ -32,7 +32,7 @@ if not os.environ.get("DISPLAY"):
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from daqio import load, DaqFileError
+from daqio import load, baseline_amplitude, DaqFileError
 
 
 # ----------------------------------------------------------------------
@@ -52,26 +52,17 @@ def find_latest(data_dir):
 #  Analisi
 # ----------------------------------------------------------------------
 
-def baseline_and_amplitude(data, pre_frac=0.15):
-    """Baseline pre-impulso e ampiezza di picco, per evento e canale.
+def baseline_and_amplitude(data, pre_frac=None):
+    """Piedistallo, tracce corrette, ampiezze e rumore robusto.
 
-    La baseline e' la mediana della porzione iniziale della traccia (robusta
-    rispetto a un eventuale impulso). L'ampiezza e' l'escursione massima
-    rispetto alla baseline, con il segno del segnale.
+    Delega a daqio.baseline_amplitude, cosi' monitor e analisi offline danno
+    gli stessi numeri sugli stessi dati.
     """
-    n_pre = max(4, int(data.shape[2] * pre_frac))
-    base = np.median(data[:, :, :n_pre], axis=2)
-    corr = data - base[:, :, None]
-
-    # Il verso del segnale si deduce dai dati, non si assume
-    imax = np.max(corr, axis=2)
-    imin = np.min(corr, axis=2)
-    amp = np.where(np.abs(imin) > np.abs(imax), imin, imax)
-
-    return base, corr, amp
+    base, corr, amp, noise = baseline_amplitude(data)
+    return base, corr, amp, noise
 
 
-def print_summary(hdr, data, base, amp, n_samp, tailcut):
+def print_summary(hdr, data, base, amp, noise, n_samp, tailcut):
     print("=" * 66)
     print("  CONFIGURAZIONE DELLA RUN")
     print("=" * 66)
@@ -90,7 +81,7 @@ def print_summary(hdr, data, base, amp, n_samp, tailcut):
     print("=" * 66)
     print(f"  {'canale':<8} {'baseline':>10} {'rms':>8} {'ampiezza media':>16} {'max':>9}")
     for i, ch in enumerate(hdr["ChannelList"]):
-        rms = float(np.std(data[:, i, :int(n_samp * 0.15)]))
+        rms = float(np.median(noise[:, i]))
         print(f"  ch{ch:<6} {np.mean(base[:, i]):>10.1f} {rms:>8.2f}"
               f" {np.mean(amp[:, i]):>16.1f} {np.max(np.abs(amp[:, i])):>9.1f}")
     print()
@@ -207,7 +198,7 @@ def main():
 
         n_samp = data.shape[2]
         tailcut = int(hdr.get("TailCut", 0))
-        base, corr, amp = baseline_and_amplitude(data)
+        base, corr, amp, noise = baseline_and_amplitude(data)
 
         if previous is not None:
             prev_n, prev_t = previous
@@ -217,11 +208,11 @@ def main():
                   f"   rate = {rate:.2f} Hz")
             print(f"  {'canale':<8} {'baseline':>10} {'rms':>8} {'ampiezza media':>16}")
             for i, ch in enumerate(hdr["ChannelList"]):
-                rms = float(np.std(data[:, i, :int(n_samp * 0.15)]))
+                rms = float(np.median(noise[:, i]))
                 print(f"  ch{ch:<6} {np.mean(base[:, i]):>10.1f} {rms:>8.2f}"
                       f" {np.mean(amp[:, i]):>16.1f}")
         else:
-            print_summary(hdr, data, base, amp, n_samp, tailcut)
+            print_summary(hdr, data, base, amp, noise, n_samp, tailcut)
 
         if not make_plots:
             return (data.shape[0], now), []

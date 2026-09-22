@@ -72,7 +72,7 @@ class Monitor:
             return self.fixed_path
         files = glob.glob(os.path.join(self.data_dir, "*.h5"))
         if not files:
-            raise DaqFileError(f"Nessun file .h5 in {self.data_dir}")
+            raise DaqFileError(f"Nessun file .h5 in {os.path.abspath(self.data_dir)}")
         return max(files, key=os.path.getmtime)
 
     # NOTA: si cercano solo i .h5 non compressi. A run finita il file diventa
@@ -431,7 +431,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("file", nargs="?", help="file da monitorare (default: il piu' recente)")
-    ap.add_argument("-d", "--data-dir", default="data")
+    ap.add_argument("-d", "--data-dir", default=None,
+                    help="directory dei dati (default: <radice del progetto>/data)")
     ap.add_argument("-p", "--port", type=int, default=8765)
     ap.add_argument("-n", "--nevents", type=int, default=1,
                     help="eventi sovrapposti nel grafico (default 1 = solo l'ultimo)")
@@ -445,7 +446,22 @@ def main():
                     help="secondi fra un aggiornamento e l'altro (default 5)")
     args = ap.parse_args()
 
-    monitor = Monitor(args.data_dir, args.file, args.max_events,
+    # Il default va ancorato alla radice del progetto, non alla directory
+    # corrente: lanciando lo script da tools/ un "data" relativo punterebbe a
+    # tools/data, che non esiste, e il monitor resterebbe vuoto senza spiegare
+    # perche'.
+    data_dir = args.data_dir
+    if data_dir is None:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        data_dir = os.path.join(root, "data")
+
+    if not os.path.isdir(data_dir):
+        sys.exit(f"La directory dei dati non esiste: {os.path.abspath(data_dir)}\n"
+                 "Indicane un'altra con -d.")
+
+    print(f"Dati letti da: {os.path.abspath(data_dir)}")
+
+    monitor = Monitor(data_dir, args.file, args.max_events,
                       min_interval=max(1.0, args.refresh / 2))
     defaults = {"n": args.nevents, "xmin": args.xmin, "xmax": args.xmax,
                 "ymin": args.ymin, "ymax": args.ymax}

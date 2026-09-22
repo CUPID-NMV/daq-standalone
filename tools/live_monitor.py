@@ -48,11 +48,18 @@ class Monitor:
     farebbe una rilettura completa del file.
     """
 
-    def __init__(self, data_dir, path=None, max_events=200, min_interval=2.0):
+    # Range di ingresso del V1742: 1 Vpp di serie, 2 Vpp con l'opzione
+    # VPERS1742. L'ADC e' a 12 bit, quindi il passo in mV segue da qui.
+    def mv_per_count(self):
+        return 1000.0 * self.vpp / 4096.0
+
+    def __init__(self, data_dir, path=None, max_events=200, min_interval=2.0,
+                 vpp=1.0):
         self.data_dir = data_dir
         self.fixed_path = path
         self.max_events = max_events
         self.min_interval = min_interval
+        self.vpp = vpp
 
         self.lock = threading.Lock()      # matplotlib non e' thread-safe
         self.hdr = None
@@ -249,6 +256,7 @@ class Monitor:
                 "offset": info.get("offset"),
                 "threshold": info.get("threshold"),
                 "eff": None if eff is None else round(eff, 1),
+                "eff_mv": None if eff is None else round(eff * self.mv_per_count(), 2),
                 "eff_note": note,
             })
         return out
@@ -286,8 +294,9 @@ class Monitor:
                 off = self.offsets.get(int(ch))
                 if eff is not None:
                     ax.axhline(eff, color="#d62728", lw=1.1, ls="--",
-                               label=f"bordo del turn-on {eff:.0f} ADC"
-                                     + (f"  (offset {off})" if off is not None else ""))
+                               label=f"soglia {eff * self.mv_per_count():.1f} mV"
+                                     f"  ({eff:.0f} ADC)"
+                                     + (f"  offset {off}" if off is not None else ""))
                     ax.legend(fontsize=8, loc="lower right")
                 elif note:
                     # Nessuna riga: disegnarne una qui vorrebbe dire inventarsi
@@ -312,7 +321,7 @@ class Monitor:
                 eff, _ = self.effective_threshold(amp[:, i], rms)
                 if eff is not None:
                     ax.axhline(eff, color=line.get_color(), lw=1.0, ls="--", alpha=.7,
-                               label=f"bordo turn-on ch{ch} ({eff:.0f})")
+                               label=f"soglia ch{ch}: {eff * self.mv_per_count():.1f} mV")
             ax.axhline(0, color="k", lw=0.8, ls=":")
             ax.set_xlabel("tempo [ns]")
             ax.set_ylabel("ADC − baseline")
@@ -461,7 +470,7 @@ PAGE = """<!DOCTYPE html>
 <div id="hctl"></div>
 <table id="tab"><thead><tr><th>canale</th><th>baseline</th><th>rms</th>
 <th>ampiezza media</th><th>max</th><th>offset</th><th>soglia</th>
-<th>bordo turn-on</th></tr></thead><tbody></tbody></table>
+<th>soglia [mV]</th><th>soglia [ADC]</th></tr></thead><tbody></tbody></table>
 <div id="boot" class="err">JavaScript non eseguito: la pagina non puo' aggiornarsi.
 Apri la console del browser per vedere l'errore.</div>
 <img id="w" alt="forme d'onda"><img id="a" alt="media"><img id="h" alt="ampiezze">
@@ -580,7 +589,8 @@ async function tick() {
       `<tr><td>ch${c.ch}</td><td>${c.baseline}</td><td>${c.rms}</td>
        <td>${c.amp_mean}</td><td>${c.amp_max}</td>
        <td>${na(c.offset)}</td><td>${na(c.threshold)}</td>
-       <td>${c.eff_note ? '<span class="err">'+c.eff_note+'</span>' : na(c.eff)}</td></tr>`).join('');
+       <td>${c.eff_note ? '<span class="err">'+c.eff_note+'</span>' : na(c.eff_mv)}</td>
+       <td>${na(c.eff)}</td></tr>`).join('');
     const p = params();
     p.set('t', Date.now());
     for (const [id, name] of [['w','waveforms'],['a','average'],['h','amplitudes']])
@@ -718,6 +728,9 @@ def main():
                     help="asse y logaritmico nell'istogramma delle ampiezze")
     ap.add_argument("-m", "--max-events", type=int, default=200,
                     help="eventi piu' recenti usati per le statistiche (default 200)")
+    ap.add_argument("--vpp", type=float, default=1.0,
+                    help="range di ingresso del digitizer in Vpp (default 1.0; "
+                         "2.0 per la versione VPERS1742)")
     ap.add_argument("-r", "--refresh", type=float, default=5,
                     help="secondi fra un aggiornamento e l'altro (default 5)")
     args = ap.parse_args()
@@ -738,7 +751,7 @@ def main():
     print(f"Dati letti da: {os.path.abspath(data_dir)}")
 
     monitor = Monitor(data_dir, args.file, args.max_events,
-                      min_interval=max(1.0, args.refresh / 2))
+                      min_interval=max(1.0, args.refresh / 2), vpp=args.vpp)
     defaults = {"n": args.nevents, "xmin": args.xmin, "xmax": args.xmax,
                 "ymin": args.ymin, "ymax": args.ymax,
                 "hxmin": args.hxmin, "hxmax": args.hxmax, "hlog": args.hlog}

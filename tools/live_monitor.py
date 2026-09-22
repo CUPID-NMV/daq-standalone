@@ -412,11 +412,6 @@ document.getElementById('reset').onclick = () => {
   for (const f of ['xmin','xmax','ymin','ymax']) document.getElementById(f).value = '';
   tick();
 };
-document.getElementById('hreset').onclick = () => {
-  for (const f of ['hxmin','hxmax']) document.getElementById(f).value = '';
-  document.getElementById('hlog').checked = false;
-  tick();
-};
 for (const f of FIELDS)
   document.getElementById(f).addEventListener('change', tick);
 function show(id, v) {

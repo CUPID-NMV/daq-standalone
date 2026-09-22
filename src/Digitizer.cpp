@@ -974,7 +974,8 @@ void Digitizer::CheckLiveThresholds()
     if (!in) return;
 
     const bool falling = (fTriggerPolarity == CAEN_DGTZ_TriggerOnFallingEdge);
-    bool changed = false;
+    bool changed   = false;   // una soglia e' cambiata davvero: nuova generazione
+    bool republish = false;   // solo l'offset dichiarato e' cambiato
     std::string line;
 
     while (std::getline(in, line)) {
@@ -1020,12 +1021,28 @@ void Digitizer::CheckLiveThresholds()
         thr = std::max(0.0, std::min(thr, static_cast<double>(MAX_THRESHOLD_COUNTS)));
 
         uint32_t newthr = static_cast<uint32_t>(std::lround(thr));
-        if (fSelfTriggerThreshold.count(c) && fSelfTriggerThreshold[c] == newthr)
-            continue;                            // nessuna variazione effettiva
+        bool same_thr = fSelfTriggerThreshold.count(c) && fSelfTriggerThreshold[c] == newthr;
 
-        fSelfTriggerOffset[c] = off;
+        // L'offset va registrato comunque, anche quando la soglia intera non
+        // cambia: altrimenti lo stato pubblicato continuerebbe a dichiarare
+        // quello vecchio e il monitor mostrerebbe un valore diverso da quello
+        // che hai chiesto.
+        if (fSelfTriggerOffset.count(c) == 0 || fSelfTriggerOffset[c] != off) {
+            fSelfTriggerOffset[c] = off;
+            republish = true;
+        }
+
+        if (same_thr) {
+            Log::OutSummary("→ Live threshold: ch" + std::to_string(c) +
+                            " offset = " + FmtOffset(off) +
+                            " → threshold unchanged (" + std::to_string(newthr) +
+                            "): rounds to the same 12-bit value as before.");
+            continue;
+        }
+
         ApplyChannelThreshold(c, newthr);
         changed = true;
+        republish = true;
 
         Log::OutSummary("→ Live threshold: ch" + std::to_string(c) +
                         " offset = " + FmtOffset(off) +
@@ -1033,11 +1050,15 @@ void Digitizer::CheckLiveThresholds()
                         " (event " + std::to_string(fH5Rows) + ")");
     }
 
+    // La generazione avanza solo se una soglia e' cambiata davvero: e' cio' che
+    // fa congelare al monitor la distribuzione precedente, e non avrebbe senso
+    // farlo quando i dati acquisiti restano gli stessi.
     if (changed) {
         ++fThresholdGen;
         fThresholdGenRow = fH5Rows;
-        WriteStatusFile();
     }
+    if (changed || republish)
+        WriteStatusFile();
 }
 
 // =======================================================================

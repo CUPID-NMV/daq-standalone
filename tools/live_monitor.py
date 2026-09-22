@@ -279,6 +279,12 @@ PAGE = """<!DOCTYPE html>
   img { max-width:100%; border:1px solid var(--line); border-radius:8px; margin-bottom:16px;
         background:#fff; }
   .err { color:#c33; }
+  #alert { display:none; background:#c0392b; color:#fff; padding:12px 16px;
+           border-radius:8px; margin-bottom:16px; font-weight:600; line-height:1.45; }
+  #upd { color:var(--mut); font-size:12px; }
+  /* Dati fermi: le immagini restano quelle dell'ultimo aggiornamento riuscito,
+     quindi vanno smorzate per non farle sembrare aggiornate. */
+  body.stale img { opacity:.4; filter:grayscale(.5); }
   .ctl { display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end;
          border:1px solid var(--line); border-radius:8px; padding:12px 16px; margin-bottom:16px; }
   .ctl label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--mut); }
@@ -292,8 +298,9 @@ PAGE = """<!DOCTYPE html>
   .ctl label.chk input { width:auto; }
   .ctl .grp { font-weight:600; font-size:13px; padding-bottom:5px; min-width:46px; }
 </style></head><body>
+<div id="alert"></div>
 <h1>DAQ V1742 — monitor online</h1>
-<div class="sub" id="file">…</div>
+<div class="sub"><span id="file">…</span> · <span id="upd">in attesa del primo aggiornamento</span></div>
 <div class="bar">
   <div><b id="rate">–</b> <span>Hz</span></div>
   <div><b id="events">–</b> <span>eventi</span></div>
@@ -318,6 +325,15 @@ Apri la console del browser per vedere l'errore.</div>
 <script>
 document.getElementById('boot').style.display = 'none';
 const REFRESH = __REFRESH__ * 1000;
+
+let lastOk = null;            // ultimo aggiornamento riuscito
+
+function setAlert(msg) {
+  const a = document.getElementById('alert');
+  a.style.display = msg ? 'block' : 'none';
+  if (msg) a.textContent = msg;
+  document.body.classList.toggle('stale', !!msg);
+}
 const FIELDS = ['xmin','xmax','ymin','ymax','nev'];
 
 // I limiti scelti sopravvivono a un reload della pagina. localStorage puo'
@@ -411,6 +427,10 @@ async function tick() {
     const r = await fetch('stats.json', {cache:'no-store'});
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const s = await r.json();
+    lastOk = new Date();
+    setAlert(null);
+    document.getElementById('upd').textContent =
+      'aggiornato alle ' + lastOk.toLocaleTimeString();
     show('rate', s.rate); show('events', s.events); show('shown', s.shown);
     document.getElementById('err').textContent    = s.error || '';
     document.getElementById('file').textContent   =
@@ -425,8 +445,18 @@ async function tick() {
     for (const [id, name] of [['w','waveforms'],['a','average'],['h','amplitudes']])
       document.getElementById(id).src = name + '.png?' + p.toString();
   } catch (e) {
-    // Meglio dire cosa e' fallito che un generico 'non raggiungibile'
-    document.getElementById('err').textContent = 'errore: ' + (e && e.message ? e.message : e);
+    // Le immagini restano quelle di prima: senza un avviso vistoso la pagina
+    // sembrerebbe viva mentre mostra dati fermi.
+    const why = (e && e.message) ? e.message : String(e);
+    const msg = lastOk
+      ? `Server non raggiungibile (${why}). Dati fermi all'ultimo aggiornamento `
+        + `riuscito: ${lastOk.toLocaleTimeString()}, `
+        + `${Math.round((Date.now() - lastOk.getTime()) / 1000)} s fa. `
+        + `Il monitor sulla macchina DAQ e' probabilmente stato chiuso.`
+      : `Server non raggiungibile (${why}). Nessun dato ricevuto da quando la `
+        + `pagina e' stata aperta: controlla che il monitor sia in esecuzione.`;
+    setAlert(msg);
+    document.getElementById('err').textContent = '';
   }
 }
 tick(); setInterval(tick, REFRESH);

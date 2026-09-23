@@ -1,0 +1,13 @@
+{
+  "descrizione": "Rate di trigger contro soglia, a diversi valori del driver HV. PMT alimentati; HV in unita' del driver. I limiti superiori corrispondono a zero conteggi nel tempo di misura.",
+  "data": "2026-09-23",
+  "canali": [8, 9],
+  "asse_x": "distanza baseline - soglia, in conteggi Transparent Mode",
+  "punti": [
+    {"hv": 0.1, "distanze": [5.94, 4.94, 3.94, 2.94, 1.94], "rate": [0.05, 0.05, 0.05, 14.5, 87.0],  "limite": [true, true, true, false, false]},
+    {"hv": 0.3, "distanze": [5.96, 4.96, 3.96, 2.96, 1.96], "rate": [0.05, 0.05, 0.05, 11.3, 94.0],  "limite": [true, true, true, false, false]},
+    {"hv": 0.5, "distanze": [6.15, 5.15, 4.15, 3.15, 2.15], "rate": [0.05, 0.05, 0.05, 7.7, 252.8],  "limite": [true, true, true, false, false]},
+    {"hv": 0.7, "distanze": [5.90, 4.90, 3.90, 2.90, 1.90], "rate": [0.3, 0.5, 0.7, 43.2, 941.8],    "limite": [false, false, false, false, false]},
+    {"hv": 0.9, "distanze": [5.76, 4.76, 3.76, 2.76, 1.76], "rate": [68.3, 79.7, 84.7, 68.8, 81.5],  "limite": [false, false, false, false, false]}
+  ]
+}

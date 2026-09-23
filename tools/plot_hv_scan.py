@@ -51,12 +51,16 @@ def main():
     ax.invert_xaxis()                     # soglia piu' bassa verso destra
     ax.legend(title="driver HV", fontsize=9)
 
-    ax.annotate("solo rumore", xy=(2.9, 12), fontsize=9, color="#555")
-    ax.annotate("segnale saturo:\nrate indipendente dalla soglia",
-                xy=(4.8, 78), xytext=(5.6, 300), fontsize=9, color="#555",
-                arrowprops=dict(arrowstyle="->", color="#888", lw=1))
-    ax.text(0.02, 0.03, "▽ = limite superiore (zero conteggi)",
-            transform=ax.transAxes, fontsize=8, color="#666")
+    # Le annotazioni vanno dove non c'e' nulla, altrimenti coprono i punti
+    ax.annotate("HV ≤ 0.5: solo rumore,\nnessun segnale", xy=(2.95, 11),
+                xytext=(2.6, 1.2), fontsize=9, color="#444",
+                arrowprops=dict(arrowstyle="->", color="#999", lw=1))
+    ax.annotate("HV 0.9: rate indipendente dalla soglia\n→ efficienza satura",
+                xy=(4.8, 80), xytext=(5.9, 260), fontsize=9, color="#444",
+                arrowprops=dict(arrowstyle="->", color="#999", lw=1))
+    ax.text(0.98, 0.03, "▽  limite superiore (zero conteggi nel tempo di misura)",
+            transform=ax.transAxes, fontsize=8, color="#666", ha="right")
+    ax.set_ylim(0.02, 3000)
 
     out = os.path.join(ROOT, "plots", "hv_scan.png")
     os.makedirs(os.path.dirname(out), exist_ok=True)

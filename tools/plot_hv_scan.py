@@ -35,7 +35,14 @@ def main():
         r = np.array(p["rate"], dtype=float)
         lim = np.array(p["limite"], dtype=bool)
 
-        ax.plot(d[~lim], r[~lim], "o-", color=col, lw=1.8, ms=6,
+        # Una curva puo' chiedere uno stile proprio, per esempio per distinguere
+        # una misura di controllo dalle altre
+        st_ = p.get("stile", {})
+        col = st_.get("colore", col)
+        ls  = st_.get("tratto", "-")
+        mk  = st_.get("marker", "o")
+
+        ax.plot(d[~lim], r[~lim], marker=mk, ls=ls, color=col, lw=1.8, ms=6,
                 label=p.get("etichetta", f"HV {p['hv']}"))
         if lim.any():
             # limiti superiori: triangolo verso il basso, linea tratteggiata

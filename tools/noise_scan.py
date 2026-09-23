@@ -117,8 +117,15 @@ def main():
     channels = [int(c["ch"]) for c in st["channels"]]
     sigma = args.sigma or 0.72
 
+    # Senza baseline registrata due scan non sono confrontabili: la "distanza"
+    # e' baseline meno soglia, e la baseline si misura una volta sola all'avvio
+    # della run. Se si sposta fra una run e l'altra -- per esempio perche' e'
+    # cambiata la corrente di anodo -- distanze nominalmente uguali non lo sono.
     print(f"file   : {os.path.basename(path)}")
     print(f"canali : {channels}      sigma assunto: {sigma} conteggi")
+    print("baseline all'avvio della run (da live-status.json):")
+    for c in st["channels"]:
+        print(f"   ch{int(c['ch'])}: {c['baseline']:.3f}")
     print("\nATTENZIONE: il segnale deve essere spento. Se i PMT sono attivi,")
     print("            quello che misuri e' segnale piu' rumore.\n")
     print(f"  {'offset':>7} {'soglie':>13} {'distanza':>10} {'rate misurato':>16} "
@@ -190,7 +197,24 @@ def main():
     fig.savefig(out, dpi=120)
     plt.close(fig)
 
+    # Misura salvata per intero, cosi' due scan si possono confrontare davvero
+    rec = {
+        "file": os.path.basename(path),
+        "quando": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "canali": channels,
+        "baseline": {str(int(c["ch"])): c["baseline"] for c in st["channels"]},
+        "sigma_assunto": sigma,
+        "secondi_per_punto": args.seconds,
+        "punti": [{"offset": r[0], "distanza": r[1], "rate": r[2],
+                   "atteso": r[3], "conteggi": r[4]} for r in rows],
+    }
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    rec_path = os.path.join(args.out, f"noise_scan_{stamp}.json")
+    with open(rec_path, "w") as f:
+        json.dump(rec, f, indent=2)
+
     print(f"\ngrafico: {out}")
+    print(f"misura : {rec_path}")
     if fitted:
         print(f"\nsigma implicito dai punti misurati: {np.median(fitted):.2f} conteggi "
               f"(assunto {sigma})")

@@ -26,7 +26,7 @@ import h5py
 
 
 __all__ = ["load", "read_header", "open_file", "DaqFileError",
-           "baseline_amplitude"]
+           "baseline_amplitude", "count_events"]
 
 
 class DaqFileError(RuntimeError):
@@ -209,3 +209,26 @@ def baseline_amplitude(data):
     amp = np.where(np.abs(lo) > np.abs(hi), lo, hi)
 
     return base, corr, amp, noise
+
+
+def count_events(path, live=True):
+    """Numero di eventi nel file, 0 se non ce ne sono ancora.
+
+    Legge solo la forma del dataset, senza caricare le forme d'onda. Serve per
+    seguire la crescita di una run: usare load() per questo significava
+    sollevare un'eccezione proprio all'avvio, quando il file e' ancora vuoto --
+    che con il segnale spento e' la norma, non un caso limite.
+    """
+    f, tmp = open_file(path, live=live)
+    try:
+        if "/events/waveforms" in f:
+            ds = f["/events/waveforms"]
+            if live:
+                ds.refresh()
+            return int(ds.shape[0])
+        if "/events" in f:
+            return len(f["/events"].keys())
+        return 0
+    finally:
+        f.close()
+        _cleanup(tmp)

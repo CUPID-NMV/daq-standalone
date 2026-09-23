@@ -37,7 +37,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from daqio import load
+from daqio import count_events
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 F_ADC = 30e6          # campionamento dell'ADC in Transparent Mode, ~30 MHz
@@ -49,8 +49,7 @@ def status(data_dir):
 
 
 def n_events(path):
-    hdr, _ = load(path, last=1, live=True)
-    return int(hdr["NEventsInFile"])
+    return count_events(path, live=True)
 
 
 def set_offset(data_dir, channels, offset, timeout=15):

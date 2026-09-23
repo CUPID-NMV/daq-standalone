@@ -35,7 +35,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from daqio import load, baseline_amplitude, DaqFileError
+from daqio import load, baseline_amplitude, count_events, DaqFileError
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -57,8 +57,7 @@ def current_file(data_dir):
 
 
 def n_events(path):
-    hdr, _ = load(path, last=1, live=True)
-    return int(hdr["NEventsInFile"])
+    return count_events(path, live=True)
 
 
 def set_offset(data_dir, channels, offset, timeout=15):

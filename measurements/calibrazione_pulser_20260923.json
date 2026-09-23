@@ -1,5 +1,5 @@
 {
-  "descrizione": "Calibrazione offset -> mV con pulser. Impulso negativo dal fan-in/fan-out invertente su ch8, PMT scollegati. L'ampiezza e' misurata dal digitizer stesso in Output Mode, non dal generatore, per togliere di mezzo l'incertezza di generatore, fan-out e cavo.",
+  "descrizione": "Calibrazione offset -> mV con pulser. Impulso negativo dal fan-in/fan-out invertente su ch8, PMT scollegati. L'ampiezza e' misurata dal digitizer stesso in Output Mode, non dal generatore, per togliere di mezzo l'incertezza di generatore, fan-out e cavo. Secondo punto con impulso piu' stretto, stessa ampiezza, per verificare la dipendenza dalla banda.",
   "data": "2026-09-23",
   "canale": 8,
   "impulso": {
@@ -9,9 +9,27 @@
     "ampiezza_mv": 36.13
   },
   "scan": {
-    "distanze": [75.64, 79.64, 83.64, 87.64, 91.64],
-    "rate": [112.0, 24.5, 0.15, 0.15, 0.15],
-    "limite": [false, false, true, true, true]
+    "distanze": [
+      75.64,
+      79.64,
+      83.64,
+      87.64,
+      91.64
+    ],
+    "rate": [
+      112.0,
+      24.5,
+      0.15,
+      0.15,
+      0.15
+    ],
+    "limite": [
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
   },
   "risultato": {
     "punto_50pc_conteggi": 78.2,
@@ -19,5 +37,53 @@
     "attenuazione_transparent_su_output": 1.89,
     "larghezza_transizione_conteggi": 8
   },
-  "validita": "Misurato con impulso da 100 ns. I PMT danno impulsi da ~10 ns: se l'attenuazione del Transparent Mode dipende dalla banda, questo fattore NON si applica ai loro segnali. Da verificare ripetendo lo scan a 30 ns e 10 ns."
+  "validita": "Fra 46 e 96 ns la calibrazione non cambia in modo significativo: 0.462 e 0.475 mV per unita' di offset, differenza 3%, entro l'incertezza data dal passo dello scan. Manca il punto a ~10 ns, che e' la larghezza degli impulsi dei PMT ed e' quello che decide se il fattore si applica ai segnali veri.",
+  "punti_larghezza": [
+    {
+      "larghezza_ns_misurata": 96,
+      "ampiezza_adc": 148,
+      "ampiezza_mv": 36.13,
+      "distanze": [
+        75.64,
+        79.64,
+        83.64
+      ],
+      "rate": [
+        112.0,
+        24.5,
+        0.15
+      ],
+      "punto_50pc": 78.2,
+      "mv_per_offset": 0.462,
+      "passo_scan": 4
+    },
+    {
+      "larghezza_ns_misurata": 46,
+      "ampiezza_adc": 147,
+      "ampiezza_mv": 35.89,
+      "distanze": [
+        20.11,
+        30.11,
+        40.11,
+        50.11,
+        60.11,
+        70.11,
+        80.11,
+        100.11
+      ],
+      "rate": [
+        118.5,
+        118.5,
+        114.5,
+        111.5,
+        112.0,
+        118.0,
+        6.5,
+        0.15
+      ],
+      "punto_50pc": 75.5,
+      "mv_per_offset": 0.475,
+      "passo_scan": 10
+    }
+  ]
 }

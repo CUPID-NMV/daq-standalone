@@ -264,6 +264,10 @@ class Monitor:
                 "baseline": round(float(np.mean(base[:, i])), 1),
                 "rms": round(rms, 2),
                 "amp_mean": round(float(np.mean(amp[:, i])), 1),
+                # La mediana e' il numero da leggere quando una frazione degli
+                # eventi non contiene impulso: quelli tirano la media verso zero
+                "amp_med": round(float(np.median(amp[:, i])), 1),
+                "amp_med_mv": round(float(np.median(amp[:, i])) * self.mv_per_count(), 2),
                 "amp_max": round(float(np.max(np.abs(amp[:, i]))), 1),
                 "offset": info.get("offset"),
                 "threshold": info.get("threshold"),
@@ -318,7 +322,10 @@ class Monitor:
                             fontsize=8, color="#d62728")
 
                 label = ("ultimo evento" if n == 1 else f"ultimi {n} eventi")
-                ax.set_title(f"ch{ch} — {label}", fontsize=10)
+                med = float(np.median(amp[:, i]))
+                ax.set_title(f"ch{ch} — {label}   "
+                             f"(ampiezza mediana {med:.0f} ADC = "
+                             f"{med * self.mv_per_count():.1f} mV)", fontsize=10)
                 ax.set_ylabel("ADC − baseline")
                 ax.grid(alpha=0.25)
                 apply_limits(ax)
@@ -481,7 +488,7 @@ PAGE = """<!DOCTYPE html>
 </div>
 <div id="hctl"></div>
 <table id="tab"><thead><tr><th>canale</th><th>baseline</th><th>rms</th>
-<th>ampiezza media</th><th>max</th><th>offset</th><th>soglia</th>
+<th>ampiezza media</th><th>mediana</th><th>mediana [mV]</th><th>max</th><th>offset</th><th>soglia</th>
 <th>amp. minima [mV]</th><th>amp. minima [ADC]</th></tr></thead><tbody></tbody></table>
 <div id="boot" class="err">JavaScript non eseguito: la pagina non puo' aggiornarsi.
 Apri la console del browser per vedere l'errore.</div>
@@ -599,7 +606,8 @@ async function tick() {
     const na = v => (v === null || v === undefined) ? '-' : v;
     tb.innerHTML = (s.channels||[]).map(c =>
       `<tr><td>ch${c.ch}</td><td>${c.baseline}</td><td>${c.rms}</td>
-       <td>${c.amp_mean}</td><td>${c.amp_max}</td>
+       <td>${c.amp_mean}</td><td><b>${na(c.amp_med)}</b></td>
+       <td><b>${na(c.amp_med_mv)}</b></td><td>${c.amp_max}</td>
        <td>${na(c.offset)}</td><td>${na(c.threshold)}</td>
        <td>${c.eff_note ? '<span class="err">'+c.eff_note+'</span>' : na(c.eff_mv)}</td>
        <td>${na(c.eff)}</td></tr>`).join('');

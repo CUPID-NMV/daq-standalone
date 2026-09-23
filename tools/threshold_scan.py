@@ -82,19 +82,40 @@ def set_offset(data_dir, channels, offset, timeout=15):
 #  Analisi
 # ----------------------------------------------------------------------
 
-def efficiency_point(ref_hist, hist, centres, plateau_from):
-    """Ampiezza al 50% di efficienza, e valore del plateau usato per normalizzare."""
+def efficiency_point(ref_hist, hist, centres, amin, min_counts=200):
+    """Ampiezza al 50%, plateau usato, curva normalizzata.
+
+    Tre accorgimenti, ognuno per un errore visto sui dati veri:
+
+    - si ignorano le ampiezze sotto `amin`, dove vive la popolazione di eventi
+      SENZA impulso (in modo "paired" il trigger di un canale fa acquisire
+      anche l'altro). Il loro peso cambia fra i punti dello scan e produceva
+      una gobba spuria che veniva scambiata per l'attraversamento del 50%;
+    - il plateau si misura dove la statistica c'e' davvero, cioe' nei bin in
+      cui il riferimento ha almeno `min_counts` eventi, invece che in una
+      regione fissa ad alta ampiezza dove i conteggi sono zero o due e il
+      rapporto vale 0, 1 o 2;
+    - l'efficienza NON satura a 1 in assoluto: con l'ADC a 30 MHz un impulso
+      da ~10 ns viene campionato sopra soglia solo in una frazione dei casi,
+      quindi il plateau e' fisico e dipende dall'offset. Normalizzarvi resta
+      giusto, purche' lo si misuri bene.
+    """
+    usable = (centres >= amin) & (ref_hist >= min_counts)
+    if usable.sum() < 4:
+        return None, None, np.full_like(centres, np.nan, dtype=float)
+
     with np.errstate(divide="ignore", invalid="ignore"):
         ratio = np.where(ref_hist > 0, hist / ref_hist, np.nan)
 
-    hi = centres >= plateau_from
+    # plateau: meta' alta della regione con statistica sufficiente
+    idx = np.where(usable)[0]
+    hi  = idx[len(idx) // 2:]
     plateau = np.nanmedian(ratio[hi])
     if not np.isfinite(plateau) or plateau <= 0:
         return None, None, ratio
 
-    eff = ratio / plateau
+    eff = np.where(usable, ratio / plateau, np.nan)
 
-    # Primo attraversamento di 0.5 salendo in ampiezza, con interpolazione
     ok = np.isfinite(eff)
     x, y = centres[ok], eff[ok]
     for k in range(len(x) - 1):
@@ -110,8 +131,13 @@ def main():
     ap.add_argument("--offsets", type=float, nargs="+", required=True,
                     help="offset da provare; il primo e' il riferimento e deve "
                          "essere il piu' basso che non triggeri sul rumore")
-    ap.add_argument("--seconds", type=float, default=90,
-                    help="secondi di raccolta per ogni punto (default 90)")
+    ap.add_argument("--events", type=int, default=12000,
+                    help="eventi da raccogliere per ogni punto (default 12000). "
+                         "A statistica fissa i punti pesano uguale: a tempo fisso "
+                         "gli offset alti, che hanno rate molto piu' basso, "
+                         "restavano troppo poveri")
+    ap.add_argument("--max-seconds", type=float, default=300,
+                    help="tempo massimo per punto, se il rate e' troppo basso")
     ap.add_argument("-d", "--data-dir", default=os.path.join(ROOT, "data"))
     ap.add_argument("--vpp", type=float, default=1.0,
                     help="range di ingresso del digitizer in Vpp (default 1.0)")
@@ -125,21 +151,34 @@ def main():
 
     print(f"file      : {os.path.basename(path)}")
     print(f"canali    : {channels}")
-    print(f"offset    : {args.offsets}   ({args.seconds:g} s ciascuno)")
-    print(f"durata    : ~{len(args.offsets) * args.seconds / 60:.1f} minuti\n")
+    print(f"offset    : {args.offsets}")
+    print(f"per punto : {args.events} eventi, al massimo {args.max_seconds:g} s\n")
 
     # --- raccolta -----------------------------------------------------
     segments = []
     for off in args.offsets:
         set_offset(args.data_dir, channels, off)
         start = n_events(path)
-        time.sleep(args.seconds)
-        end = n_events(path)
-        rate = (end - start) / args.seconds
-        print(f"  offset {off:<6g} eventi {end-start:<8d} rate {rate:7.1f} Hz")
-        if end - start < 500:
-            print("     ATTENZIONE: pochi eventi, la curva sara' rumorosa")
+        t0 = time.time()
+        while True:
+            time.sleep(2)
+            end = n_events(path)
+            if end - start >= args.events or time.time() - t0 > args.max_seconds:
+                break
+        dt = time.time() - t0
+        rate = (end - start) / dt
+        flag = "" if end - start >= args.events else "   POCHI EVENTI: curva rumorosa"
+        print(f"  offset {off:<6g} eventi {end-start:<8d} rate {rate:7.1f} Hz "
+              f"in {dt:5.0f} s{flag}")
         segments.append((off, start, end))
+
+    # Salvati per poter rianalizzare senza rifare la presa dati
+    seg_file = os.path.join(args.out, "threshold_scan_segments.json")
+    os.makedirs(args.out, exist_ok=True)
+    with open(seg_file, "w") as f:
+        json.dump({"file": os.path.basename(path), "vpp": args.vpp,
+                   "segments": segments}, f, indent=2)
+    print(f"\nsegmenti salvati in {seg_file}")
 
     # --- analisi ------------------------------------------------------
     print("\nanalisi…")
@@ -165,8 +204,9 @@ def main():
         ref = hists[segments[0][0]]
         ax = axes[0][i]
         for off, _, _ in segments[1:]:
-            x50, plateau, eff = efficiency_point(ref, hists[off], centres,
-                                                 plateau_from=250)
+            # sotto 8 volte il rumore c'e' la popolazione senza impulso
+            amin = 8 * float(np.median(noise[:, i]))
+            x50, plateau, eff = efficiency_point(ref, hists[off], centres, amin)
             ax.plot(centres, eff, marker=".", lw=1, label=f"offset {off:g}")
             if x50:
                 results[ch].append((off, x50))

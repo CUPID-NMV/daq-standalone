@@ -1423,10 +1423,20 @@ void Digitizer::AcquireTransparent()
     const uint32_t channelsPerGroup = 8;
     const uint32_t hwGroups = (fNChannels + channelsPerGroup - 1) / channelsPerGroup;
 
+    // VERIFICATO SPERIMENTALMENTE (23/09): questo dump registra correttamente
+    // PIEDISTALLO e RUMORE del dominio in cui lavora il comparatore, ma NON
+    // cattura gli impulsi. Con un impulso da pulser di 148 conteggi Output
+    // Mode, largo 100 ns, che faceva scattare il self-trigger 300 volte con
+    // soglia 20 conteggi sotto il piedistallo, la traccia registrata mostrava
+    // un'escursione massima di 6 conteggi: l'impulso non entra nella finestra.
+    // Per misurare l'ampiezza nel dominio della soglia si usa invece lo scan in
+    // soglia, che adopera il comparatore stesso come strumento.
     Log::OutSummary("=====================================================");
     Log::OutSummary(" TRANSPARENT MODE DUMP");
-    Log::OutSummary(" Registra cio' che vede il discriminatore del");
-    Log::OutSummary(" self-trigger, non le forme d'onda ricostruite.");
+    Log::OutSummary(" Misura piedistallo e rumore del dominio in cui");
+    Log::OutSummary(" lavora il comparatore del self-trigger.");
+    Log::OutSummary(" NON cattura gli impulsi: per quelli usare lo scan");
+    Log::OutSummary(" in soglia (tools/noise_scan.py).");
     Log::OutSummary("=====================================================");
 
     // Le tabelle di correzione DRS4 sono tarate sull'Output Mode: applicarle

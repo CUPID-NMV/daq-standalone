@@ -53,28 +53,51 @@ def n_events(path):
 
 
 def set_offset(data_dir, channels, offset, timeout=15):
+    """Imposta l'offset e restituisce cio' che la DAQ ha davvero scritto.
+
+    L'offset richiesto non e' la soglia: il registro e' a 12 bit, quindi
+    offset diversi possono finire sullo stesso valore intero. Serve la
+    distanza vera fra baseline e soglia, che e' la grandezza fisica.
+    """
     with open(os.path.join(data_dir, "live-threshold.txt"), "w") as f:
         for ch in channels:
             f.write(f"{ch} {offset}\n")
     t0 = time.time()
     while time.time() - t0 < timeout:
-        applied = {int(c["ch"]): c["offset"] for c in status(data_dir)["channels"]}
+        st = status(data_dir)
+        applied = {int(c["ch"]): c["offset"] for c in st["channels"]}
         if all(abs(applied.get(ch, -1) - offset) < 1e-6 for ch in channels):
-            return
+            return {int(c["ch"]): (c["baseline"], int(c["threshold"]))
+                    for c in st["channels"]}
         time.sleep(0.5)
     sys.exit(f"La DAQ non ha applicato l'offset {offset} entro {timeout} s.")
 
 
-def predicted(offset, sigma, nch):
-    z = offset / (sigma * math.sqrt(2.0))
-    return F_ADC * nch * 0.5 * math.erfc(z)
+def predicted(distances, sigma):
+    """Rate atteso sommando i canali, ognuno con la sua distanza vera."""
+    return sum(F_ADC * 0.5 * math.erfc(d / (sigma * math.sqrt(2.0)))
+               for d in distances)
+
+
+def sigma_from_rate(distances, rate):
+    """Sigma che riprodurrebbe il rate misurato, per bisezione."""
+    if rate <= 0:
+        return None
+    lo, hi = 0.05, 5.0
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        if predicted(distances, mid) < rate:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--offsets", type=float, nargs="+",
-                    default=[5, 4.5, 4, 3.5, 3, 2.5],
+                    default=[6, 5, 4, 3, 2],
                     help="offset da provare, meglio in ordine decrescente")
     ap.add_argument("--seconds", type=float, default=20,
                     help="secondi di misura per punto (default 20)")
@@ -98,22 +121,40 @@ def main():
     print(f"canali : {channels}      sigma assunto: {sigma} conteggi")
     print("\nATTENZIONE: il segnale deve essere spento. Se i PMT sono attivi,")
     print("            quello che misuri e' segnale piu' rumore.\n")
-    print(f"  {'offset':>7} {'in sigma':>9} {'rate misurato':>15} {'atteso':>12}")
+    print(f"  {'offset':>7} {'soglie':>13} {'distanza':>10} {'rate misurato':>16} "
+          f"{'atteso':>11} {'sigma implicito':>16}")
 
     rows = []
+    prev_thr = None
     for off in args.offsets:
-        set_offset(args.data_dir, channels, off)
+        applied = set_offset(args.data_dir, channels, off)
+        thr = tuple(applied[ch][1] for ch in channels)
+        dists = [applied[ch][0] - applied[ch][1] for ch in channels]
+
+        if thr == prev_thr:
+            print(f"  {off:7g} {str(thr):>13}   COLLASSA sulla soglia precedente, salto")
+            continue
+        prev_thr = thr
+
         time.sleep(1.0)                        # la soglia entra in vigore
         start = n_events(path)
         t0 = time.time()
         time.sleep(args.seconds)
         dt = time.time() - t0
-        rate = (n_events(path) - start) / dt
+        counts = n_events(path) - start
+        rate = counts / dt
 
-        exp = predicted(off, sigma, len(channels))
-        exp_s = f"{exp:10.1f} Hz" if exp < 1e4 else "    saturo"
-        print(f"  {off:7g} {off/sigma:8.1f}σ {rate:12.1f} Hz {exp_s}")
-        rows.append((off, rate, exp))
+        # Zero conteggi non e' "rate nullo": e' un limite superiore
+        meas = (f"{rate:10.1f} Hz" if counts > 0
+                else f"  < {3.0/dt:5.2f} Hz")
+        exp = predicted(dists, sigma)
+        exp_s = f"{exp:8.1f} Hz" if exp < 1e4 else "  saturo"
+        sfit = sigma_from_rate(dists, rate)
+        sfit_s = f"{sfit:14.2f}" if sfit else "             -"
+
+        print(f"  {off:7g} {str(thr):>13} {np.mean(dists):9.2f} {meas:>16} "
+              f"{exp_s:>11} {sfit_s}")
+        rows.append((off, np.mean(dists), rate, exp, counts))
 
         if rate > 5000:
             print("     rate molto alto: mi fermo qui per non intasare la DAQ")
@@ -122,15 +163,24 @@ def main():
     # --- grafico ---
     os.makedirs(args.out, exist_ok=True)
     fig, ax = plt.subplots(figsize=(6.5, 4.2))
-    x = np.array([r[0] for r in rows])
-    y = np.array([max(r[1], 1e-3) for r in rows])
-    ax.semilogy(x, y, "o-", label="misurato")
+    x = np.array([r[1] for r in rows])                 # distanza vera
+    y = np.array([max(r[2], 1e-3) for r in rows])
+    det = np.array([r[4] > 0 for r in rows])
+    ax.semilogy(x[det], y[det], "o-", label="misurato")
+    if (~det).any():
+        ax.semilogy(x[~det], y[~det], "v", color="grey", label="limite superiore")
 
     xs = np.linspace(min(x) * 0.9, max(x) * 1.1, 100)
-    ys = [max(predicted(v, sigma, len(channels)), 1e-3) for v in xs]
+    ys = [max(predicted([v] * len(channels), sigma), 1e-3) for v in xs]
     ax.semilogy(xs, ys, "--", label=f"coda gaussiana, σ = {sigma}")
 
-    ax.set_xlabel("offset [conteggi Transparent Mode]")
+    fitted = [sigma_from_rate([r[1]] * len(channels), r[2]) for r in rows if r[4] > 0]
+    if fitted:
+        sm = float(np.median(fitted))
+        ax.semilogy(xs, [max(predicted([v] * len(channels), sm), 1e-3) for v in xs],
+                    ":", label=f"σ implicito dai dati = {sm:.2f}")
+
+    ax.set_xlabel("distanza baseline − soglia [conteggi]")
     ax.set_ylabel("rate di trigger [Hz]")
     ax.set_title("Pavimento di rumore del self-trigger", fontsize=11)
     ax.grid(alpha=.3, which="both")
@@ -141,9 +191,12 @@ def main():
     plt.close(fig)
 
     print(f"\ngrafico: {out}")
-    print("\nSe misura e previsione si sovrappongono, il modello di rumore regge e")
-    print("le soglie espresse in sigma sono affidabili. Se la misura sta sopra,")
-    print("c'e' una componente di rumore in piu' rispetto alla gaussiana.")
+    if fitted:
+        print(f"\nsigma implicito dai punti misurati: {np.median(fitted):.2f} conteggi "
+              f"(assunto {sigma})")
+        print("Se i valori nella colonna 'sigma implicito' concordano fra loro, il")
+        print("modello gaussiano regge e quel numero e' il rumore vero del")
+        print("comparatore. Se divergono, la coda non e' gaussiana.")
 
 
 if __name__ == "__main__":

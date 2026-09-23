@@ -36,7 +36,7 @@ def main():
         lim = np.array(p["limite"], dtype=bool)
 
         ax.plot(d[~lim], r[~lim], "o-", color=col, lw=1.8, ms=6,
-                label=f"HV {p['hv']}")
+                label=p.get("etichetta", f"HV {p['hv']}"))
         if lim.any():
             # limiti superiori: triangolo verso il basso, linea tratteggiata
             ax.plot(d[lim], r[lim], "v", color=col, ms=7, mfc="none")
@@ -51,18 +51,16 @@ def main():
     ax.invert_xaxis()                     # soglia piu' bassa verso destra
     ax.legend(title="driver HV", fontsize=9)
 
-    # Le annotazioni vanno dove non c'e' nulla, altrimenti coprono i punti
-    ax.annotate("HV ≤ 0.5: solo rumore,\nnessun segnale", xy=(2.95, 11),
-                xytext=(2.6, 1.2), fontsize=9, color="#444",
-                arrowprops=dict(arrowstyle="->", color="#999", lw=1))
-    ax.annotate("HV 0.9: rate indipendente dalla soglia\n→ efficienza satura",
-                xy=(4.8, 80), xytext=(5.9, 260), fontsize=9, color="#444",
-                arrowprops=dict(arrowstyle="->", color="#999", lw=1))
+    for a in m.get("annotazioni", []):
+        ax.annotate(a["testo"], xy=tuple(a["xy"]), xytext=tuple(a["xytext"]),
+                    fontsize=9, color="#444",
+                    arrowprops=dict(arrowstyle="->", color="#999", lw=1))
     ax.text(0.98, 0.03, "▽  limite superiore (zero conteggi nel tempo di misura)",
             transform=ax.transAxes, fontsize=8, color="#666", ha="right")
     ax.set_ylim(0.02, 3000)
 
-    out = os.path.join(ROOT, "plots", "hv_scan.png")
+    name = os.path.splitext(os.path.basename(src))[0]
+    out = os.path.join(ROOT, "plots", name + ".png")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     fig.tight_layout()
     fig.savefig(out, dpi=130)

@@ -1,0 +1,120 @@
+{
+  "descrizione": "Bracketing: HV 0.9, ritorno a 0.3, ritorno a 0.9. Verifica di riproducibilita' e del pavimento di rumore contemporaneo.",
+  "data": "2026-09-23 pomeriggio",
+  "canali": [
+    8,
+    9
+  ],
+  "punti": [
+    {
+      "hv": 0.9,
+      "etichetta": "HV 0.9 (prima)",
+      "distanze": [
+        6.16,
+        5.16,
+        4.16,
+        3.16,
+        2.16
+      ],
+      "rate": [
+        51.7,
+        106.8,
+        126.7,
+        189.5,
+        935.0
+      ],
+      "limite": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "hv": 0.3,
+      "etichetta": "HV 0.3 (rumore)",
+      "distanze": [
+        5.98,
+        4.98,
+        3.98,
+        2.98,
+        1.98
+      ],
+      "rate": [
+        0.05,
+        0.05,
+        0.05,
+        56.2,
+        811.2
+      ],
+      "limite": [
+        true,
+        true,
+        true,
+        false,
+        false
+      ]
+    },
+    {
+      "hv": 0.9,
+      "etichetta": "HV 0.9 (dopo)",
+      "distanze": [
+        5.85,
+        4.85,
+        3.85,
+        2.85,
+        1.85
+      ],
+      "rate": [
+        54.2,
+        107.2,
+        141.8,
+        198.5,
+        870.0
+      ],
+      "limite": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    }
+  ],
+  "annotazioni": [
+    {
+      "testo": "rumore trascurabile\n(< 0.05 Hz)",
+      "xy": [
+        4.0,
+        0.05
+      ],
+      "xytext": [
+        4.6,
+        0.25
+      ]
+    },
+    {
+      "testo": "qui domina il rumore",
+      "xy": [
+        2.0,
+        850
+      ],
+      "xytext": [
+        3.0,
+        2000
+      ]
+    },
+    {
+      "testo": "il rate sale al calare\ndella soglia: nessun plateau",
+      "xy": [
+        4.5,
+        110
+      ],
+      "xytext": [
+        5.4,
+        8
+      ]
+    }
+  ]
+}

@@ -151,9 +151,18 @@ def fig_popolazioni(meta, amp, pos, out):
 
 
 def liscia(x, n=101):
-    """Mediana mobile: isola la deriva dalla dispersione evento per evento."""
+    """Media mobile della deriva, isolata dalla dispersione evento per evento.
+
+    La mediana mobile non va bene: i livelli DC sono quasi interi, quindi la
+    mediana si quantizza e una deriva di pochi conteggi sparisce. La media ha
+    la risoluzione che serve, ma va protetta dagli eventi in cui una lunga
+    escursione sposta il piedistallo del singolo evento di decine di conteggi.
+    """
+    c = np.median(x)
+    x = np.clip(x, c - 8, c + 8)
     pad = np.pad(x, n // 2, mode="edge")
-    return np.array([np.median(pad[i:i + n]) for i in range(len(x))])
+    ker = np.ones(n) / n
+    return np.convolve(pad, ker, mode="valid")[:len(x)]
 
 
 def fig_deriva(meta, amp, pos, dc, chans, out):
@@ -173,7 +182,7 @@ def fig_deriva(meta, amp, pos, dc, chans, out):
             label="differenza  (parte non comune): %.1f cnt" % (diff.max() - diff.min()))
     ax.axhline(0, color="#999", lw=.8)
     ax.set_xlabel("evento")
-    ax.set_ylabel("deriva del livello DC  [conteggi]\n(mediana mobile su 101 eventi)")
+    ax.set_ylabel("deriva del livello DC  [conteggi]\n(media mobile su 101 eventi)")
     ax.set_title("La deriva e' quasi tutta comune ai due canali: non e' il generatore",
                  fontsize=11)
     ax.legend(fontsize=8.5, ncol=2)

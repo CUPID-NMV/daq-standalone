@@ -92,7 +92,14 @@ def analizza(path, live, max_eventi):
 
 
 def deriva(x, n=101):
-    """Media mobile con clipping: isola la deriva dalla dispersione."""
+    """Media mobile con clipping: isola la deriva dalla dispersione.
+
+    Su run corte la finestra va accorciata, altrimenti copre tutti i dati e
+    restituisce una costante: la deriva risulterebbe zero per costruzione.
+    """
+    n = min(n, max(5, len(x) // 6))
+    if n % 2 == 0:
+        n += 1
     c = np.median(x)
     x = np.clip(x, c - 8, c + 8)
     pad = np.pad(x, n // 2, mode="edge")
@@ -133,6 +140,8 @@ def main():
 
     hdr, chans, dt, n_tot, amp, pos, dc, rms = analizza(path, live, args.max_events)
     print("eventi: %d totali, %d analizzati" % (n_tot, len(amp)))
+    if len(amp) < 600:
+        print("  ATTENZIONE: pochi eventi, la deriva non e' ancora misurabile")
     print()
 
     for i, ch in enumerate(chans):

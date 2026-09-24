@@ -3,10 +3,38 @@
   "data": "2026-09-24",
   "canale": 8,
   "punti": [
-    {"larghezza_ns": 96.0, "ampiezza_mv": 36.13, "taglio_conteggi": 78.2,  "err_conteggi": 2,  "mv_per_offset": 0.462},
-    {"larghezza_ns": 46.0, "ampiezza_mv": 35.89, "taglio_conteggi": 75.5,  "err_conteggi": 3,  "mv_per_offset": 0.475},
-    {"larghezza_ns": 7.6,  "ampiezza_mv": 198.5, "taglio_conteggi": 260.0, "err_conteggi": 10, "mv_per_offset": 0.765}
+    {
+      "larghezza_ns": 96.0,
+      "ampiezza_mv": 36.13,
+      "taglio_conteggi": 78.2,
+      "err_conteggi": 2,
+      "mv_per_offset": 0.462
+    },
+    {
+      "larghezza_ns": 46.0,
+      "ampiezza_mv": 35.89,
+      "taglio_conteggi": 75.5,
+      "err_conteggi": 3,
+      "mv_per_offset": 0.475
+    },
+    {
+      "larghezza_ns": 7.6,
+      "ampiezza_mv": 198.5,
+      "taglio_conteggi": 260.0,
+      "err_conteggi": 10,
+      "mv_per_offset": 0.765
+    },
+    {
+      "larghezza_ns": 1.6,
+      "ampiezza_mv": 14.64,
+      "taglio_conteggi": 2.88,
+      "err_conteggi": 0.6,
+      "mv_per_offset": 5.08,
+      "limite_inferiore": true,
+      "nota": "Run 0101, generatore a 100 Hz. Il 50% cade al punto piu' basso dello scan o sotto, quindi 5.08 e' un LIMITE INFERIORE. L'efficienza non raggiunge mai il plateau: 48% al punto piu' basso."
+    }
   ],
   "note_7_6ns": "Lo scan non mostra un gradino netto ma una discesa continua da 103 Hz a offset 110 fino a 26 Hz a offset 250, poi zero fra 250 e 270. La discesa graduale e' l'effetto della fase di campionamento a 30 MHz su un impulso breve; il taglio netto e' il picco vero nel dominio del comparatore.",
-  "conclusione": "Fra 96 e 46 ns la calibrazione non cambia (0.462 e 0.475). A 7.6 ns sale a 0.765, un fattore 1.65: l'attenuazione del Transparent Mode dipende dalla banda, con un ginocchio fra 46 e 7.6 ns. Gli impulsi dei PMT sono larghi ~2 ns, quindi per loro il fattore e' almeno 1.65 e probabilmente maggiore: la calibrazione con impulsi larghi SOTTOSTIMA la soglia."
+  "conclusione": "Fra 96 e 46 ns la calibrazione non cambia (0.462 e 0.475). A 7.6 ns sale a 0.765, un fattore 1.65: l'attenuazione del Transparent Mode dipende dalla banda, con un ginocchio fra 46 e 7.6 ns. Gli impulsi dei PMT sono larghi ~2 ns, quindi per loro il fattore e' almeno 1.65 e probabilmente maggiore: la calibrazione con impulsi larghi SOTTOSTIMA la soglia.",
+  "aggiornamento_20260924_pomeriggio": "Aggiunto il punto a 1.6 ns, la stessa larghezza degli impulsi dei PMT, quindi senza piu' bisogno di estrapolare. E' un limite inferiore: l'efficienza non arriva al plateau nemmeno alla soglia piu' bassa raggiungibile, percio' il punto al 50% sta a distanza <= 2.88. Il turn-off e' inoltre molto piu' largo di quanto la dispersione delle ampiezze giustifichi, il che punta alla fase di campionamento a 30 MHz gia' sospettata per il punto a 7.6 ns."
 }

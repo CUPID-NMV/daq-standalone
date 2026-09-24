@@ -1,0 +1,24 @@
+{
+  "descrizione": "Scan in soglia con impulso da 1.6 ns FWHM, la stessa larghezza degli impulsi dei PMT. Generatore a 100 Hz, ampiezza misurata dal digitizer. Run 0101. Le efficienze sono corrette per la purezza, misurata evento per evento dalla presenza di un impulso vero a ~50 ns nella finestra.",
+  "data": "2026-09-24",
+  "run": "PMT_selftrig_0101_2.5Gs_10PT.h5",
+  "canale": 8,
+  "rate_generatore_hz": 100.0,
+  "ampiezza_conteggi": -60.0,
+  "ampiezza_mv": -14.64,
+  "larghezza_ns": 1.60,
+  "baseline_transparent": 2537.88,
+  "secondi_per_punto": 30,
+  "punti": [
+    {"offset": 3,  "soglia": 2535, "distanza": 2.88, "rate_hz": 87.7, "purezza": 0.55, "eventi_da": 318,  "eventi_a": 2949},
+    {"offset": 4,  "soglia": 2534, "distanza": 3.88, "rate_hz": 33.0, "purezza": 0.996, "eventi_da": 2949, "eventi_a": 3939},
+    {"offset": 5,  "soglia": 2533, "distanza": 4.88, "rate_hz": 9.7,  "purezza": 1.00, "eventi_da": 3939, "eventi_a": 4230},
+    {"offset": 6,  "soglia": 2532, "distanza": 5.88, "rate_hz": 2.3,  "purezza": 1.00, "eventi_da": 4230, "eventi_a": 4299},
+    {"offset": 7,  "soglia": 2531, "distanza": 6.88, "rate_hz": 0.05, "purezza": null, "limite_superiore": true},
+    {"offset": 8,  "soglia": 2530, "distanza": 7.88, "rate_hz": 0.05, "purezza": null, "limite_superiore": true},
+    {"offset": 9,  "soglia": 2529, "distanza": 8.88, "rate_hz": 0.05, "purezza": null, "limite_superiore": true},
+    {"offset": 10, "soglia": 2528, "distanza": 9.88, "rate_hz": 0.05, "purezza": null, "limite_superiore": true}
+  ],
+  "confini_eventi": "Ricavati da rate x 30 s, ancorati a changed_at_event = 4299 per l'ultimo passo. Il confine offset 3 -> 4 e' confermato indipendentemente dal salto di purezza osservato a ~ev 3000.",
+  "conclusione": "Nessun plateau: anche al punto piu' basso l'efficienza e' 48%. Il turn-off si estende su ~4 conteggi mentre la dispersione delle ampiezze (5-95%: -64/-56) ne giustificherebbe meno di mezzo. Il 50% cade a distanza <= 2.9, cioe' >= 5 mV per unita' di offset, attenuazione >= 21."
+}

@@ -97,7 +97,9 @@ def deriva(x, n=101):
     Su run corte la finestra va accorciata, altrimenti copre tutti i dati e
     restituisce una costante: la deriva risulterebbe zero per costruzione.
     """
-    n = min(n, max(5, len(x) // 6))
+    if len(x) < 3:
+        return np.zeros(max(len(x), 1))
+    n = min(n, max(3, len(x) // 6))
     if n % 2 == 0:
         n += 1
     c = np.median(x)
@@ -139,6 +141,17 @@ def main():
             print("rate: non misurabile (", e, ")")
 
     hdr, chans, dt, n_tot, amp, pos, dc, rms = analizza(path, live, args.max_events)
+    if n_tot == 0:
+        print("eventi: NESSUNO")
+        print()
+        print("La run gira ma non sta triggerando. Se la soglia qui sopra e' lontana")
+        print("dal piedistallo, l'impulso non ci arriva: abbassa l'offset, anche a run")
+        print("in corso, senza fermarla:")
+        print()
+        for c in (st["channels"] if st else []):
+            print("    printf '%d 3\\n' > %s"
+                  % (c["ch"], os.path.join(args.data_dir, "live-threshold.txt")))
+        return
     print("eventi: %d totali, %d analizzati" % (n_tot, len(amp)))
     if len(amp) < 600:
         print("  ATTENZIONE: pochi eventi, la deriva non e' ancora misurabile")
@@ -147,7 +160,7 @@ def main():
     for i, ch in enumerate(chans):
         buoni = (amp[:, i] < SOGLIA_IMPULSO) & (pos[:, i] > FINESTRA_50NS[0]) \
                                              & (pos[:, i] < FINESTRA_50NS[1])
-        pur = 100.0 * buoni.mean()
+        pur = 100.0 * buoni.mean() if len(buoni) else float("nan")
         print("ch%d:  rumore %.2f cnt   impulso a ~50 ns nel %.1f%% degli eventi"
               % (ch, np.median(rms[:, i]), pur))
         if buoni.sum() > 20:

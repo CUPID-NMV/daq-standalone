@@ -1,0 +1,12 @@
+{
+  "descrizione": "Dipendenza della calibrazione offset->mV dalla larghezza dell'impulso. Ampiezza e larghezza misurate dal digitizer stesso, non dalle impostazioni del generatore. Per l'impulso da 7.6 ns la sorgente e' un discriminatore attenuato con raccordi a T e terminatori.",
+  "data": "2026-09-24",
+  "canale": 8,
+  "punti": [
+    {"larghezza_ns": 96.0, "ampiezza_mv": 36.13, "taglio_conteggi": 78.2,  "err_conteggi": 2,  "mv_per_offset": 0.462},
+    {"larghezza_ns": 46.0, "ampiezza_mv": 35.89, "taglio_conteggi": 75.5,  "err_conteggi": 3,  "mv_per_offset": 0.475},
+    {"larghezza_ns": 7.6,  "ampiezza_mv": 198.5, "taglio_conteggi": 260.0, "err_conteggi": 10, "mv_per_offset": 0.765}
+  ],
+  "note_7_6ns": "Lo scan non mostra un gradino netto ma una discesa continua da 103 Hz a offset 110 fino a 26 Hz a offset 250, poi zero fra 250 e 270. La discesa graduale e' l'effetto della fase di campionamento a 30 MHz su un impulso breve; il taglio netto e' il picco vero nel dominio del comparatore.",
+  "conclusione": "Fra 96 e 46 ns la calibrazione non cambia (0.462 e 0.475). A 7.6 ns sale a 0.765, un fattore 1.65: l'attenuazione del Transparent Mode dipende dalla banda, con un ginocchio fra 46 e 7.6 ns. Gli impulsi dei PMT sono larghi ~2 ns, quindi per loro il fattore e' almeno 1.65 e probabilmente maggiore: la calibrazione con impulsi larghi SOTTOSTIMA la soglia."
+}

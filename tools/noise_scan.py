@@ -144,6 +144,10 @@ def main():
         prev_thr = thr
 
         time.sleep(1.0)                        # la soglia entra in vigore
+        # Gli estremi vanno registrati, non ricostruiti dopo: dedurli da
+        # rate x durata sbaglia appena la DAQ perde eventi o il rate varia
+        # dentro il passo, e l'analisi finisce per campionare il segmento
+        # sbagliato senza accorgersene.
         start = n_events(path)
         t0 = time.time()
         time.sleep(args.seconds)
@@ -161,7 +165,7 @@ def main():
 
         print(f"  {off:7g} {str(thr):>13} {np.mean(dists):9.2f} {meas:>16} "
               f"{exp_s:>11} {sfit_s}")
-        rows.append((off, np.mean(dists), rate, exp, counts))
+        rows.append((off, np.mean(dists), rate, exp, counts, start, start + counts))
 
         if rate > 5000:
             print("     rate molto alto: mi fermo qui per non intasare la DAQ")
@@ -206,7 +210,8 @@ def main():
         "sigma_assunto": sigma,
         "secondi_per_punto": args.seconds,
         "punti": [{"offset": r[0], "distanza": r[1], "rate": r[2],
-                   "atteso": r[3], "conteggi": r[4]} for r in rows],
+                   "atteso": r[3], "conteggi": r[4],
+                   "eventi_da": r[5], "eventi_a": r[6]} for r in rows],
     }
     stamp = time.strftime("%Y%m%d_%H%M%S")
     rec_path = os.path.join(args.out, f"noise_scan_{stamp}.json")

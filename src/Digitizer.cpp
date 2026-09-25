@@ -416,6 +416,14 @@ void Digitizer::SelectBoard()
         Log::OutWarning("→ PLL calibration not supported or failed (code = " + std::to_string(err) + ").");
     }
 
+    // Le tabelle si caricano perche' la stessa chiamata porta con se' la
+    // calibrazione del PLL, ma non vanno MAI applicate: riguardano il percorso
+    // di memoria del DRS4, mentre il self-trigger deve vedere il segnale che
+    // arriva dal rivelatore. Disabilitarle qui rende lo stato deterministico,
+    // qualunque sia il tipo di trigger configurato dopo.
+    if (CAEN_DGTZ_DisableDRS4Correction(fHandle) != CAEN_DGTZ_Success)
+        Log::OutWarning("Cannot disable DRS4 corrections at startup.");
+
     CAEN_DGTZ_Calibrate(fHandle);
     Log::OutSummary("PLL calibration done.");
 }
@@ -724,22 +732,25 @@ void Digitizer::ComputeSelfTriggerThresholds() {
     // indicato da TriggerPolarity.
     Log::OutSummary("Measuring Transparent Mode baseline for self-trigger thresholds...");
 
-    // Le tabelle di correzione DRS4 sono calibrate sull'Output Mode. Applicarle
-    // ai dati in Transparent Mode lascia il piedistallo corretto ma gonfia
-    // l'RMS di circa un fattore 40 (0.7 conteggi diventano ~28), e quell'RMS e'
-    // proprio il numero che si guarda per scegliere la soglia.
-    bool corr_off = (CAEN_DGTZ_DisableDRS4Correction(fHandle) == CAEN_DGTZ_Success);
-    if (!corr_off)
-        Log::OutWarning("Cannot disable DRS4 corrections: the measured RMS will be "
-                        "overestimated.");
+    // Le correzioni DRS4 restano spente, e non vengono riaccese dopo: con il
+    // self-trigger il comparatore lavora sul segnale che arriva dal rivelatore,
+    // e le tabelle riguardano solo il percorso di memoria del DRS4. Applicarle
+    // qui non cambierebbe la decisione del trigger, ma renderebbe le tracce
+    // registrate diverse dal segnale su cui quella decisione e' stata presa.
+    // In piu' sono calibrate sull'Output Mode: sui dati in Transparent Mode
+    // lasciano il piedistallo corretto ma gonfiano l'RMS di circa 40 volte
+    // (0.7 conteggi diventano ~28), e quell'RMS e' proprio il numero che si
+    // guarda per scegliere la soglia.
+    if (CAEN_DGTZ_DisableDRS4Correction(fHandle) != CAEN_DGTZ_Success)
+        Log::OutWarning("Cannot disable DRS4 corrections: the recorded waveforms "
+                        "will differ from the signal the comparator judged.");
+    else
+        Log::OutSummary("→ DRS4 corrections DISABLED and left off: the recorded "
+                        "waveforms are the raw detector signal.");
 
     SetTransparentMode(true);
     bool ok = MeasureBaseline(fTransparentBaseline, fTransparentRMS, 10, "transparent");
     SetTransparentMode(false);
-
-    if (corr_off && CAEN_DGTZ_EnableDRS4Correction(fHandle) != CAEN_DGTZ_Success)
-        Log::OutWarning("Cannot re-enable DRS4 corrections: the acquired waveforms "
-                        "will not be corrected.");
 
     if (!ok) {
         Log::OutError("Transparent Mode baseline measurement failed: "

@@ -279,8 +279,34 @@ class Monitor:
 
     # -- grafici -------------------------------------------------------
 
+    @staticmethod
+    def banda_limitata(sig, dt_ns, fc_mhz):
+        """Segnale visto attraverso un passa-basso a un polo a fc_mhz.
+
+        Modella la banda della strada del trigger: e' una approssimazione, il
+        percorso vero e' piu' complicato, ma riproduce il fenomeno che conta,
+        cioe' che un impulso breve perde il picco mentre uno largo no.
+        """
+        n = sig.shape[-1]
+        f = np.fft.rfftfreq(n, d=dt_ns * 1e-9)
+        H = 1.0 / (1.0 + 1j * f / (fc_mhz * 1e6))
+        return np.fft.irfft(np.fft.rfft(sig) * H, n=n)
+
+    @staticmethod
+    def campiona(t_ns, sig, fs_mhz):
+        """Istanti in cui un ADC a fs_mhz leggerebbe, e i valori letti.
+
+        E' l'altra meta' del fenomeno: campionare non e' filtrare. Il rumore
+        viene letto comunque, l'impulso solo se cade su un istante buono.
+        """
+        passo = 1e3 / fs_mhz                       # ns fra due campioni
+        istanti = np.arange(t_ns[0], t_ns[-1], passo)
+        idx = np.searchsorted(t_ns, istanti)
+        idx = np.clip(idx, 0, len(t_ns) - 1)
+        return t_ns[idx], sig[idx]
+
     def figure(self, kind, n_show=1, xlim=(None, None), ylim=(None, None),
-               hset=None):
+               hset=None, bw=None):
         res = self.analysis()
         if res is None:
             return self._placeholder()
@@ -304,6 +330,25 @@ class Monitor:
                     ax.plot(t_ns, corr[e, i], lw=0.9 if n == 1 else 0.6,
                             alpha=1.0 if n == 1 else 0.5)
                 ax.axhline(0, color="k", lw=0.8, ls=":")
+
+                if bw:
+                    dt = float(t_ns[1] - t_ns[0])
+                    grezzo = corr[-1, i]
+                    filtrato = self.banda_limitata(grezzo, dt, bw)
+                    ts, vs = self.campiona(t_ns, filtrato, 30.0)
+                    ax.plot(t_ns, filtrato, lw=1.6, color="#d62728",
+                            label=f"dopo una banda a {bw:g} MHz")
+                    ax.plot(ts, vs, "o", ms=4, color="#8e44ad", zorder=5,
+                            label="letture di un ADC a 30 MHz")
+                    pg, pf = float(grezzo.min()), float(filtrato.min())
+                    rg = 1.4826 * np.median(np.abs(grezzo - np.median(grezzo)))
+                    rf = 1.4826 * np.median(np.abs(filtrato - np.median(filtrato)))
+                    ax.text(0.01, 0.04,
+                            f"picco  {pg:.0f} -> {pf:.1f} ADC   (x{pg/pf:.1f})\n"
+                            f"rumore {rg:.2f} -> {rf:.2f} ADC   (x{rg/rf:.1f})",
+                            transform=ax.transAxes, ha="left", va="bottom",
+                            fontsize=8.5, color="#333",
+                            bbox=dict(fc="white", ec="#ccc", alpha=.85))
 
                 rms = float(np.median(noise[:, i]))
                 eff, note = self.effective_threshold(amp[:, i], rms)
@@ -483,6 +528,7 @@ PAGE = """<!DOCTYPE html>
   <label>y min [ADC]<input id="ymin" value="__YMIN__" placeholder="auto"></label>
   <label>y max [ADC]<input id="ymax" value="__YMAX__" placeholder="auto"></label>
   <label>eventi<input id="nev" value="__NEVENTS__" style="width:60px"></label>
+  <label>banda [MHz]<input id="bw" value="__BW__" placeholder="off" style="width:70px"></label>
   <button id="reset">Autoscale</button>
   <span class="hint">forme d'onda · campi vuoti = autoscale</span>
 </div>
@@ -505,7 +551,7 @@ function setAlert(msg) {
   if (msg) a.textContent = msg;
   document.body.classList.toggle('stale', !!msg);
 }
-const FIELDS = ['xmin','xmax','ymin','ymax','nev'];
+const FIELDS = ['xmin','xmax','ymin','ymax','nev','bw'];
 
 // I limiti scelti sopravvivono a un reload della pagina. localStorage puo'
 // essere inaccessibile (finestra privata, cookie bloccati): mai fatale.
@@ -681,6 +727,7 @@ def make_handler(monitor, refresh, defaults):
             if route == "index.html":
                 page = (PAGE.replace("__REFRESH__", str(refresh))
                             .replace("__NEVENTS__", str(defaults["n"]))
+                            .replace("__BW__", _fmt(defaults["bw"]))
                             .replace("__XMIN__", _fmt(defaults["xmin"]))
                             .replace("__XMAX__", _fmt(defaults["xmax"]))
                             .replace("__YMIN__", _fmt(defaults["ymin"]))
@@ -720,7 +767,9 @@ def make_handler(monitor, refresh, defaults):
                                    ["1" if defaults["hlog"] else "0"])[0] == "1",
                         )
                     return self._send(200, "image/png",
-                                      monitor.figure(kinds[route], n, xlim, ylim, hset))
+                                      monitor.figure(kinds[route], n, xlim, ylim,
+                                                     hset, self._num(qs, "bw",
+                                                                     defaults["bw"])))
 
             self._send(404, "text/plain", b"not found")
 
@@ -736,6 +785,10 @@ def main():
     ap.add_argument("-p", "--port", type=int, default=8765)
     ap.add_argument("-n", "--nevents", type=int, default=1,
                     help="eventi sovrapposti nel grafico (default 1 = solo l'ultimo)")
+    ap.add_argument("--bw", type=float, default=None,
+                    help="mostra il segnale dopo un passa-basso a questa frequenza "
+                         "[MHz], piu' le letture di un ADC a 30 MHz. Serve a vedere "
+                         "cosa arriva al comparatore del self-trigger")
     ap.add_argument("--xmin", type=float, default=None, help="limite inferiore asse tempi [ns]")
     ap.add_argument("--xmax", type=float, default=None, help="limite superiore asse tempi [ns]")
     ap.add_argument("--ymin", type=float, default=None, help="limite inferiore asse ampiezze [ADC]")
@@ -773,7 +826,8 @@ def main():
 
     monitor = Monitor(data_dir, args.file, args.max_events,
                       min_interval=max(1.0, args.refresh / 2), vpp=args.vpp)
-    defaults = {"n": args.nevents, "xmin": args.xmin, "xmax": args.xmax,
+    defaults = {"n": args.nevents, "bw": args.bw,
+                "xmin": args.xmin, "xmax": args.xmax,
                 "ymin": args.ymin, "ymax": args.ymax,
                 "hxmin": args.hxmin, "hxmax": args.hxmax, "hlog": args.hlog}
 

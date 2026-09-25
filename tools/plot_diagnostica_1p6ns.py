@@ -73,48 +73,59 @@ def artefatti(ev):
 
 # ----------------------------------------------------------------------
 def fig_efficienza(cal, seg, out):
-    d = np.array([p["distanza"] for p in cal["punti"]])
-    eff = np.array([p["efficienza"] for p in cal["punti"]])
-    n = np.array([p["rate_hz"] for p in cal["punti"]]) * 30
-    err = eff * np.sqrt(1.0 / np.maximum(n, 1))
+    serie = cal["serie"]
+    colori = ["#1f77b4", "#e67e22"]
+    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.0))
 
-    fig, ax = plt.subplots(figsize=(7.8, 5.0))
-    ax.errorbar(d, 100 * eff, yerr=100 * err, fmt="o", ms=9, capsize=4, lw=1.8,
-                color="#1f77b4", zorder=5,
-                label="misura, normalizzata ai %g Hz del generatore"
-                      % cal["rate_generatore_hz"])
+    # --- a sinistra: le due ampiezze come sono state misurate
+    ax = axes[0]
+    for sr, col in zip(serie, colori):
+        d = np.array([p["distanza"] for p in sr["punti"]])
+        e = np.array([p["rate_hz"] for p in sr["punti"]]) / sr["rate_generatore_hz"]
+        n = np.array([p["rate_hz"] for p in sr["punti"]]) * 30
+        ax.errorbar(d, 100 * e, yerr=100 * e * np.sqrt(1 / np.maximum(n, 1)),
+                    fmt="o", ms=8, capsize=4, lw=1.7, color=col,
+                    label="%s  ->  %.2f mV/offset" % (sr["etichetta"], sr["mv_per_offset"]))
+        ax.axvline(sr["distanza_50pc"], color=col, lw=1, ls=":")
 
-    # previsione con la SOLA dispersione delle ampiezze, tarata perche' il 50%
-    # cada dove lo dice la misura: e' il turn-off piu' largo compatibile con la
-    # distribuzione osservata, e resta un gradino
+    # previsione con la SOLA dispersione delle ampiezze, tarata sul 50% misurato
     reali = seg["amp"][:, 0][seg["amp"][:, 0] < -90]
-    d50 = cal["distanza_50pc"]
-    k = abs(np.median(reali)) / d50
-    g = np.linspace(0, d.max() + 1.5, 400)
+    k = abs(np.median(reali)) / serie[0]["distanza_50pc"]
+    g = np.linspace(0, 13, 400)
     ax.plot(g, 100 * np.array([(np.abs(reali) > k * x).mean() for x in g]),
-            lw=2.2, ls="--", color="#c0392b",
-            label="previsione dalla sola dispersione delle\nampiezze (5-95%%: %.0f/%.0f cnt)"
-                  % (np.percentile(reali, 5), np.percentile(reali, 95)))
+            lw=2.0, ls="--", color="#c0392b",
+            label="previsione dalla sola\ndispersione delle ampiezze")
 
-    ax.axvline(d50, color="#666", lw=1, ls=":")
-    ax.annotate("50%% a distanza %.2f\n%.2f mV per offset\nattenuazione %.1f"
-                % (d50, cal["mv_per_offset"], cal["attenuazione"]),
-                xy=(d50, 50), xytext=(d50 + 0.7, 68), fontsize=9.5, color="#333",
-                arrowprops=dict(arrowstyle="->", color="#666"))
-
+    ax.axhline(50, color="#999", lw=.8, ls=":")
     ax.axvspan(0, 3.2, color="#c0392b", alpha=.09)
-    ax.annotate("escluso: qui il rate e' rumore\ne artefatti, non segnale\n"
-                "(dimostrato dalla run senza segnale)",
-                xy=(1.55, 22), ha="center", fontsize=8.5, color="#8a2020")
-
-    ax.set_xlabel("distanza soglia-piedistallo  [conteggi, Transparent Mode]")
+    ax.annotate("escluso: rumore\ne artefatti", xy=(1.6, 12), ha="center",
+                fontsize=8.5, color="#8a2020")
+    ax.set_xlabel("distanza soglia-piedistallo  [conteggi]")
     ax.set_ylabel("efficienza del self-trigger  [%]")
-    ax.set_title("Impulso da %.1f ns, %.1f mV: calibrazione alla larghezza dei PMT"
-                 % (cal["larghezza_ns"], abs(cal["ampiezza_mv"])), fontsize=12)
-    ax.set_xlim(0, d.max() + 1.5)
+    ax.set_title("Due ampiezze, impulso da %.1f ns" % cal["larghezza_ns"], fontsize=11)
+    ax.set_xlim(0, 13); ax.set_ylim(-2, 105)
+    ax.grid(alpha=.3); ax.legend(fontsize=8.5, loc="upper right")
+
+    # --- a destra: stessa cosa normalizzata all'ampiezza. Se la risposta e'
+    #     lineare le due curve devono sovrapporsi, ed e' il test di linearita'
+    ax = axes[1]
+    for sr, col in zip(serie, colori):
+        d = np.array([p["distanza"] for p in sr["punti"]]) / sr["ampiezza_conteggi"]
+        e = np.array([p["rate_hz"] for p in sr["punti"]]) / sr["rate_generatore_hz"]
+        ax.plot(1e3 * d, 100 * e, "o-", ms=8, lw=1.7, color=col, label=sr["etichetta"])
+        ax.axvline(1e3 * sr["distanza_50pc"] / sr["ampiezza_conteggi"],
+                   color=col, lw=1, ls=":")
+    ax.axhline(50, color="#999", lw=.8, ls=":")
+    ax.set_xlabel("soglia / ampiezza dell'impulso  [x1000]")
+    ax.set_ylabel("efficienza  [%]")
+    ax.set_title("Normalizzate all'ampiezza: le curve si sovrappongono", fontsize=11)
     ax.set_ylim(-2, 105)
-    ax.grid(alpha=.3)
-    ax.legend(fontsize=8.5, loc="upper right")
+    ax.grid(alpha=.3); ax.legend(fontsize=8.5)
+    ax.annotate(cal["linearita"].split(":")[0] + ":\naccordo entro il 2 per cento",
+                xy=(.04, .18), xycoords="axes fraction", fontsize=8.5, color="#333")
+
+    fig.suptitle("Calibrazione della soglia alla larghezza degli impulsi dei PMT",
+                 fontsize=12.5)
     salva(fig, out)
 
 

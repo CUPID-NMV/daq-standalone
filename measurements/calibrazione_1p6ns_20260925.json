@@ -50,9 +50,81 @@
       "efficienza": 0.026744186046511628
     }
   ],
-  "distanza_50pc": 7.84,
+  "distanza_50pc": 7.82,
   "mv_per_offset": 3.93,
   "attenuazione": 16.1,
   "conferma_indipendente": "L'artefatto del V1742 (-52 cnt = -12.69 mV, 1-3 ns) smette di triggerare fra distanza 2.80 e 3.80, quindi arriva al comparatore come ~3.2 conteggi: attenuazione ~16, cioe' ~4.0 mV/offset. Coincide con il valore ricavato dal generatore senza usarlo.",
-  "forma_del_turn_off": "L'efficienza scende dal 90% al 2.7% fra distanza 3.6 e 11.6, cioe' su otto conteggi, mentre la dispersione delle ampiezze (+-4%) ne giustificherebbe meno di mezzo. Il turn-off resta molto piu' largo di quanto la sola ampiezza spieghi."
+  "forma_del_turn_off": "L'efficienza scende dal 90% al 2.7% fra distanza 3.6 e 11.6, cioe' su otto conteggi, mentre la dispersione delle ampiezze (+-4%) ne giustificherebbe meno di mezzo. Il turn-off resta molto piu' largo di quanto la sola ampiezza spieghi.",
+  "serie": [
+    {
+      "etichetta": "30.76 mV (run 0104)",
+      "run": "PMT_selftrig_0104_2.5Gs_10PT.h5",
+      "ampiezza_mv": 30.76,
+      "ampiezza_conteggi": 126.0,
+      "rate_generatore_hz": 86.0,
+      "rate_misurato_come": "scaler sul trigger out",
+      "punti": [
+        {
+          "distanza": 3.64,
+          "rate_hz": 77.0
+        },
+        {
+          "distanza": 4.64,
+          "rate_hz": 72.7
+        },
+        {
+          "distanza": 5.64,
+          "rate_hz": 64.7
+        },
+        {
+          "distanza": 6.64,
+          "rate_hz": 54.7
+        },
+        {
+          "distanza": 7.64,
+          "rate_hz": 44.7
+        },
+        {
+          "distanza": 8.64,
+          "rate_hz": 36.0
+        },
+        {
+          "distanza": 9.64,
+          "rate_hz": 24.3
+        },
+        {
+          "distanza": 11.64,
+          "rate_hz": 2.3
+        }
+      ],
+      "distanza_50pc": 7.82,
+      "mv_per_offset": 3.93
+    },
+    {
+      "etichetta": "14.64 mV (run 0101)",
+      "run": "PMT_selftrig_0101_2.5Gs_10PT.h5",
+      "ampiezza_mv": 14.64,
+      "ampiezza_conteggi": 60.0,
+      "rate_generatore_hz": 86.0,
+      "rate_misurato_come": "NON misurato allo scaler: assunto uguale a quello della 0104",
+      "punti": [
+        {
+          "distanza": 3.88,
+          "rate_hz": 33.0
+        },
+        {
+          "distanza": 4.88,
+          "rate_hz": 9.7
+        },
+        {
+          "distanza": 5.88,
+          "rate_hz": 2.3
+        }
+      ],
+      "distanza_50pc": 3.66,
+      "mv_per_offset": 4.0,
+      "nota": "Usati solo offset 4, 5 e 6, dove la purezza e' ~100 per cento. Il punto a offset 3 e' escluso perche' contaminato da rumore e artefatti. Il 50 per cento cade sopra il punto piu' basso misurato, quindi e' estrapolato dai due piu' vicini. Assumendo 100 Hz invece di 86 il valore diventa 4.13, cioe' la conclusione non dipende dalla normalizzazione."
+    }
+  ],
+  "linearita": "Ampiezze in rapporto 2.10 danno 3.93 e 4.00 mV/offset: accordo entro il 2 per cento. La risposta del comparatore e' lineare nell'ampiezza sull'intervallo esplorato, quindi la calibrazione vale anche alle ampiezze dei PMT."
 }

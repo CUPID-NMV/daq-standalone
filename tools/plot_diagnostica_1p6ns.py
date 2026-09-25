@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
-"""Figure esplicative per lo scan in soglia con impulso da 1.6 ns.
+"""Figure esplicative per la calibrazione della soglia a 1.6 ns.
 
-Tre grafici, ognuno risponde a una domanda rimasta aperta:
-
-  1. efficienza.png   il turn-off e' molto piu' largo di quanto la dispersione
-                      delle ampiezze giustifichi
-  2. popolazioni.png  quali trigger sono segnale e quali rumore, e come si
-                      distinguono dalla posizione dell'impulso nella finestra
-  3. deriva.png       la deriva del piedistallo e' comune ai due canali, e
-                      spiega la perdita di purezza a soglia bassa
+  1. efficienza_1p6ns.png   la curva di efficienza e il confronto con quella
+                            che darebbe la sola dispersione delle ampiezze
+  2. popolazioni_1p6ns.png  come si distinguono segnale, rumore e artefatti
+                            del V1742, e perche' ch9 e' il discriminante
+  3. deriva_1p6ns.png       deriva del piedistallo, e rumore contro artefatti
+                            in funzione della soglia
 
 Va lanciato sul PC DAQ, dove stanno i file di dati.
 
@@ -30,183 +28,173 @@ import daqio
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "plots")
+CAL = os.path.join(ROOT, "measurements", "calibrazione_1p6ns_20260925.json")
+RUM = os.path.join(ROOT, "measurements", "rumore_artefatti_20260925.json")
 
-SOGLIA_IMPULSO = -40      # conteggi: sotto questa ampiezza l'evento ha un impulso
-FINESTRA_50NS = (40, 60)  # ns: dove il self-trigger mette l'impulso
-ATT_CONTINUA = 1.89       # attenuazione del Transparent Mode in continua
+# Il pre-scan della run 0104 e' a offset 4 con purezza verificata al 99.9%:
+# e' il campione di segnale puro, e non dipende dai confini dei passi dello
+# scan, che in quella run non sono ricostruibili con certezza.
+PRESCAN = (0, 6000)
+COINC_NS = 2.0            # tolleranza per dire che due canali hanno lo stesso picco
+SOGLIA_CH9 = -20          # conteggi: ch9 ha rumore 2.97, questo e' ben sopra
 
 
-def carica(meta):
-    """Ampiezza, posizione e livello DC per ogni evento della run."""
-    path = os.path.join(ROOT, "data", meta["run"])
+def leggi(nome, primi=None, ultimi=None):
+    path = os.path.join(ROOT, "data", nome)
     if not os.path.exists(path):
         path += ".gz"
-    f, tmp = daqio.open_file(path, live=not path.endswith(".gz"))
+    f, tmp = daqio.open_file(path, live=False)
     try:
         hdr = daqio.read_header(f)
         w = f["events/waveforms"]
-        n, ns = w.shape[0], hdr["SamplesPerChannel"]
-        nch = len(hdr["ChannelList"])
-        amp = np.empty(n); pos = np.empty(n)
-        dc = np.empty((n, nch))
-        for a in range(0, n, 2000):                     # a blocchi: il file e' grande
-            z = min(a + 2000, n)
-            d = np.asarray(w[a:z, :]).reshape(z - a, nch, ns).astype(np.float32)
-            m = np.median(d, axis=2)
-            dc[a:z] = m
-            s = d[:, 0, :] - m[:, 0][:, None]
-            amp[a:z] = s.min(axis=1)
-            pos[a:z] = np.argmin(s, axis=1) * hdr["SamplingTime"] * 1e9
+        ns, nch = hdr["SamplesPerChannel"], len(hdr["ChannelList"])
+        dt = hdr["SamplingTime"] * 1e9
+        a, z = (primi if primi else (w.shape[0] - ultimi, w.shape[0]))
+        a, z = max(a, 0), min(z, w.shape[0])
+        d = np.asarray(w[a:z, :]).reshape(z - a, nch, ns).astype(np.float32)
     finally:
         f.close()
         daqio._cleanup(tmp)
-    return amp, pos, dc, list(hdr["ChannelList"])
+    dc = np.median(d, axis=2)
+    s = d - dc[:, :, None]
+    return dict(amp=s.min(axis=2), pos=np.argmin(s, axis=2) * dt, dc=dc, dt=dt)
 
 
-def buoni(amp, pos):
-    """Eventi con un impulso vero, riconosciuto dalla posizione nella finestra."""
-    return (amp < SOGLIA_IMPULSO) & (pos > FINESTRA_50NS[0]) & (pos < FINESTRA_50NS[1])
+def artefatti(ev):
+    """Stesso picco su entrambi i canali: e' il difetto noto del V1742."""
+    vicino = np.abs(ev["pos"][:, 0] - ev["pos"][:, 1]) <= COINC_NS
+    return (ev["amp"][:, 1] < SOGLIA_CH9) & vicino
 
 
 # ----------------------------------------------------------------------
-def fig_efficienza(meta, amp, pos, out):
-    """Misura contro la previsione che tiene conto solo della dispersione."""
-    p = [x for x in meta["punti"] if not x.get("limite_superiore")]
-    lim = [x for x in meta["punti"] if x.get("limite_superiore")]
-    rg = meta["rate_generatore_hz"]
+def fig_efficienza(cal, seg, out):
+    d = np.array([p["distanza"] for p in cal["punti"]])
+    eff = np.array([p["efficienza"] for p in cal["punti"]])
+    n = np.array([p["rate_hz"] for p in cal["punti"]]) * 30
+    err = eff * np.sqrt(1.0 / np.maximum(n, 1))
 
-    d = np.array([x["distanza"] for x in p])
-    eff = np.array([x["rate_hz"] * x["purezza"] / rg for x in p])
-    # errore: statistico sul conteggio + 10% sulla purezza dove e' stata stimata
-    nev = np.array([x["rate_hz"] * meta["secondi_per_punto"] for x in p])
-    err = eff * np.sqrt(1.0 / np.maximum(nev, 1) + (0.10 * (1 - np.array(
-        [x["purezza"] for x in p])))**2)
-
-    dmax = max([x["distanza"] for x in meta["punti"]])
-    fig, ax = plt.subplots(figsize=(7.6, 5.0))
+    fig, ax = plt.subplots(figsize=(7.8, 5.0))
     ax.errorbar(d, 100 * eff, yerr=100 * err, fmt="o", ms=9, capsize=4, lw=1.8,
-                color="#1f77b4", zorder=5, label="misura (corretta per la purezza)")
-    for x in lim:
-        ax.annotate("", xy=(x["distanza"], 0.4), xytext=(x["distanza"], 4.5),
-                    arrowprops=dict(arrowstyle="-|>", color="#1f77b4", lw=1.4))
-    ax.plot([], [], marker=r"$\downarrow$", ls="none", color="#1f77b4",
-            ms=10, label="limite superiore (nessun trigger)")
+                color="#1f77b4", zorder=5,
+                label="misura, normalizzata ai %g Hz del generatore"
+                      % cal["rate_generatore_hz"])
 
-    # previsione: la SOLA dispersione delle ampiezze, scalata perche' il 50%
-    # cada dove lo dice la misura. E' il turn-off piu' largo compatibile con
-    # la distribuzione osservata, ed e' comunque un gradino.
-    reali = amp[buoni(amp, pos)]
-    a50 = np.median(reali)
-    d50 = np.interp(0.5, eff[::-1], d[::-1])
-    k = abs(a50) / d50                  # conteggi di ampiezza per conteggio di distanza
-    griglia = np.linspace(0, dmax + 1, 400)
-    prev = np.array([(np.abs(reali) > k * g).mean() for g in griglia])
-    ax.plot(griglia, 100 * prev, lw=2.2, color="#c0392b", ls="--",
-            label="previsione dalla sola dispersione\ndelle ampiezze (5-95%%: %.0f/%.0f cnt)"
+    # previsione con la SOLA dispersione delle ampiezze, tarata perche' il 50%
+    # cada dove lo dice la misura: e' il turn-off piu' largo compatibile con la
+    # distribuzione osservata, e resta un gradino
+    reali = seg["amp"][:, 0][seg["amp"][:, 0] < -90]
+    d50 = cal["distanza_50pc"]
+    k = abs(np.median(reali)) / d50
+    g = np.linspace(0, d.max() + 1.5, 400)
+    ax.plot(g, 100 * np.array([(np.abs(reali) > k * x).mean() for x in g]),
+            lw=2.2, ls="--", color="#c0392b",
+            label="previsione dalla sola dispersione delle\nampiezze (5-95%%: %.0f/%.0f cnt)"
                   % (np.percentile(reali, 5), np.percentile(reali, 95)))
 
-    ax.axhline(50, color="#888", lw=1, ls=":")
-    ax.annotate("50%", xy=(0.15, 52), color="#666", fontsize=9)
-    ax.axvspan(0, 3.4, color="#f39c12", alpha=.13)
-    ax.annotate("qui la deriva del piedistallo\nfa entrare rumore\n(purezza 55%)",
-                xy=(1.7, 76), ha="center", fontsize=9, color="#8a5a00")
+    ax.axvline(d50, color="#666", lw=1, ls=":")
+    ax.annotate("50%% a distanza %.2f\n%.2f mV per offset\nattenuazione %.1f"
+                % (d50, cal["mv_per_offset"], cal["attenuazione"]),
+                xy=(d50, 50), xytext=(d50 + 0.7, 68), fontsize=9.5, color="#333",
+                arrowprops=dict(arrowstyle="->", color="#666"))
+
+    ax.axvspan(0, 3.2, color="#c0392b", alpha=.09)
+    ax.annotate("escluso: qui il rate e' rumore\ne artefatti, non segnale\n"
+                "(dimostrato dalla run senza segnale)",
+                xy=(1.55, 22), ha="center", fontsize=8.5, color="#8a2020")
 
     ax.set_xlabel("distanza soglia-piedistallo  [conteggi, Transparent Mode]")
     ax.set_ylabel("efficienza del self-trigger  [%]")
-    ax.set_title("Impulso da %.1f ns, %.1f mV: il turn-off e' troppo largo"
-                 % (meta["larghezza_ns"], abs(meta["ampiezza_mv"])), fontsize=12)
-    ax.set_xlim(0, dmax + 0.8)
+    ax.set_title("Impulso da %.1f ns, %.1f mV: calibrazione alla larghezza dei PMT"
+                 % (cal["larghezza_ns"], abs(cal["ampiezza_mv"])), fontsize=12)
+    ax.set_xlim(0, d.max() + 1.5)
     ax.set_ylim(-2, 105)
     ax.grid(alpha=.3)
     ax.legend(fontsize=8.5, loc="upper right")
     salva(fig, out)
 
 
-def fig_popolazioni(meta, amp, pos, out):
-    """Segnale e rumore si separano nel piano ampiezza-posizione."""
-    p = {x["offset"]: x for x in meta["punti"]}
-    fig, axes = plt.subplots(1, 2, figsize=(10.4, 4.6), sharey=True, sharex=True)
-    for ax, off in zip(axes, (3, 5)):
-        s = slice(p[off]["eventi_da"], p[off]["eventi_a"])
-        a, q = amp[s], pos[s]
-        ax.scatter(q, a, s=7, alpha=.35, color="#1f77b4", edgecolors="none")
-        ax.axhspan(SOGLIA_IMPULSO, 5, color="#c0392b", alpha=.08)
-        ax.axvspan(*FINESTRA_50NS, color="#2ca02c", alpha=.10)
-        pur = 100 * buoni(a, q).mean()
-        ax.set_title("offset %d  (distanza %.2f)   purezza %.0f%%"
-                     % (off, p[off]["distanza"], pur), fontsize=11)
-        ax.set_xlabel("posizione del minimo nella finestra  [ns]")
-        ax.set_xlim(0, 410)
-        ax.grid(alpha=.3)
-    axes[0].set_ylabel("ampiezza  [conteggi]")
-    axes[0].annotate("trigger di rumore:\nampiezza piccola,\nposizione casuale",
-                     xy=(210, -20), fontsize=9, color="#a03020", ha="center")
-    axes[0].annotate("popolazione discreta a $-$52 cnt,\n~7%: origine non spiegata",
-                     xy=(255, -52), xytext=(150, -88), fontsize=8.5, color="#555",
-                     arrowprops=dict(arrowstyle="->", color="#777", lw=1))
-    axes[1].annotate("impulsi veri:\ntutti a 50 ns", xy=(120, -60), fontsize=9,
-                     color="#1a6b1a")
-    fig.suptitle("Come si riconosce un trigger di rumore", fontsize=12)
+def fig_popolazioni(seg, rum, out):
+    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.8))
+
+    ax = axes[0]
+    art = artefatti(rum)
+    ax.scatter(rum["amp"][~art, 0], rum["amp"][~art, 1], s=8, alpha=.35,
+               color="#7f8c8d", edgecolors="none", label="rumore")
+    ax.scatter(rum["amp"][art, 0], rum["amp"][art, 1], s=14, alpha=.7,
+               color="#c0392b", edgecolors="none", label="artefatto V1742")
+    lim = [-75, 5]
+    ax.plot(lim, lim, lw=1.2, color="#333", ls="--", label="ampiezze uguali")
+    ax.set_xlim(*lim); ax.set_ylim(*lim)
+    ax.set_xlabel("ampiezza ch8  [conteggi]")
+    ax.set_ylabel("ampiezza ch9  [conteggi]")
+    ax.set_title("Run senza segnale: l'artefatto sta sulla diagonale", fontsize=11)
+    ax.legend(fontsize=8.5, loc="upper left")
+    ax.grid(alpha=.3)
+    ax.annotate("stessa ampiezza sui due canali:\n$-52$ e $-54$ cnt, rapporto 1.02",
+                xy=(-52, -54), xytext=(-70, -28), fontsize=8.5, color="#8a2020",
+                arrowprops=dict(arrowstyle="->", color="#c0392b"))
+
+    ax = axes[1]
+    a, p = seg["amp"][:, 0], seg["pos"][:, 0]
+    ax.scatter(p, a, s=8, alpha=.4, color="#1f77b4", edgecolors="none")
+    ax.axvspan(40, 60, color="#2ca02c", alpha=.10)
+    ax.set_xlim(0, 410)
+    ax.set_xlabel("posizione del minimo nella finestra  [ns]")
+    ax.set_ylabel("ampiezza ch8  [conteggi]")
+    ax.set_title("Con segnale: impulsi veri, tutti a 50 ns e a $-126$ cnt",
+                 fontsize=11)
+    ax.grid(alpha=.3)
+
+    fig.suptitle("Segnale, rumore e artefatto si separano senza ambiguita'",
+                 fontsize=12)
+    salva(fig, out)
+
+
+def fig_deriva(seg, rum, rumjson, out):
+    fig, axes = plt.subplots(2, 1, figsize=(8.0, 6.6))
+
+    ax = axes[0]
+    ev = np.arange(len(seg["dc"]))
+    lisci = np.column_stack([liscia(seg["dc"][:, i]) for i in range(2)])
+    for i, ch in enumerate((8, 9)):
+        ax.plot(ev, lisci[:, i] - lisci[0, i], lw=1.8,
+                label="ch%d%s" % (ch, "  (generatore)" if i == 0 else "  (scollegato)"))
+    diff = (lisci[:, 0] - lisci[0, 0]) - (lisci[:, 1] - lisci[0, 1])
+    ax.plot(ev, diff, lw=2.0, color="#c0392b",
+            label="differenza: %.2f cnt" % (diff.max() - diff.min()))
+    ax.axhline(0, color="#999", lw=.8)
+    ax.set_xlabel("evento")
+    ax.set_ylabel("deriva del livello DC  [conteggi]\n(media mobile su 101 eventi)")
+    ax.set_title("Run 0104: deriva sotto il conteggio, e comune ai due canali",
+                 fontsize=11)
+    ax.legend(fontsize=8.5, ncol=3)
+    ax.grid(alpha=.3)
+
+    ax = axes[1]
+    pts = rumjson["punti"]
+    d = np.array([p["distanza"] for p in pts])
+    tot = np.array([p["rate_totale"] for p in pts])
+    fa = np.array([p["frazione_artefatti"] for p in pts])
+    ax.semilogy(d, tot * (1 - fa), "o-", color="#7f8c8d", ms=8, label="rumore")
+    ax.semilogy(d, tot * fa, "s-", color="#c0392b", ms=8, label="artefatti V1742")
+    ax.axvline(3.2, color="#2ca02c", lw=1.4, ls=":")
+    ax.annotate("l'artefatto smette di\npassare la soglia qui:\n~3.2 conteggi",
+                xy=(3.2, 6), xytext=(3.45, 40), fontsize=8.5, color="#1a6b1a")
+    ax.set_xlabel("distanza soglia-piedistallo  [conteggi]")
+    ax.set_ylabel("rate  [Hz]")
+    ax.set_title("Run senza segnale: le due componenti del fondo", fontsize=11)
+    ax.legend(fontsize=9)
+    ax.grid(alpha=.3, which="both")
     salva(fig, out)
 
 
 def liscia(x, n=101):
-    """Media mobile della deriva, isolata dalla dispersione evento per evento.
-
-    La mediana mobile non va bene: i livelli DC sono quasi interi, quindi la
-    mediana si quantizza e una deriva di pochi conteggi sparisce. La media ha
-    la risoluzione che serve, ma va protetta dagli eventi in cui una lunga
-    escursione sposta il piedistallo del singolo evento di decine di conteggi.
-    """
+    """Media mobile con clipping: isola la deriva dalla dispersione."""
+    n = min(n, max(3, len(x) // 6))
     c = np.median(x)
     x = np.clip(x, c - 8, c + 8)
     pad = np.pad(x, n // 2, mode="edge")
-    ker = np.ones(n) / n
-    return np.convolve(pad, ker, mode="valid")[:len(x)]
-
-
-def fig_deriva(meta, amp, pos, dc, chans, out):
-    """La deriva e' comune ai due canali, e mangia la purezza."""
-    p = {x["offset"]: x for x in meta["punti"]}
-    fig, axes = plt.subplots(2, 1, figsize=(8.0, 6.4))
-
-    ax = axes[0]
-    lisci = np.column_stack([liscia(dc[:, i]) for i in range(dc.shape[1])])
-    ev = np.arange(len(dc))
-    for i, ch in enumerate(chans):
-        ax.plot(ev, lisci[:, i] - lisci[0, i], lw=1.8,
-                label="ch%d%s" % (ch, "  (collegato al generatore)" if i == 0
-                                  else "  (non collegato)"))
-    diff = (lisci[:, 0] - lisci[0, 0]) - (lisci[:, 1] - lisci[0, 1])
-    ax.plot(ev, diff, lw=2.0, color="#c0392b",
-            label="differenza  (parte non comune): %.1f cnt" % (diff.max() - diff.min()))
-    ax.axhline(0, color="#999", lw=.8)
-    ax.set_xlabel("evento")
-    ax.set_ylabel("deriva del livello DC  [conteggi]\n(media mobile su 101 eventi)")
-    ax.set_title("La deriva e' quasi tutta comune ai due canali: non e' il generatore",
-                 fontsize=11)
-    ax.legend(fontsize=8.5, ncol=2)
-    ax.grid(alpha=.3)
-
-    ax = axes[1]
-    s = slice(p[3]["eventi_da"], p[3]["eventi_a"])
-    a, q, level = amp[s], pos[s], liscia(dc[:, 0])[s]
-    ok = buoni(a, q)
-    bordi = np.percentile(level, np.linspace(0, 100, 9))
-    xs, ys, es = [], [], []
-    for lo, hi in zip(bordi[:-1], bordi[1:]):
-        m = (level >= lo) & (level < hi)
-        if m.sum() > 30:
-            xs.append(level[m].mean())
-            ys.append(100 * ok[m].mean())
-            es.append(100 * np.sqrt(ok[m].mean() * (1 - ok[m].mean()) / m.sum()))
-    ax.errorbar(xs, ys, yerr=es, fmt="o-", ms=7, capsize=3, color="#8e44ad")
-    ax.set_xlabel("livello DC del canale  [conteggi]")
-    ax.set_ylabel("purezza dei trigger  [%]")
-    ax.set_title("A offset 3: quando il piedistallo scende verso la soglia, entra rumore",
-                 fontsize=11)
-    ax.grid(alpha=.3)
-    salva(fig, out)
+    return np.convolve(pad, np.ones(n) / n, mode="valid")[:len(x)]
 
 
 def salva(fig, nome):
@@ -219,14 +207,14 @@ def salva(fig, nome):
 
 
 def main():
-    src = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
-        ROOT, "measurements", "scan_1p6ns_20260924.json")
-    meta = json.load(open(src))
-    amp, pos, dc, chans = carica(meta)
-    print("eventi letti:", len(amp))
-    fig_efficienza(meta, amp, pos, "efficienza_1p6ns.png")
-    fig_popolazioni(meta, amp, pos, "popolazioni_1p6ns.png")
-    fig_deriva(meta, amp, pos, dc, chans, "deriva_1p6ns.png")
+    cal = json.load(open(CAL))
+    rumjson = json.load(open(RUM))
+    seg = leggi(cal["run"], primi=PRESCAN)
+    rum = leggi(rumjson["run"].replace(".gz", ""), ultimi=4000)
+    print("eventi letti: %d con segnale, %d senza" % (len(seg["amp"]), len(rum["amp"])))
+    fig_efficienza(cal, seg, "efficienza_1p6ns.png")
+    fig_popolazioni(seg, rum, "popolazioni_1p6ns.png")
+    fig_deriva(seg, rum, rumjson, "deriva_1p6ns.png")
 
 
 if __name__ == "__main__":

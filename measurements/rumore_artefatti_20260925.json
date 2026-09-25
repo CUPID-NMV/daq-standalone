@@ -1,0 +1,19 @@
+{
+  "descrizione": "Rumore e artefatti del V1742 misurati senza segnale: nella run 0108 l'uscita del generatore non arrivava a ch8, quindi tutti i trigger sono rumore o artefatti. Le due componenti si separano con la coincidenza su ch9, che non ha sorgente collegata.",
+  "data": "2026-09-25",
+  "run": "PMT_selftrig_0108_2.5Gs_10PT.h5.gz",
+  "artefatto": {
+    "ampiezza_ch8_conteggi": -52.0, "ampiezza_ch8_mv": -12.69,
+    "ampiezza_ch9_conteggi": -54.0, "ampiezza_ch9_mv": -13.18,
+    "rapporto_fra_canali": 1.020, "rapporto_rms": 0.042,
+    "dispersione_5_95_ch8": [-54, -50], "larghezza_ns": "1-3",
+    "nota": "Segnalato a CAEN, esiste una patch applicabile solo offline."
+  },
+  "punti": [
+    {"distanza": 1.80, "rate_totale": 850.8, "frazione_artefatti": 0.108},
+    {"distanza": 2.80, "rate_totale": 419.7, "frazione_artefatti": 0.137},
+    {"distanza": 3.80, "rate_totale": 19.0,  "frazione_artefatti": 0.089},
+    {"distanza": 2.80, "rate_totale": 670.2, "frazione_artefatti": 0.145, "ripetuto": true}
+  ],
+  "conclusione": "L'artefatto arriva al comparatore come ~3.2 conteggi: crolla di 34 volte fra distanza 2.80 e 3.80, coerentemente con un'ampiezza monocromatica al +-4%. Attenuazione ~16, in accordo con il 16.1 ricavato dal generatore."
+}

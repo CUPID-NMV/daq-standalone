@@ -118,11 +118,13 @@ def fig_efficienza(cal, seg, out):
     ax.axhline(50, color="#999", lw=.8, ls=":")
     ax.set_xlabel("soglia / ampiezza dell'impulso  [x1000]")
     ax.set_ylabel("efficienza  [%]")
-    ax.set_title("Normalizzate all'ampiezza: le curve si sovrappongono", fontsize=11)
+    ax.set_title("Normalizzate all'ampiezza: i punti al 50% coincidono", fontsize=11)
     ax.set_ylim(-2, 105)
     ax.grid(alpha=.3); ax.legend(fontsize=8.5)
-    ax.annotate(cal["linearita"].split(":")[0] + ":\naccordo entro il 2 per cento",
-                xy=(.04, .18), xycoords="axes fraction", fontsize=8.5, color="#333")
+    ax.annotate("Le due soglie al 50 per cento coincidono entro il 2 per cento.\n"
+                "Le code non si sovrappongono del tutto, e il 50 per cento della\n"
+                "serie bassa e' estrapolato: si ferma al 38 per cento misurato.",
+                xy=(.04, .13), xycoords="axes fraction", fontsize=8, color="#444")
 
     fig.suptitle("Calibrazione della soglia alla larghezza degli impulsi dei PMT",
                  fontsize=12.5)

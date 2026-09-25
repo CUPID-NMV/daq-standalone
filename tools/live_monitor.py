@@ -58,6 +58,8 @@ class Monitor:
     # l'altro. Serve qualche migliaio di eventi perche' converga.
     MIN_EVENTS_FOR_THRESHOLD = 1000
 
+    TAGLIO_CODA = 20      # campioni finali scartati: vedi analysis()
+
     def __init__(self, data_dir, path=None, max_events=2000, min_interval=2.0,
                  vpp=1.0):
         self.data_dir = data_dir
@@ -69,6 +71,7 @@ class Monitor:
         self.lock = threading.Lock()      # matplotlib non e' thread-safe
         self.hdr = None
         self.data = None
+        self.tail_cut = self.TAGLIO_CODA
         self.error = None
         self.path = None
 
@@ -189,10 +192,16 @@ class Monitor:
         if self._ana is not None:
             return self._ana
 
-        base, corr, amp, noise = baseline_amplitude(self.data)
+        # Gli ultimi campioni della finestra portano spesso un picco positivo
+        # spurio del V1742. Scartarli prima di qualsiasi calcolo: altrimenti
+        # sporcano piedistallo e rumore, non solo l'aspetto del grafico.
+        d = self.data
+        if self.tail_cut:
+            d = d[:, :, :max(d.shape[2] - self.tail_cut, 1)]
+        base, corr, amp, noise = baseline_amplitude(d)
 
         dt_ns = float(self.hdr.get("SamplingTime", 1e-9)) * 1e9
-        t_ns = np.arange(self.data.shape[2]) * dt_ns
+        t_ns = np.arange(d.shape[2]) * dt_ns
         self._ana = (self.hdr, base, corr, amp, t_ns, noise)
         return self._ana
 
@@ -374,7 +383,11 @@ class Monitor:
                 ax.set_ylabel("ADC − baseline")
                 ax.grid(alpha=0.25)
                 apply_limits(ax)
-            axes[-1][0].set_xlabel("tempo [ns]")
+            if self.tail_cut:
+                axes[-1][0].set_xlabel(
+                    f"tempo [ns]      (ultimi {self.tail_cut} campioni scartati)")
+            else:
+                axes[-1][0].set_xlabel("tempo [ns]")
 
         elif kind == "average":
             fig, ax = plt.subplots(figsize=(9, 4))
@@ -785,6 +798,9 @@ def main():
     ap.add_argument("-p", "--port", type=int, default=8765)
     ap.add_argument("-n", "--nevents", type=int, default=1,
                     help="eventi sovrapposti nel grafico (default 1 = solo l'ultimo)")
+    ap.add_argument("--tail-cut", type=int, default=Monitor.TAGLIO_CODA,
+                    help="campioni finali da scartare: il V1742 ci mette spesso "
+                         "un picco positivo spurio (0 per non scartarne)")
     ap.add_argument("--bw", type=float, default=None,
                     help="mostra il segnale dopo un passa-basso a questa frequenza "
                          "[MHz], piu' le letture di un ADC a 30 MHz. Serve a vedere "
@@ -826,6 +842,7 @@ def main():
 
     monitor = Monitor(data_dir, args.file, args.max_events,
                       min_interval=max(1.0, args.refresh / 2), vpp=args.vpp)
+    monitor.tail_cut = max(0, args.tail_cut)
     defaults = {"n": args.nevents, "bw": args.bw,
                 "xmin": args.xmin, "xmax": args.xmax,
                 "ymin": args.ymin, "ymax": args.ymax,

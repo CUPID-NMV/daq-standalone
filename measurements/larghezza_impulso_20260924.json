@@ -26,12 +26,11 @@
     },
     {
       "larghezza_ns": 1.6,
-      "ampiezza_mv": 14.64,
-      "taglio_conteggi": 2.88,
+      "ampiezza_mv": 30.76,
+      "taglio_conteggi": 7.84,
       "err_conteggi": 0.6,
-      "mv_per_offset": 5.08,
-      "limite_inferiore": true,
-      "nota": "Run 0101, generatore a 100 Hz. Il 50% cade al punto piu' basso dello scan o sotto, quindi 5.08 e' un LIMITE INFERIORE. L'efficienza non raggiunge mai il plateau: 48% al punto piu' basso."
+      "mv_per_offset": 3.93,
+      "nota": "Run 0104 con generatore a 86 Hz misurato allo scaler. Sostituisce il limite inferiore >=5.08, che derivava da un rate del generatore assunto a 100 Hz e da un'assegnazione sbagliata dei segmenti dello scan."
     }
   ],
   "note_7_6ns": "Lo scan non mostra un gradino netto ma una discesa continua da 103 Hz a offset 110 fino a 26 Hz a offset 250, poi zero fra 250 e 270. La discesa graduale e' l'effetto della fase di campionamento a 30 MHz su un impulso breve; il taglio netto e' il picco vero nel dominio del comparatore.",

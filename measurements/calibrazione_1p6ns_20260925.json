@@ -1,0 +1,58 @@
+{
+  "descrizione": "Calibrazione offset->mV a 1.6 ns FWHM, la larghezza degli impulsi dei PMT. Run 0104, generatore a 86 Hz misurato con scaler sul trigger out. I punti a offset 2 e 3 sono esclusi: li' il rate e' dominato da rumore e artefatti del V1742, come dimostrato dalla run 0108 presa senza segnale.",
+  "data": "2026-09-25",
+  "run": "PMT_selftrig_0104_2.5Gs_10PT.h5",
+  "canale": 8,
+  "rate_generatore_hz": 86.0,
+  "come_misurato_il_rate": "scaler sul trigger out del generatore",
+  "ampiezza_mv": -30.76,
+  "ampiezza_conteggi": -126.0,
+  "larghezza_ns": 1.6,
+  "punti": [
+    {
+      "distanza": 3.64,
+      "rate_hz": 77.0,
+      "efficienza": 0.8953488372093024
+    },
+    {
+      "distanza": 4.64,
+      "rate_hz": 72.7,
+      "efficienza": 0.8453488372093023
+    },
+    {
+      "distanza": 5.64,
+      "rate_hz": 64.7,
+      "efficienza": 0.7523255813953489
+    },
+    {
+      "distanza": 6.64,
+      "rate_hz": 54.7,
+      "efficienza": 0.636046511627907
+    },
+    {
+      "distanza": 7.64,
+      "rate_hz": 44.7,
+      "efficienza": 0.5197674418604652
+    },
+    {
+      "distanza": 8.64,
+      "rate_hz": 36.0,
+      "efficienza": 0.4186046511627907
+    },
+    {
+      "distanza": 9.64,
+      "rate_hz": 24.3,
+      "efficienza": 0.28255813953488373
+    },
+    {
+      "distanza": 11.64,
+      "rate_hz": 2.3,
+      "efficienza": 0.026744186046511628
+    }
+  ],
+  "distanza_50pc": 7.84,
+  "mv_per_offset": 3.93,
+  "attenuazione": 16.1,
+  "conferma_indipendente": "L'artefatto del V1742 (-52 cnt = -12.69 mV, 1-3 ns) smette di triggerare fra distanza 2.80 e 3.80, quindi arriva al comparatore come ~3.2 conteggi: attenuazione ~16, cioe' ~4.0 mV/offset. Coincide con il valore ricavato dal generatore senza usarlo.",
+  "forma_del_turn_off": "L'efficienza scende dal 90% al 2.7% fra distanza 3.6 e 11.6, cioe' su otto conteggi, mentre la dispersione delle ampiezze (+-4%) ne giustificherebbe meno di mezzo. Il turn-off resta molto piu' largo di quanto la sola ampiezza spieghi."
+}

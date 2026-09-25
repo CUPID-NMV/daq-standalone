@@ -170,18 +170,30 @@ def fig_deriva(seg, rum, rumjson, out):
     ax.axhline(0, color="#999", lw=.8)
     ax.set_xlabel("evento")
     ax.set_ylabel("deriva del livello DC  [conteggi]\n(media mobile su 101 eventi)")
-    ax.set_title("Run 0104: deriva sotto il conteggio, e comune ai due canali",
-                 fontsize=11)
+    pp = max(np.ptp(lisci[:, 0] - lisci[0, 0]), np.ptp(lisci[:, 1] - lisci[0, 1]))
+    ax.set_title("Run 0104: deriva %.1f cnt picco-picco, quasi tutta comune ai due canali"
+                 % pp, fontsize=11)
     ax.legend(fontsize=8.5, ncol=3)
     ax.grid(alpha=.3)
 
     ax = axes[1]
-    pts = rumjson["punti"]
-    d = np.array([p["distanza"] for p in pts])
-    tot = np.array([p["rate_totale"] for p in pts])
-    fa = np.array([p["frazione_artefatti"] for p in pts])
-    ax.semilogy(d, tot * (1 - fa), "o-", color="#7f8c8d", ms=8, label="rumore")
-    ax.semilogy(d, tot * fa, "s-", color="#c0392b", ms=8, label="artefatti V1742")
+    pts = sorted(rumjson["punti"], key=lambda q: q["distanza"])
+    def serie(rip):
+        q = [x for x in pts if bool(x.get("ripetuto")) is rip]
+        d = np.array([x["distanza"] for x in q])
+        t = np.array([x["rate_totale"] for x in q])
+        f = np.array([x["frazione_artefatti"] for x in q])
+        return d, t * (1 - f), t * f
+    d, ru, ar = serie(False)
+    ax.semilogy(d, ru, "o-", color="#7f8c8d", ms=8, label="rumore")
+    ax.semilogy(d, ar, "s-", color="#c0392b", ms=8, label="artefatti V1742")
+    # la misura ripetuta sta alla stessa distanza: va mostrata come dispersione,
+    # non unita da una linea che tornerebbe indietro
+    dr, rur, arr = serie(True)
+    if len(dr):
+        ax.semilogy(dr, rur, "o", mfc="none", color="#7f8c8d", ms=11, mew=1.8)
+        ax.semilogy(dr, arr, "s", mfc="none", color="#c0392b", ms=11, mew=1.8,
+                    label="stesso punto, ripetuto 4 minuti dopo")
     ax.axvline(3.2, color="#2ca02c", lw=1.4, ls=":")
     ax.annotate("l'artefatto smette di\npassare la soglia qui:\n~3.2 conteggi",
                 xy=(3.2, 6), xytext=(3.45, 40), fontsize=8.5, color="#1a6b1a")

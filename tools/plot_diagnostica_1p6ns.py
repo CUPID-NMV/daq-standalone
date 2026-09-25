@@ -43,7 +43,12 @@ def leggi(nome, primi=None, ultimi=None):
     path = os.path.join(ROOT, "data", nome)
     if not os.path.exists(path):
         path += ".gz"
-    f, tmp = daqio.open_file(path, live=False)
+    try:
+        f, tmp = daqio.open_file(path, live=False)
+    except daqio.DaqFileError:
+        # Una run non chiusa in modo pulito lascia il flag di scrittura nel
+        # file: in lettura normale HDF5 lo rifiuta, in SWMR no.
+        f, tmp = daqio.open_file(path, live=True)
     try:
         hdr = daqio.read_header(f)
         w = f["events/waveforms"]

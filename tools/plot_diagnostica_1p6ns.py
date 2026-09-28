@@ -128,7 +128,8 @@ def fig_efficienza(cal, seg, out):
                 "la risposta e' lineare nell'ampiezza. Quella a 1 GS/s no:\n"
                 "il comparatore vede lo stesso impulso il 26 per cento piu'\n"
                 "grande, quindi la calibrazione dipende dal campionamento.",
-                xy=(.03, .10), xycoords="axes fraction", fontsize=8, color="#444")
+                xy=(.03, .04), xycoords="axes fraction", fontsize=8, color="#444",
+                bbox=dict(fc="white", ec="#ddd", alpha=.9))
 
     fig.suptitle("Calibrazione della soglia alla larghezza degli impulsi dei PMT",
                  fontsize=12.5)

@@ -23,7 +23,20 @@ import daqio
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-SOGLIA_IMPULSO = -40       # conteggi sotto i quali l'evento ha un impulso vero
+SOGLIA_MIN     = -15       # conteggi: il piu' permissivo che abbia senso
+SIGMA_IMPULSO  = 8         # oppure questo numero di sigma di rumore, se maggiore
+
+
+def soglia_impulso(rms):
+    """Ampiezza sotto la quale si considera che l'evento contenga un impulso.
+
+    Scritta fissa a -40 conteggi tagliava fuori segnali perfettamente validi:
+    lo stesso impulso misurato -45 a 2.5 GS/s vale -37 a 1 GS/s, perche' con un
+    campione ogni nanosecondo il picco cade fra due punti. Il taglio si ricava
+    invece dal rumore del canale, restando comunque ben sopra il massimo che il
+    rumore puo' produrre su una traccia intera (~4-5 sigma).
+    """
+    return min(SOGLIA_MIN, -SIGMA_IMPULSO * float(rms))
 TOLLERANZA_NS  = 15        # semiampiezza della finestra in cui cercare l'impulso
 LATENZA_NS     = {"paired": 320.0, "global": 420.0}
 
@@ -192,11 +205,12 @@ def main():  # noqa: C901
     print()
 
     for i, ch in enumerate(chans):
-        buoni = (amp[:, i] < SOGLIA_IMPULSO) & (pos[:, i] > FIN[0]) \
+        cut = soglia_impulso(np.median(rms[:, i]))
+        buoni = (amp[:, i] < cut) & (pos[:, i] > FIN[0]) \
                                              & (pos[:, i] < FIN[1])
         pur = 100.0 * buoni.mean() if len(buoni) else float("nan")
-        print("ch%d:  rumore %.2f cnt   impulso in posizione nel %.1f%% degli eventi"
-              % (ch, np.median(rms[:, i]), pur))
+        print("ch%d:  rumore %.2f cnt   impulso in posizione nel %.1f%% degli eventi "
+              "(soglia %.0f cnt)" % (ch, np.median(rms[:, i]), pur, cut))
         if buoni.sum() > 20:
             a = amp[buoni, i]
             q = np.percentile(a, [5, 25, 50, 75, 95])
@@ -208,7 +222,7 @@ def main():  # noqa: C901
                  (dd.max() - dd.min()) / ATT_CONTINUA))
 
     # la larghezza si misura solo sul canale che ha davvero il segnale
-    i = int(np.argmax([( (amp[:, k] < SOGLIA_IMPULSO) &
+    i = int(np.argmax([( (amp[:, k] < soglia_impulso(np.median(rms[:, k]))) &
                          (pos[:, k] > FIN[0]) &
                          (pos[:, k] < FIN[1]) ).sum()
                        for k in range(len(chans))]))
@@ -216,7 +230,7 @@ def main():  # noqa: C901
     try:
         w = f["events/waveforms"]
         ns = hdr["SamplesPerChannel"]; nch = len(chans)
-        sel = np.where((amp[:, i] < SOGLIA_IMPULSO) &
+        sel = np.where((amp[:, i] < soglia_impulso(np.median(rms[:, i]))) &
                        (pos[:, i] > FIN[0]) &
                        (pos[:, i] < FIN[1]))[0]
         if len(sel):

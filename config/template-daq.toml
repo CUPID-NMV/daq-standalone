@@ -29,6 +29,25 @@ TailCut = 12    # numero di sample da eliminare alla fine di ogni canale
 #    entrambi false                                 -> solo trigger software
 # ===========================================================================
 
+# ---------------------------------------------------------------------------
+#  Correzione delle celle del DRS4
+#
+#  Riguarda i dati REGISTRATI, non il trigger: la decisione del self-trigger la
+#  prende l'hardware sul segnale in Transparent Mode, che raggiunge l'ADC senza
+#  attraversare le celle di memoria del DRS4, quindi questa opzione non la
+#  tocca in nessun modo.
+#
+#  Spenta, il pattern grezzo delle celle domina la traccia: ~34 conteggi di RMS
+#  contro ~1.5 con la correzione attiva, cioe' 8 mV di struttura. Correggerlo a
+#  posteriori non si puo': il pattern e' agganciato alla cella fisica e
+#  servirebbe lo Start Index Cell, che non salviamo.
+#
+#  Viene comunque disabilitata durante la misura del piedistallo in Transparent
+#  Mode, dove le tabelle (tarate sull'Output Mode) gonfierebbero l'RMS di ~40x.
+# ---------------------------------------------------------------------------
+DRS4Correction = true
+
+
 # --- Fronte di discriminazione, vale per TRn e per il self-trigger ---
 TriggerPolarity = 1          # 0 = rising, 1 = falling (impulsi negativi)
 

@@ -74,7 +74,7 @@ def artefatti(ev):
 # ----------------------------------------------------------------------
 def fig_efficienza(cal, seg, out):
     serie = cal["serie"]
-    colori = ["#1f77b4", "#e67e22"]
+    colori = ["#1f77b4", "#e67e22", "#2ca02c"]
     fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.0))
 
     # --- a sinistra: le due ampiezze come sono state misurate
@@ -85,13 +85,15 @@ def fig_efficienza(cal, seg, out):
         n = np.array([p["rate_hz"] for p in sr["punti"]]) * 30
         ax.errorbar(d, 100 * e, yerr=100 * e * np.sqrt(1 / np.maximum(n, 1)),
                     fmt="o", ms=8, capsize=4, lw=1.7, color=col,
-                    label="%s  ->  %.2f mV/offset" % (sr["etichetta"], sr["mv_per_offset"]))
+                    label="%s\n%.2f mV/offset, attenuazione %.1f"
+                          % (sr["etichetta"], sr["mv_per_offset"],
+                             sr["mv_per_offset"] / (1000.0 / 4096)))
         ax.axvline(sr["distanza_50pc"], color=col, lw=1, ls=":")
 
     # previsione con la SOLA dispersione delle ampiezze, tarata sul 50% misurato
     reali = seg["amp"][:, 0][seg["amp"][:, 0] < -90]
     k = abs(np.median(reali)) / serie[0]["distanza_50pc"]
-    g = np.linspace(0, 13, 400)
+    g = np.linspace(0, 15, 400)
     ax.plot(g, 100 * np.array([(np.abs(reali) > k * x).mean() for x in g]),
             lw=2.0, ls="--", color="#c0392b",
             label="previsione dalla sola\ndispersione delle ampiezze")
@@ -102,8 +104,9 @@ def fig_efficienza(cal, seg, out):
                 fontsize=8.5, color="#8a2020")
     ax.set_xlabel("distanza soglia-piedistallo  [conteggi]")
     ax.set_ylabel("efficienza del self-trigger  [%]")
-    ax.set_title("Due ampiezze, impulso da %.1f ns" % cal["larghezza_ns"], fontsize=11)
-    ax.set_xlim(0, 13); ax.set_ylim(-2, 105)
+    ax.set_title("Impulso da %.1f ns: due ampiezze e due frequenze"
+                 % cal["larghezza_ns"], fontsize=11)
+    ax.set_xlim(0, 15); ax.set_ylim(-2, 105)
     ax.grid(alpha=.3); ax.legend(fontsize=8.5, loc="upper right")
 
     # --- a destra: stessa cosa normalizzata all'ampiezza. Se la risposta e'
@@ -118,13 +121,14 @@ def fig_efficienza(cal, seg, out):
     ax.axhline(50, color="#999", lw=.8, ls=":")
     ax.set_xlabel("soglia / ampiezza dell'impulso  [x1000]")
     ax.set_ylabel("efficienza  [%]")
-    ax.set_title("Normalizzate all'ampiezza: i punti al 50% coincidono", fontsize=11)
+    ax.set_title("Normalizzate all'ampiezza: 1 GS/s non si sovrappone", fontsize=11)
     ax.set_ylim(-2, 105)
     ax.grid(alpha=.3); ax.legend(fontsize=8.5)
-    ax.annotate("Le due soglie al 50 per cento coincidono entro il 2 per cento.\n"
-                "Le code non si sovrappongono del tutto, e il 50 per cento della\n"
-                "serie bassa e' estrapolato: si ferma al 38 per cento misurato.",
-                xy=(.04, .13), xycoords="axes fraction", fontsize=8, color="#444")
+    ax.annotate("Le due serie a 2.5 GS/s coincidono entro il 2 per cento:\n"
+                "la risposta e' lineare nell'ampiezza. Quella a 1 GS/s no:\n"
+                "il comparatore vede lo stesso impulso il 26 per cento piu'\n"
+                "grande, quindi la calibrazione dipende dal campionamento.",
+                xy=(.03, .10), xycoords="axes fraction", fontsize=8, color="#444")
 
     fig.suptitle("Calibrazione della soglia alla larghezza degli impulsi dei PMT",
                  fontsize=12.5)

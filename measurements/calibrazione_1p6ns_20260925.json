@@ -98,7 +98,8 @@
         }
       ],
       "distanza_50pc": 7.82,
-      "mv_per_offset": 3.93
+      "mv_per_offset": 3.93,
+      "campionamento": "2.5GHz"
     },
     {
       "etichetta": "14.64 mV (run 0101)",
@@ -123,8 +124,42 @@
       ],
       "distanza_50pc": 3.66,
       "mv_per_offset": 4.0,
-      "nota": "Usati solo offset 4, 5 e 6, dove la purezza e' ~100 per cento. Il punto a offset 3 e' escluso perche' contaminato da rumore e artefatti. Il 50 per cento cade sopra il punto piu' basso misurato, quindi e' estrapolato dai due piu' vicini. Assumendo 100 Hz invece di 86 il valore diventa 4.13, cioe' la conclusione non dipende dalla normalizzazione."
+      "nota": "Usati solo offset 4, 5 e 6, dove la purezza e' ~100 per cento. Il punto a offset 3 e' escluso perche' contaminato da rumore e artefatti. Il 50 per cento cade sopra il punto piu' basso misurato, quindi e' estrapolato dai due piu' vicini. Assumendo 100 Hz invece di 86 il valore diventa 4.13, cioe' la conclusione non dipende dalla normalizzazione.",
+      "campionamento": "2.5GHz"
+    },
+    {
+      "etichetta": "30.76 mV a 1 GS/s (run 0137)",
+      "run": "PMT_selftrig_0137_1Gs_10PT.h5",
+      "campionamento": "1GHz",
+      "ampiezza_mv": 30.76,
+      "ampiezza_conteggi": 126.0,
+      "ampiezza_letta_a_1gs_mv": 26.35,
+      "rate_generatore_hz": 86.0,
+      "rate_misurato_come": "scaler sul trigger out",
+      "punti": [
+        {
+          "distanza": 7.8,
+          "rate_hz": 68.8
+        },
+        {
+          "distanza": 9.8,
+          "rate_hz": 43.2
+        },
+        {
+          "distanza": 11.8,
+          "rate_hz": 25.2
+        },
+        {
+          "distanza": 13.8,
+          "rate_hz": 2.7
+        }
+      ],
+      "distanza_50pc": 9.82,
+      "mv_per_offset": 3.13,
+      "attenuazione": 12.8,
+      "nota": "Ampiezza misurata a 2.5 GS/s (run 0138, -126 cnt) senza toccare il generatore: a 1 GS/s il digitizer ne legge 26.35 mV, cioe' il 14 per cento in meno, perche' con un campione ogni nanosecondo il picco di un impulso da 1.6 ns cade fra due punti. Usare quel valore avrebbe dato 2.69 mV/offset invece di 3.13. Il punto a offset 6 e' escluso: rate saturo e purezza 4.5 per cento."
     }
   ],
-  "linearita": "Ampiezze in rapporto 2.10 danno 3.93 e 4.00 mV/offset: accordo entro il 2 per cento. La risposta del comparatore e' lineare nell'ampiezza sull'intervallo esplorato, quindi la calibrazione vale anche alle ampiezze dei PMT."
+  "linearita": "Ampiezze in rapporto 2.10 danno 3.93 e 4.00 mV/offset: accordo entro il 2 per cento. La risposta del comparatore e' lineare nell'ampiezza sull'intervallo esplorato, quindi la calibrazione vale anche alle ampiezze dei PMT.",
+  "dipendenza_dal_campionamento": "Stesso impulso, stesso generatore, sola frequenza di campionamento diversa: d50 passa da 7.82 a 2.5 GS/s a 9.82 a 1 GS/s, cioe' il comparatore vede il segnale il 26 per cento piu' grande. La calibrazione passa da 3.93 a 3.13 mV per offset, l'attenuazione da 16.1 a 12.8. Con il clock del DRS4 piu' lento l'apertura con cui il segnale viene trasferito all'ADC e' piu' lunga, quindi un impulso stretto ne esce meno schiacciato. Smentisce l'aspettativa che il Transparent Mode fosse indipendente dal clock di campionamento."
 }

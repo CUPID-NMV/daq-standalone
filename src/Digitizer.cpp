@@ -1,4 +1,5 @@
 // Digitizer.cpp aggiornato e corretto per V1742 32 canali
+#include <cctype>
 #include <filesystem>
 #define CAEN_USE_X742
 
@@ -388,14 +389,28 @@ void Digitizer::SelectBoard()
     CAEN_DGTZ_DRS4Frequency_t freq = CAEN_DGTZ_DRS4_5GHz;
     double sTime = 0.2e-9;
 
-    if (fSamplingRateStr == "5GHz") {
-        freq = CAEN_DGTZ_DRS4_5GHz;    sTime = 0.2e-9;
-    } else if (fSamplingRateStr == "2.5GHz") {
-        freq = CAEN_DGTZ_DRS4_2_5GHz;  sTime = 0.4e-9;
-    } else if (fSamplingRateStr == "1GHz") {
-        freq = CAEN_DGTZ_DRS4_1GHz;    sTime = 1.0e-9;
+    // Il confronto e' su stringa, quindi va normalizzato: "1.0GHz" e "1 ghz"
+    // sono la stessa cosa per chi scrive il file di configurazione. E un valore
+    // non riconosciuto e' un ERRORE, non un avviso: cadere sul default di 5 GHz
+    // significa fare l'intera run a una frequenza diversa da quella chiesta, e
+    // a 5 GHz il self-trigger non puo' nemmeno funzionare perche' la latenza e'
+    // piu' lunga della finestra. Un warning in mezzo al log non basta: e' gia'
+    // costata una run, che si chiamava "1Gs" ed era a 5 GS/s.
+    std::string rate;
+    for (char ch : fSamplingRateStr)
+        if (!std::isspace(static_cast<unsigned char>(ch)))
+            rate += static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+
+    if (rate == "5ghz" || rate == "5.0ghz" || rate == "5") {
+        freq = CAEN_DGTZ_DRS4_5GHz;    sTime = 0.2e-9;  fSamplingRateStr = "5GHz";
+    } else if (rate == "2.5ghz" || rate == "2.5") {
+        freq = CAEN_DGTZ_DRS4_2_5GHz;  sTime = 0.4e-9;  fSamplingRateStr = "2.5GHz";
+    } else if (rate == "1ghz" || rate == "1.0ghz" || rate == "1") {
+        freq = CAEN_DGTZ_DRS4_1GHz;    sTime = 1.0e-9;  fSamplingRateStr = "1GHz";
     } else {
-        Log::OutWarning("Unknown SamplingRate = '" + fSamplingRateStr + "'. Defaulting to 5 GHz.");
+        Log::OutError("Unknown SamplingRate = '" + fSamplingRateStr +
+                      "'. Accepted values: \"5GHz\", \"2.5GHz\", \"1GHz\".");
+        exit(1);
     }
 
     err = CAEN_DGTZ_SetDRS4SamplingFrequency(fHandle, freq);

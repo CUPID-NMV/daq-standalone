@@ -1293,7 +1293,7 @@ void Digitizer::AcquireEvents() {
 
     uint32_t totalEvents = 0;
     const uint32_t maxEvents = fNEvents;
-    const int maxRetries = 5000;
+    const int maxRetries = 50000;   // attese consecutive da 100 ms = ~83 min senza un evento
     int retry = 0;
 
     // Un errore di comunicazione con la board puo' essere transitorio: e' gia'
@@ -1326,10 +1326,19 @@ void Digitizer::AcquireEvents() {
             continue;
         }
         readErrors = 0;
+        retry = 0;              // il contatore di attese vuote conta le attese
+                                // CONSECUTIVE: senza azzerarlo, una run lunga a
+                                // basso rate si fermava da sola al raggiungimento
+                                // di maxRetries, senza dire perche'.
 
         if (fBufferSize == 0) {
             if (fSelfTrigger) CheckLiveThresholds();
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            // Un secondo intero senza toccare il link e' troppo: a basso rate
+            // sono centinaia di silenzi lunghi, e il sintomo delle run che
+            // muoiono con ReadData -1 si presenta solo a basso rate. Con 100 ms
+            // il link resta impegnato, e le soglie a caldo diventano anche piu'
+            // reattive. Il costo in CPU e' trascurabile.
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
             ++retry;
             continue;
         }

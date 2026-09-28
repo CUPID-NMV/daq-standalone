@@ -1287,6 +1287,14 @@ void Digitizer::AcquireEvents() {
     const int maxRetries = 5000;
     int retry = 0;
 
+    // Un errore di comunicazione con la board puo' essere transitorio: e' gia'
+    // successo di perdere otto minuti di presa dati per un singolo -1
+    // (CommError) mentre il link era ancora perfettamente vivo. Si riprova
+    // qualche volta prima di arrendersi, e si torna a zero appena una lettura
+    // riesce, cosi' un errore isolato non conta come l'inizio di una serie.
+    const int maxReadErrors = 20;          // ~4 s a 200 ms per tentativo
+    int readErrors = 0;
+
     while (totalEvents < maxEvents && retry < maxRetries) {
         re = CAEN_DGTZ_ReadData(
             fHandle,
@@ -1295,9 +1303,20 @@ void Digitizer::AcquireEvents() {
             &fBufferSize
         );
         if (re != CAEN_DGTZ_Success) {
-            Log::OutError("ReadData failed in AcquireEvents. Code: " + std::to_string(re));
-            break;
+            ++readErrors;
+            if (readErrors >= maxReadErrors) {
+                Log::OutError("ReadData failed " + std::to_string(readErrors) +
+                              " times in a row (last code: " + std::to_string(re) +
+                              "): giving up. The link to the board is down; a restart "
+                              "of the DAQ usually re-establishes it.");
+                break;
+            }
+            Log::OutWarning("ReadData failed (code " + std::to_string(re) + "), retry " +
+                            std::to_string(readErrors) + "/" + std::to_string(maxReadErrors));
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            continue;
         }
+        readErrors = 0;
 
         if (fBufferSize == 0) {
             if (fSelfTrigger) CheckLiveThresholds();

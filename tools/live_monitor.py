@@ -821,7 +821,7 @@ def main():
     ap.add_argument("--vpp", type=float, default=1.0,
                     help="range di ingresso del digitizer in Vpp (default 1.0; "
                          "2.0 per la versione VPERS1742)")
-    ap.add_argument("-r", "--refresh", type=float, default=5,
+    ap.add_argument("-r", "--refresh", type=float, default=2,
                     help="secondi fra un aggiornamento e l'altro (default 5)")
     args = ap.parse_args()
 
@@ -841,7 +841,7 @@ def main():
     print(f"Dati letti da: {os.path.abspath(data_dir)}")
 
     monitor = Monitor(data_dir, args.file, args.max_events,
-                      min_interval=max(1.0, args.refresh / 2), vpp=args.vpp)
+                      min_interval=max(0.3, args.refresh / 2), vpp=args.vpp)
     monitor.tail_cut = max(0, args.tail_cut)
     defaults = {"n": args.nevents, "bw": args.bw,
                 "xmin": args.xmin, "xmax": args.xmax,

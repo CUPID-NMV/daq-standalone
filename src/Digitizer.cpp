@@ -1304,6 +1304,10 @@ void Digitizer::AcquireEvents() {
     const int maxReadErrors = 20;          // ~4 s a 200 ms per tentativo
     int readErrors = 0;
 
+    // Ritardo massimo con cui un evento diventa visibile ai lettori SWMR
+    constexpr long kFlushMaxDelayMs = 300;
+    auto lastFlush = std::chrono::steady_clock::now();
+
     while (totalEvents < maxEvents && retry < maxRetries) {
         re = CAEN_DGTZ_ReadData(
             fHandle,
@@ -1445,10 +1449,24 @@ void Digitizer::AcquireEvents() {
                         ++fH5Rows;
 
                         // In SWMR i lettori vedono i dati solo dopo una flush.
-                        if (fLiveMonitoring && (fH5Rows % fFlushEvery) == 0) {
-                            H5Dflush(fH5Waveforms->getId());
-                            if (fH5WaveformsRaw != nullptr)
-                                H5Dflush(fH5WaveformsRaw->getId());
+                        // Il conteggio degli eventi da solo non basta: a basso
+                        // rate aspettare LiveFlushEvery eventi vuol dire far
+                        // aspettare al monitor LiveFlushEvery/rate secondi, che
+                        // a 0.5 Hz sono venti. Si flusha anche allo scadere di
+                        // un tempo, cosi' a rate basso si flusha di fatto a ogni
+                        // evento (e sono pochi, quindi costa niente) e a rate
+                        // alto resta il conteggio a limitare la frequenza.
+                        if (fLiveMonitoring) {
+                            auto now = std::chrono::steady_clock::now();
+                            bool perConteggio = (fH5Rows % fFlushEvery) == 0;
+                            bool perTempo = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                now - lastFlush).count() >= kFlushMaxDelayMs;
+                            if (perConteggio || perTempo) {
+                                H5Dflush(fH5Waveforms->getId());
+                                if (fH5WaveformsRaw != nullptr)
+                                    H5Dflush(fH5WaveformsRaw->getId());
+                                lastFlush = now;
+                            }
                         }
 
                     } catch (const H5::Exception& e) {

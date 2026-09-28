@@ -24,7 +24,30 @@ import daqio
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SOGLIA_IMPULSO = -40       # conteggi sotto i quali l'evento ha un impulso vero
-FINESTRA_50NS = (40, 60)   # ns: dove il self-trigger mette l'impulso
+TOLLERANZA_NS  = 15        # semiampiezza della finestra in cui cercare l'impulso
+LATENZA_NS     = {"paired": 320.0, "global": 420.0}
+
+
+def finestra_attesa(hdr):
+    """Dove il self-trigger mette l'impulso, (da, a) in ns.
+
+    Non e' una costante: dipende da frequenza di campionamento e
+    PostTriggerSize. A 2.5 GS/s con PostTriggerSize 10% cade a ~50 ns, a
+    1 GS/s a ~600 ns. Scriverla fissa a 40-60 ns fa dire allo strumento
+    "nessun impulso" su una run perfettamente sana presa a un'altra frequenza.
+
+        posizione = (1 - PostTriggerSize) * finestra - latenza
+    """
+    try:
+        dt = float(hdr["SamplingTime"]) * 1e9
+        n = int(hdr["SamplesPerChannel"])
+        post = float(hdr["PostTriggerSize"]) / 100.0
+        modo = str(hdr.get("SelfTriggerMode", "paired"))
+    except (KeyError, TypeError, ValueError):
+        return None, None
+    lat = LATENZA_NS.get(modo, LATENZA_NS["paired"])
+    pos = (1.0 - post) * (n * dt) - lat
+    return pos, (pos - TOLLERANZA_NS, pos + TOLLERANZA_NS)
 CONTEGGIO_MV = 1000.0 / 4096
 ATT_CONTINUA = 1.89        # attenuazione del Transparent Mode in continua
 
@@ -108,7 +131,7 @@ def deriva(x, n=101):
     return np.convolve(pad, np.ones(n) / n, mode="valid")[:len(x)]
 
 
-def main():
+def main():  # noqa: C901
     ap = argparse.ArgumentParser()
     ap.add_argument("file", nargs="?")
     ap.add_argument("-d", "--data-dir", default=os.path.join(ROOT, "data"))
@@ -141,6 +164,17 @@ def main():
             print("rate: non misurabile (", e, ")")
 
     hdr, chans, dt, n_tot, amp, pos, dc, rms = analizza(path, live, args.max_events)
+    attesa, FIN = finestra_attesa(hdr)
+    if FIN is None:
+        FIN = (-1e9, 1e9)
+        print("posizione attesa dell'impulso: non calcolabile, cerco su tutta la finestra")
+    elif attesa < 0:
+        print("ATTENZIONE: con questa frequenza e PostTriggerSize l'impulso cade a "
+              "%.0f ns, cioe' PRIMA dell'inizio della finestra: non e' registrabile"
+              % attesa)
+    else:
+        print("posizione attesa dell'impulso: %.0f ns  (finestra %.0f-%.0f ns)"
+              % (attesa, FIN[0], FIN[1]))
     if n_tot == 0:
         print("eventi: NESSUNO")
         print()
@@ -158,10 +192,10 @@ def main():
     print()
 
     for i, ch in enumerate(chans):
-        buoni = (amp[:, i] < SOGLIA_IMPULSO) & (pos[:, i] > FINESTRA_50NS[0]) \
-                                             & (pos[:, i] < FINESTRA_50NS[1])
+        buoni = (amp[:, i] < SOGLIA_IMPULSO) & (pos[:, i] > FIN[0]) \
+                                             & (pos[:, i] < FIN[1])
         pur = 100.0 * buoni.mean() if len(buoni) else float("nan")
-        print("ch%d:  rumore %.2f cnt   impulso a ~50 ns nel %.1f%% degli eventi"
+        print("ch%d:  rumore %.2f cnt   impulso in posizione nel %.1f%% degli eventi"
               % (ch, np.median(rms[:, i]), pur))
         if buoni.sum() > 20:
             a = amp[buoni, i]
@@ -175,16 +209,16 @@ def main():
 
     # la larghezza si misura solo sul canale che ha davvero il segnale
     i = int(np.argmax([( (amp[:, k] < SOGLIA_IMPULSO) &
-                         (pos[:, k] > FINESTRA_50NS[0]) &
-                         (pos[:, k] < FINESTRA_50NS[1]) ).sum()
+                         (pos[:, k] > FIN[0]) &
+                         (pos[:, k] < FIN[1]) ).sum()
                        for k in range(len(chans))]))
     f, tmp = daqio.open_file(path, live=live)
     try:
         w = f["events/waveforms"]
         ns = hdr["SamplesPerChannel"]; nch = len(chans)
         sel = np.where((amp[:, i] < SOGLIA_IMPULSO) &
-                       (pos[:, i] > FINESTRA_50NS[0]) &
-                       (pos[:, i] < FINESTRA_50NS[1]))[0]
+                       (pos[:, i] > FIN[0]) &
+                       (pos[:, i] < FIN[1]))[0]
         if len(sel):
             a0 = w.shape[0] - len(amp)
             larg = []

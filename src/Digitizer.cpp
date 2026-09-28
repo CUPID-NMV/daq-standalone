@@ -59,6 +59,7 @@ Digitizer::Digitizer()
       fNTransferedEvents(1),
       fGroupMask(0),
       fSelfTrigger(fConfig.GetEntry<bool>("digitizer","SelfTrigger",false)),
+      fDRS4Correction(fConfig.GetEntry<bool>("digitizer","DRS4Correction",true)),
       fSaveRaw(fConfig.GetEntry<bool>("digitizer","SaveRaw",false)),
       fExternalTrigger(fConfig.GetEntry<bool>("digitizer","ExternalTrigger",true)),
       fSelfTriggerMode(CAEN_DGTZ_TRGMODE_DISABLED),
@@ -416,13 +417,35 @@ void Digitizer::SelectBoard()
         Log::OutWarning("→ PLL calibration not supported or failed (code = " + std::to_string(err) + ").");
     }
 
-    // Le tabelle si caricano perche' la stessa chiamata porta con se' la
-    // calibrazione del PLL, ma non vanno MAI applicate: riguardano il percorso
-    // di memoria del DRS4, mentre il self-trigger deve vedere il segnale che
-    // arriva dal rivelatore. Disabilitarle qui rende lo stato deterministico,
-    // qualunque sia il tipo di trigger configurato dopo.
-    if (CAEN_DGTZ_DisableDRS4Correction(fHandle) != CAEN_DGTZ_Success)
-        Log::OutWarning("Cannot disable DRS4 corrections at startup.");
+    // Le correzioni riguardano il percorso di MEMORIA del DRS4, cioe' le
+    // differenze fra le singole celle di campionamento: si applicano ai dati
+    // registrati e basta. La decisione del self-trigger la prende l'hardware
+    // sul segnale in Transparent Mode, che all'ADC arriva senza attraversare
+    // quelle celle, quindi accenderle o spegnerle non la tocca in nessun modo.
+    //
+    // Senza correzione il pattern grezzo delle celle domina la traccia: 34
+    // conteggi di RMS contro 1.5 con la correzione attiva, cioe' 8 mV di
+    // struttura su un segnale che ne vale pochi. Correggerlo dopo non si puo',
+    // perche' il pattern e' agganciato alla cella fisica e servirebbe lo Start
+    // Index Cell, che non salviamo: un profilo per indice di lettura ne
+    // recupera solo il 7%.
+    //
+    // Lo stato viene imposto qui esplicitamente, in modo che non dipenda piu'
+    // dal tipo di trigger configurato dopo.
+    if (fDRS4Correction) {
+        if (CAEN_DGTZ_EnableDRS4Correction(fHandle) != CAEN_DGTZ_Success)
+            Log::OutWarning("Cannot enable DRS4 corrections: the recorded waveforms "
+                            "will carry the raw cell-to-cell pattern (~34 counts RMS).");
+        else
+            Log::OutSummary("→ DRS4 corrections ENABLED (recorded data only; the "
+                            "self-trigger decision is unaffected).");
+    } else {
+        if (CAEN_DGTZ_DisableDRS4Correction(fHandle) != CAEN_DGTZ_Success)
+            Log::OutWarning("Cannot disable DRS4 corrections at startup.");
+        else
+            Log::OutSummary("→ DRS4 corrections DISABLED: raw cell-to-cell pattern "
+                            "in the recorded waveforms.");
+    }
 
     CAEN_DGTZ_Calibrate(fHandle);
     Log::OutSummary("PLL calibration done.");
@@ -741,16 +764,21 @@ void Digitizer::ComputeSelfTriggerThresholds() {
     // lasciano il piedistallo corretto ma gonfiano l'RMS di circa 40 volte
     // (0.7 conteggi diventano ~28), e quell'RMS e' proprio il numero che si
     // guarda per scegliere la soglia.
+    // Qui vanno spente comunque, qualunque sia DRS4Correction: le tabelle sono
+    // tarate sull'Output Mode, e applicate ai dati in Transparent Mode lasciano
+    // il piedistallo corretto ma gonfiano l'RMS di circa 40 volte (0.7 conteggi
+    // diventano ~28). Quell'RMS e' proprio il numero con cui si sceglie la
+    // soglia. Lo stato configurato viene ripristinato subito dopo.
     if (CAEN_DGTZ_DisableDRS4Correction(fHandle) != CAEN_DGTZ_Success)
-        Log::OutWarning("Cannot disable DRS4 corrections: the recorded waveforms "
-                        "will differ from the signal the comparator judged.");
-    else
-        Log::OutSummary("→ DRS4 corrections DISABLED and left off: the recorded "
-                        "waveforms are the raw detector signal.");
+        Log::OutWarning("Cannot disable DRS4 corrections: the measured RMS will be "
+                        "overestimated.");
 
     SetTransparentMode(true);
     bool ok = MeasureBaseline(fTransparentBaseline, fTransparentRMS, 10, "transparent");
     SetTransparentMode(false);
+
+    if (fDRS4Correction && CAEN_DGTZ_EnableDRS4Correction(fHandle) != CAEN_DGTZ_Success)
+        Log::OutWarning("Cannot restore DRS4 corrections after the baseline measurement.");
 
     if (!ok) {
         Log::OutError("Transparent Mode baseline measurement failed: "

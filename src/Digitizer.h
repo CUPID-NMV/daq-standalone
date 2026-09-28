@@ -70,6 +70,7 @@ private:
     uint32_t fGroupMask;
 
     bool fSelfTrigger;
+    bool fDRS4Correction;   // correzione celle DRS4 sui dati REGISTRATI
     bool fSaveRaw;
     bool fExternalTrigger;
 

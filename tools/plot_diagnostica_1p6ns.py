@@ -74,7 +74,7 @@ def artefatti(ev):
 # ----------------------------------------------------------------------
 def fig_efficienza(cal, seg, out):
     serie = cal["serie"]
-    colori = ["#1f77b4", "#e67e22", "#2ca02c"]
+    colori = ["#1f77b4", "#5fa8d3", "#2ca02c", "#8bc34a"]
     fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.0))
 
     # --- a sinistra: le due ampiezze come sono state misurate
@@ -104,7 +104,7 @@ def fig_efficienza(cal, seg, out):
                 fontsize=8.5, color="#8a2020")
     ax.set_xlabel("distanza soglia-piedistallo  [conteggi]")
     ax.set_ylabel("efficienza del self-trigger  [%]")
-    ax.set_title("Impulso da %.1f ns: due ampiezze e due frequenze"
+    ax.set_title("Impulso da %.1f ns: due ampiezze x due frequenze"
                  % cal["larghezza_ns"], fontsize=11)
     ax.set_xlim(0, 15); ax.set_ylim(-2, 105)
     ax.grid(alpha=.3); ax.legend(fontsize=8.5, loc="upper right")
@@ -121,13 +121,14 @@ def fig_efficienza(cal, seg, out):
     ax.axhline(50, color="#999", lw=.8, ls=":")
     ax.set_xlabel("soglia / ampiezza dell'impulso  [x1000]")
     ax.set_ylabel("efficienza  [%]")
-    ax.set_title("Normalizzate all'ampiezza: 1 GS/s non si sovrappone", fontsize=11)
+    ax.set_title("Normalizzate all'ampiezza: si separano per frequenza, non per ampiezza",
+                 fontsize=11)
     ax.set_ylim(-2, 105)
     ax.grid(alpha=.3); ax.legend(fontsize=8.5)
-    ax.annotate("Le due serie a 2.5 GS/s coincidono entro il 2 per cento:\n"
-                "la risposta e' lineare nell'ampiezza. Quella a 1 GS/s no:\n"
-                "il comparatore vede lo stesso impulso il 26 per cento piu'\n"
-                "grande, quindi la calibrazione dipende dal campionamento.",
+    ax.annotate("Le coppie alla stessa frequenza coincidono entro il 3 per\n"
+                "cento: la risposta e' lineare nell'ampiezza a entrambe. Le due\n"
+                "frequenze restano separate del 29 per cento: il comparatore\n"
+                "vede lo stesso impulso piu' grande col clock DRS4 piu' lento.",
                 xy=(.03, .04), xycoords="axes fraction", fontsize=8, color="#444",
                 bbox=dict(fc="white", ec="#ddd", alpha=.9))
 

@@ -158,8 +158,66 @@
       "mv_per_offset": 3.13,
       "attenuazione": 12.8,
       "nota": "Ampiezza misurata a 2.5 GS/s (run 0138, -126 cnt) senza toccare il generatore: a 1 GS/s il digitizer ne legge 26.35 mV, cioe' il 14 per cento in meno, perche' con un campione ogni nanosecondo il picco di un impulso da 1.6 ns cade fra due punti. Usare quel valore avrebbe dato 2.69 mV/offset invece di 3.13. Il punto a offset 6 e' escluso: rate saturo e purezza 4.5 per cento."
+    },
+    {
+      "etichetta": "21.07 mV a 1 GS/s (run 0143)",
+      "campionamento": "1GHz",
+      "ampiezza_mv": 21.07,
+      "ampiezza_conteggi": 86.4,
+      "ampiezza_letta_a_1gs_mv": 18.06,
+      "rate_generatore_hz": 86.0,
+      "rate_misurato_come": "scaler sul trigger out",
+      "punti": [
+        {
+          "distanza": 5.09,
+          "rate_hz": 68.3
+        },
+        {
+          "distanza": 6.09,
+          "rate_hz": 52.0
+        },
+        {
+          "distanza": 7.09,
+          "rate_hz": 41.7
+        },
+        {
+          "distanza": 8.09,
+          "rate_hz": 16.0
+        },
+        {
+          "distanza": 9.09,
+          "rate_hz": 1.8
+        }
+      ],
+      "distanza_50pc": 6.95,
+      "mv_per_offset": 3.03,
+      "attenuazione": 12.4,
+      "nota": "Rate corretti per la purezza. Il punto a distanza 4.09 e' escluso: purezza 5.4 per cento e rate totale 452 Hz, con la DAQ vicina al tetto che sopprime gli impulsi veri. Ampiezza ricavata dai -74 conteggi letti a 1 GS/s, divisi per il fattore 0.857 misurato sullo stesso impulso confrontando 1 e 2.5 GS/s."
     }
   ],
   "linearita": "Ampiezze in rapporto 2.10 danno 3.93 e 4.00 mV/offset: accordo entro il 2 per cento. La risposta del comparatore e' lineare nell'ampiezza sull'intervallo esplorato, quindi la calibrazione vale anche alle ampiezze dei PMT.",
-  "dipendenza_dal_campionamento": "Stesso impulso, stesso generatore, sola frequenza di campionamento diversa: d50 passa da 7.82 a 2.5 GS/s a 9.82 a 1 GS/s, cioe' il comparatore vede il segnale il 26 per cento piu' grande. La calibrazione passa da 3.93 a 3.13 mV per offset, l'attenuazione da 16.1 a 12.8. Con il clock del DRS4 piu' lento l'apertura con cui il segnale viene trasferito all'ADC e' piu' lunga, quindi un impulso stretto ne esce meno schiacciato. Smentisce l'aspettativa che il Transparent Mode fosse indipendente dal clock di campionamento."
+  "dipendenza_dal_campionamento": "Stesso impulso, stesso generatore, sola frequenza di campionamento diversa: d50 passa da 7.82 a 2.5 GS/s a 9.82 a 1 GS/s, cioe' il comparatore vede il segnale il 26 per cento piu' grande. La calibrazione passa da 3.93 a 3.13 mV per offset, l'attenuazione da 16.1 a 12.8. Con il clock del DRS4 piu' lento l'apertura con cui il segnale viene trasferito all'ADC e' piu' lunga, quindi un impulso stretto ne esce meno schiacciato. Smentisce l'aspettativa che il Transparent Mode fosse indipendente dal clock di campionamento.",
+  "matrice": {
+    "2.5GHz": [
+      [
+        14.64,
+        4.0
+      ],
+      [
+        30.76,
+        3.93
+      ]
+    ],
+    "1GHz": [
+      [
+        21.07,
+        3.03
+      ],
+      [
+        30.76,
+        3.13
+      ]
+    ]
+  },
+  "conclusione_finale": "Due ampiezze per ciascuna delle due frequenze. A 2.5 GS/s: 3.93 e 4.00 mV/offset. A 1 GS/s: 3.13 e 3.03. La linearita' nell'ampiezza regge a entrambe le frequenze entro il 3 per cento, mentre fra le due frequenze c'e' una differenza del 29 per cento: il comparatore vede lo stesso impulso piu' grande quando il clock del DRS4 e' piu' lento."
 }

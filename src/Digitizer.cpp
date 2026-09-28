@@ -417,6 +417,41 @@ void Digitizer::SelectBoard()
         Log::OutWarning("→ PLL calibration not supported or failed (code = " + std::to_string(err) + ").");
     }
 
+    CAEN_DGTZ_Calibrate(fHandle);
+    Log::OutSummary("PLL calibration done.");
+}
+
+// =======================================================================
+//  INIT ACQUISITION
+// =======================================================================
+void Digitizer::InitAcquisition()
+{
+    CAEN_DGTZ_ErrorCode err;
+
+    err = CAEN_DGTZ_MallocReadoutBuffer(fHandle,&fBuffer,&fBufferSize);
+    if (err != CAEN_DGTZ_Success) {
+        Log::OutError("Cannot allocate readout buffer.");
+        exit(1);
+    }
+
+    err = CAEN_DGTZ_AllocateEvent(fHandle,&fVoidEvent);
+    if (err != CAEN_DGTZ_Success) {
+        Log::OutError("Cannot allocate event structure.");
+        exit(1);
+    }
+
+    fEvent = reinterpret_cast<CAEN_DGTZ_X742_EVENT_t*>(fVoidEvent);
+    Log::OutSummary("Acquisition initialized.");
+
+    // ---- Correzione delle celle DRS4 ----
+    // DEVE stare qui, non in SelectBoard(): la libreria costruisce il proprio
+    // stato per lo x742 al momento dell'abilitazione, a partire dalla
+    // configurazione corrente. Abilitarla prima di SetRecordLength e
+    // SetGroupEnableMask, e prima che il buffer di lettura sia allocato, lascia
+    // quello stato incoerente con la board: la presa dati parte, gira qualche
+    // minuto e poi ReadData comincia a restituire -1 (CommError) senza piu'
+    // riprendersi. Successo tre volte su tre, mentre le run precedenti con la
+    // chiamata piu' avanti arrivavano a 150000 eventi senza un errore.
     // Le correzioni riguardano il percorso di MEMORIA del DRS4, cioe' le
     // differenze fra le singole celle di campionamento: si applicano ai dati
     // registrati e basta. La decisione del self-trigger la prende l'hardware
@@ -446,32 +481,6 @@ void Digitizer::SelectBoard()
             Log::OutSummary("→ DRS4 corrections DISABLED: raw cell-to-cell pattern "
                             "in the recorded waveforms.");
     }
-
-    CAEN_DGTZ_Calibrate(fHandle);
-    Log::OutSummary("PLL calibration done.");
-}
-
-// =======================================================================
-//  INIT ACQUISITION
-// =======================================================================
-void Digitizer::InitAcquisition()
-{
-    CAEN_DGTZ_ErrorCode err;
-
-    err = CAEN_DGTZ_MallocReadoutBuffer(fHandle,&fBuffer,&fBufferSize);
-    if (err != CAEN_DGTZ_Success) {
-        Log::OutError("Cannot allocate readout buffer.");
-        exit(1);
-    }
-
-    err = CAEN_DGTZ_AllocateEvent(fHandle,&fVoidEvent);
-    if (err != CAEN_DGTZ_Success) {
-        Log::OutError("Cannot allocate event structure.");
-        exit(1);
-    }
-
-    fEvent = reinterpret_cast<CAEN_DGTZ_X742_EVENT_t*>(fVoidEvent);
-    Log::OutSummary("Acquisition initialized.");
 }
 
 // =======================================================================

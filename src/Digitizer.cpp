@@ -437,6 +437,26 @@ void Digitizer::SelectBoard()
     CAEN_DGTZ_ErrorCode err;        // riusata dal resto della funzione
 
     CAEN_DGTZ_GetInfo(fHandle,&fBoardInfo);
+
+    // Riportare la board a uno stato noto PRIMA di configurarla. Finora il
+    // Reset si faceva solo allo spegnimento, quindi una sessione morta male
+    // -- e ne sono morte diverse con "Cannot reset digitizer" -- lasciava i
+    // registri come capitava, e la sessione seguente ci costruiva sopra.
+    // Il sintomo era una lettura disallineata: campioni di un canale nello
+    // slot dell'altro, con rms di centinaia di conteggi invece di due.
+    //
+    // L'ordine conta: Stop prima di Reset, perche' una board lasciata in
+    // acquisizione non si riconfigura; Clear dopo, per svuotare il buffer di
+    // uscita. Il firmware lo svuota gia' all'avvio di ogni run, ma farlo qui
+    // costa nulla e copre il caso in cui la run precedente non sia mai
+    // arrivata a fermarsi.
+    CAEN_DGTZ_SWStopAcquisition(fHandle);
+    if (CAEN_DGTZ_Reset(fHandle) != CAEN_DGTZ_Success)
+        Log::OutWarning("Reset at startup failed: the board may still carry "
+                        "leftover state from a previous session.");
+    else
+        Log::OutSummary("→ Board reset to a known state.");
+    CAEN_DGTZ_ClearData(fHandle);
     Log::OutSummary("Digitizer model: " + std::string(fBoardInfo.ModelName));
     Log::OutSummary("ROC firmware release: " + std::string(fBoardInfo.ROC_FirmwareRel));
     Log::OutSummary("AMC firmware release: " + std::string(fBoardInfo.AMC_FirmwareRel));
@@ -669,6 +689,7 @@ bool Digitizer::MeasureBaseline(std::map<uint32_t,double>& mean,
 
     CAEN_DGTZ_ErrorCode re;
 
+    CAEN_DGTZ_ClearData(fHandle);      // niente residui nel primo blocco letto
     re = CAEN_DGTZ_SWStartAcquisition(fHandle);
     if (re != CAEN_DGTZ_Success) {
         Log::OutError("Start acquisition failed in MeasureBaseline (" + tag +
@@ -805,6 +826,20 @@ void Digitizer::SetTriggerThreshold(double offset) {
     std::map<uint32_t,double> rms;
     if (!MeasureBaseline(fBaselineMean, rms, 1, "output"))
         return;
+
+    // Un rumore di centinaia di conteggi non e' rumore: e' la lettura che
+    // consegna i dati fuori posto. E' gia' costata run da ventiquattromila
+    // eventi buttati, accorgendosene solo in analisi.
+    for (const auto& kv : rms) {
+        if (kv.second > 100.0) {
+            Log::OutError("ch" + std::to_string(kv.first) + " baseline rms = " +
+                          std::to_string(kv.second) + " counts, expected a few: "
+                          "the readout is delivering corrupted data.");
+            Log::OutError("Reset the board (power cycle if a software reset does "
+                          "not help) before acquiring: this run would be useless.");
+            exit(1);
+        }
+    }
 
     Log::OutSummary("Baseline calculation completed.");
 }

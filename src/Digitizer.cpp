@@ -306,9 +306,12 @@ Digitizer::Digitizer()
                            FmtOffset(fSelfTriggerOffset[ch]);
             Log::OutSummary("   threshold driven by SelfTriggerThresholdOffset "
                             "[counts]:" + offlist);
-            Log::OutWarning("   SelfTriggerThreshold is IGNORED in \"relative\" mode "
-                            "(used only as fallback if the Transparent Mode "
-                            "measurement fails).");
+            // Non e' un problema: in modo "relative" la soglia assoluta e' per
+            // definizione soltanto una riserva. Un warning a ogni avvio per il
+            // funzionamento normale e' rumore, ed e' cosi' che si smette di
+            // leggere anche quelli veri.
+            Log::OutSummary("   (SelfTriggerThreshold is only the fallback here, "
+                            "used if the Transparent Mode measurement fails)");
         } else {
             std::string thrlist;
             for (auto ch : fSelfTriggerChannels)

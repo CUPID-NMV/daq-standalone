@@ -521,8 +521,13 @@ class Monitor:
             gruppi = [r["gruppo"] for r in righe]
             mv = self.mv_per_count()
 
-            fig, axes = plt.subplots(3, 1, figsize=(max(7, 0.22 * len(righe) + 3), 7.5),
-                                     sharex=True)
+            # La larghezza cresce coi canali ma si ferma: a 200 canali una
+            # figura proporzionale sarebbe da seimila pixel, scomoda da
+            # guardare e pesante da rigenerare ogni cinque secondi.
+            larg = min(20.0, max(7.0, 0.22 * len(righe) + 3))
+            fig, axes = plt.subplots(3, 1, figsize=(larg, 7.5), sharex=True)
+            # Con pochi canali le barre a larghezza piena sembrano blocchi.
+            wbar = 0.8 if len(righe) > 8 else 0.35
             # Bande alternate per gruppo del V1742: con molti canali si perde
             # subito il conto di dove finisce uno e comincia l'altro.
             for g in sorted(set(gruppi)):
@@ -534,21 +539,23 @@ class Monitor:
                                  xycoords=("data", "axes fraction"),
                                  ha="center", fontsize=8, color="#666")
 
-            axes[0].bar(x, [100 * r["occupazione"] for r in righe], color="#1f77b4")
+            axes[0].bar(x, [100 * r["occupazione"] for r in righe], width=wbar, color="#1f77b4")
             axes[0].set_ylabel("occupazione [%]")
             axes[0].set_ylim(0, 105)
 
-            axes[1].bar(x, [abs(r["ampiezza"]) * mv for r in righe], color="#2ca02c")
+            axes[1].bar(x, [abs(r["ampiezza"]) * mv for r in righe], width=wbar, color="#2ca02c")
             axes[1].set_ylabel("ampiezza [mV]")
 
-            axes[2].bar(x, [r["rms"] * mv for r in righe], color="#d62728")
+            axes[2].bar(x, [r["rms"] * mv for r in righe], width=wbar, color="#d62728")
             axes[2].set_ylabel("rumore [mV]")
             axes[2].set_xlabel("canale")
 
             for ax in axes:
                 ax.grid(alpha=.25, axis="y")
-            axes[2].set_xticks(x)
-            axes[2].set_xticklabels(etich, fontsize=7,
+            # Con molti canali le etichette si diradano invece di sovrapporsi.
+            passo = 1 if len(righe) <= 40 else (2 if len(righe) <= 80 else 8)
+            axes[2].set_xticks(x[::passo])
+            axes[2].set_xticklabels(etich[::passo], fontsize=7,
                                     rotation=90 if len(righe) > 24 else 0)
             fig.suptitle("Panoramica su %d canali  (ultimi %d eventi)"
                          % (len(righe), ov["eventi"]), fontsize=12)

@@ -45,8 +45,8 @@ public:
 
     static void Out(const Log::LogLevel& loglevel, const std::string& message="");
 
-private:
     static void ToFile(const std::string& line);
+private:
     static std::ofstream           fFile;
     static std::vector<std::string> fPending;   // prima che il file esista
 public:
@@ -74,6 +74,13 @@ public:
     template<typename T>
     static void Out(const Log::LogLevel& loglevel, const std::vector<T> values)
     {
+	{
+	    std::ostringstream oss;
+	    oss << Log::ToString(loglevel);
+	    for( auto it: values )
+		oss << std::boolalpha << it << "\t";
+	    Log::ToFile(oss.str());
+	}
 	if (Log::fLogLevel >= loglevel) {
 
 	    if (loglevel == Log::LogLevel::error) {
@@ -88,7 +95,6 @@ public:
 	    for( auto it: values )
 		oss << std::boolalpha << it << "\t";
 	    std::cout << oss.str() << "\033[0m" << std::endl;
-	    Log::ToFile(oss.str());
 	}
 	
 	return;

@@ -188,3 +188,12 @@ OutputFile      = "WC_proto"
 [bridge]
 # Usato solo quando il collegamento passa da un bridge VME (ETH_V4718).
 IPAddress = "192.168.99.105"
+[settings]
+# Quanto la DAQ stampa A SCHERMO. Il file di log accanto ai dati riceve
+# sempre tutto, qualunque sia questo valore: si puo' tenere il terminale
+# leggibile senza perdere le righe di debug proprio dove servono, cioe'
+# quando a run finita si cerca di capire cosa e' andato storto.
+#
+#   0 = niente     1 = solo errori     2 = errori e avvisi
+#   3 = riepilogo (consigliato)        4 = tutto, comprese le righe Debug
+verbosity = 3

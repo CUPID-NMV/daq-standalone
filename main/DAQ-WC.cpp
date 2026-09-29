@@ -18,7 +18,8 @@ int main(int argc, char** argv)
     Config& theConfig = Config::GetInstance();
     theConfig.Read(argv[1]);
 
-    Log::OpenLog(Log::LogLevel::debug);
+    // Il livello lo decide [settings][verbosity] nel TOML, letto da
+    // Config::Read: forzarlo qui rendeva quell'opzione inerte.
     Log::OutSummary("* * * * * * * * * * * * * * *");
     Log::OutSummary("*                           *");
     Log::OutSummary("*  Welcome to the GAGG DAQ  *");

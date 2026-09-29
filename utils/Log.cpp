@@ -67,6 +67,12 @@ void Log::SetLogLevel(const Log::LogLevel& loglevel) {
 
 void Log::Out(const Log::LogLevel& loglevel, const std::string& message) {
 
+    // Il file riceve tutto, lo schermo solo cio' che supera la verbosita'.
+    // Cosi' si puo' tenere il terminale leggibile senza perdere le righe di
+    // debug proprio nel posto in cui servono, cioe' quando a run finita si
+    // cerca di capire cosa e' andato storto.
+    Log::ToFile(Log::ToString(loglevel) + message);
+
     if (Log::fLogLevel >= loglevel) {
 
         if (loglevel == Log::LogLevel::error) {
@@ -78,7 +84,6 @@ void Log::Out(const Log::LogLevel& loglevel, const std::string& message) {
         }
         std::cout << Log::ToString(loglevel) << std::boolalpha << message;
         std::cout << "\033[0m"<< std::endl;
-        Log::ToFile(Log::ToString(loglevel) + message);
     }
 
 }

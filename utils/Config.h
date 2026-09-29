@@ -140,15 +140,12 @@ public:
 	return static_cast<Tout>(std::stod(node ? node.value_or(defvalue) : defvalue));
     }
 
-
-		       std::string key,
-		       T value,
-		       T defvalue )
+    void WarnMissing( const std::string& category,
+		      const std::string& subcategory,
+		      const std::string& key )
     {
-	if( value == defvalue )
-	    Log::OutWarning( "Using default value for [" + category + "][" + subcategory + "][" + key + "]" );
-	
-	return;
+	Log::OutWarning( "[" + category + "][" + subcategory + "][" + key + "] not in the "
+			 "config file: using the built-in default" );
     }
 
     template <typename T>
@@ -157,9 +154,13 @@ public:
 		   std::string key,
 		   T defvalue )
     {
-	T value = fTbl[category][subcategory][key].value_or(defvalue);
-	CheckDefault( category, subcategory, key, value, defvalue);
-	return value;
+	auto node = fTbl[category][subcategory][key];
+	if( !node )
+	    {
+		WarnMissing( category, subcategory, key );
+		return defvalue;
+	    }
+	return node.value_or(defvalue);
     }
 
     template <typename Tin, typename Tout>

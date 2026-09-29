@@ -1499,6 +1499,20 @@ void Digitizer::AcquireEvents() {
     if (fExternalTrigger) trgsrc += "external";
     if (fSelfTrigger)     trgsrc += (trgsrc.empty() ? "" : " + ") + std::string("self");
     if (trgsrc.empty())   trgsrc = "software only";
+    // Rilettura DOPO l'avvio: i registri del pannello frontale si leggono
+    // giusti a fine configurazione, ma il connettore e' risultato muto. Se
+    // qualcosa fra la configurazione e l'acquisizione li azzera, e' qui che si
+    // vede, invece di doverlo dedurre.
+    {
+        uint32_t v = 0;
+        if (CAEN_DGTZ_ReadRegister(fHandle, REG_FP_TRGOUT_MASK, &v) == CAEN_DGTZ_Success)
+            Log::OutSummary("→ dopo l'avvio: 0x8110 (TRG-OUT mask) = " + IntToHex(v));
+        if (CAEN_DGTZ_ReadRegister(fHandle, REG_BOARD_CONFIG, &v) == CAEN_DGTZ_Success)
+            Log::OutSummary("→ dopo l'avvio: 0x8000 = " + IntToHex(v) +
+                            "  (instradamento [31:28] = " +
+                            std::to_string((v >> MONITOR_SHIFT) & 0xFu) + ")");
+    }
+
     Log::OutSummary("→ Acquisition started (waiting for " + trgsrc + " triggers)");
     std::cout << std::endl;
 

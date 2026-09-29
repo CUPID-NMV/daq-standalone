@@ -36,6 +36,11 @@ public:
     /// appena il file si apre: senza, mancherebbe proprio la parte piu' utile,
     /// cioe' connessione, calibrazioni e piedistalli.
     static void OpenFile(const std::string& path);
+
+    /// Scrive solo sul file, senza stampare a schermo. Serve per allegare alla
+    /// run cose voluminose ma utili a posteriori -- la configurazione usata --
+    /// senza riempire il terminale mentre si lavora.
+    static void FileOnly(const std::string& text);
     static void CloseFile();
 
     static void Out(const Log::LogLevel& loglevel, const std::string& message="");

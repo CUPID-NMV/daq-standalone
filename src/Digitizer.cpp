@@ -1997,6 +1997,13 @@ void Digitizer::PrepareOutput() {
             logpath.compare(logpath.size() - ext.size(), ext.size(), ext) == 0)
             logpath = logpath.substr(0, logpath.size() - ext.size());
         Log::OpenFile(logpath + ".log");
+
+        // La configurazione usata viene allegata al log, non stampata: e'
+        // voluminosa e a schermo dava solo fastidio, ma fra sei mesi e' l'unica
+        // cosa che dice davvero com'era impostata questa run.
+        Log::FileOnly("\n===== configurazione usata (" + fConfig.GetFileName() + ") =====");
+        Log::FileOnly(fConfig.AsString());
+        Log::FileOnly("===== fine configurazione =====\n");
     }
 
     try {

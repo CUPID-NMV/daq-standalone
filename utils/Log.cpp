@@ -26,6 +26,10 @@ void Log::OpenFile(const std::string& path) {
     Log::OutSummary("→ Log written to " + path);
 }
 
+void Log::FileOnly(const std::string& text) {
+    Log::ToFile(text);
+}
+
 void Log::CloseFile() {
     if (fFile.is_open()) fFile.close();
 }

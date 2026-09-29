@@ -2,6 +2,7 @@
 #define CONFIG_H
 
 #include <string>
+#include <sstream>
 #include <iostream>
 #include <fstream>
 #include <optional>
@@ -27,6 +28,15 @@ public:
     void SetNoConfigFile();
     bool ConfigFileProvided(){ return fReadConfigFile; };
     void Read( char* filename );
+
+    /// La configurazione come testo, per allegarla al log della run.
+    std::string AsString() const
+    {
+	std::ostringstream oss;
+	oss << fTbl;
+	return oss.str();
+    }
+
     toml::table& GetTbl(){ return fTbl; };
 
     bool CheckIfEntryExists( std::string category, bool throwerror=true )

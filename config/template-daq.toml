@@ -174,8 +174,17 @@ NNoiseEvents    = 2000
 LiveMonitoring  = true
 LiveFlushEvery  = 10
 
+# File di comando per le soglie a caldo.
+# Vuoto = <OutputDir>/live-threshold.txt
+LiveThresholdFile = ""
+
 SaveRaw = false 
 OutputFormat    = "HDF5"        # oppure "ROOT" o "ASCII"
 OutputDir       = "/home/daq/daq-standalone/data"
 OutputFile      = "WC_proto"
 
+
+
+[bridge]
+# Usato solo quando il collegamento passa da un bridge VME (ETH_V4718).
+IPAddress = "192.168.99.105"

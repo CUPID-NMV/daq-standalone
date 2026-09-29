@@ -45,10 +45,12 @@ Digitizer::Digitizer()
     : fConfig(Config::GetInstance()),
       fIsRunning(true),
       fAcqRunning(false),
+      fConnectionStr(fConfig.GetEntry<std::string>("digitizer","Connection","auto")),
       fConnectionType(CAEN_DGTZ_ETH_V4718),
       fIPAddress(fConfig.GetEntry<std::string>("digitizer","IPAddress","192.168.99.105")),
+      fA4818PID(fConfig.GetEntry<uint32_t>("digitizer","A4818PID",0)),
       fConetNode(fConfig.GetEntry<int>("digitizer","ConetNode",0)),
-      fVMEBaseAddress(0x32100000),
+      fVMEBaseAddress(fConfig.GetEntry<uint32_t>("digitizer","VMEBaseAddress",0x32100000)),
       fHandle(0),
       fRecordLength(fConfig.GetEntry<uint32_t>("digitizer","RecordLength",1024)),
       fNChannels(32), // V1742 32-ch
@@ -358,21 +360,78 @@ void Digitizer::Close() {
 // =============================================================
 //  SELECT BOARD
 // =============================================================
+bool Digitizer::UsesVMEBridge() const
+{
+    return fConnectionType == CAEN_DGTZ_ETH_V4718 ||
+           fConnectionType == CAEN_DGTZ_USB_V4718;
+}
+
+std::string Digitizer::LinkDescription() const
+{
+    if (fConnectionType == CAEN_DGTZ_USB_A4818)
+        return "USB_A4818 (PID " + std::to_string(fA4818PID) + ", CONET diretto)";
+    return "ETH_V4718 (" + fIPAddress + ", VME 0x" + IntToHex(fVMEBaseAddress) + ")";
+}
+
+// Un tentativo di apertura. Le convenzioni per `arg` differiscono fra i due
+// link e non sono documentate nell'header, che dice solo "See documentation":
+// sono state determinate con tools/probe_link.py. Per l'A4818 arg e' un
+// PUNTATORE A uint32 con il PID, non una stringa, e la base VME deve essere 0
+// perche' la board e' il nodo CONET e non uno slave su bus VME.
+bool Digitizer::TryOpen(CAEN_DGTZ_ConnectionType type)
+{
+    uint32_t pid = fA4818PID;
+    const void* arg = (type == CAEN_DGTZ_USB_A4818)
+                        ? static_cast<const void*>(&pid)
+                        : static_cast<const void*>(fIPAddress.c_str());
+    uint32_t vme = (type == CAEN_DGTZ_USB_A4818) ? 0u : fVMEBaseAddress;
+
+    if (type == CAEN_DGTZ_USB_A4818 && fA4818PID == 0) {
+        Log::OutDebug("  A4818: nessun PID configurato, salto");
+        return false;
+    }
+
+    CAEN_DGTZ_ErrorCode err =
+        CAEN_DGTZ_OpenDigitizer2(type, arg, fConetNode, vme, &fHandle);
+    if (err != CAEN_DGTZ_Success) {
+        Log::OutDebug("  tentativo su " + std::string(
+            type == CAEN_DGTZ_USB_A4818 ? "USB_A4818" : "ETH_V4718") +
+            " fallito, codice " + std::to_string(err));
+        return false;
+    }
+    fConnectionType = type;
+    fVMEBaseAddress = vme;
+    return true;
+}
+
 void Digitizer::SelectBoard()
 {
-    CAEN_DGTZ_ErrorCode err = CAEN_DGTZ_OpenDigitizer2(
-        fConnectionType,
-        (void*)fIPAddress.c_str(),
-        fConetNode,
-        fVMEBaseAddress,
-        &fHandle);
+    bool aperto = false;
 
-    if (err != CAEN_DGTZ_Success) {
-        Log::OutError("Cannot connect. Code: " + std::to_string(err));
+    if (fConnectionStr == "USB_A4818") {
+        aperto = TryOpen(CAEN_DGTZ_USB_A4818);
+    } else if (fConnectionStr == "ETH_V4718") {
+        aperto = TryOpen(CAEN_DGTZ_ETH_V4718);
+    } else if (fConnectionStr == "auto") {
+        Log::OutSummary("Connection = auto: cerco il collegamento...");
+        aperto = TryOpen(CAEN_DGTZ_USB_A4818) || TryOpen(CAEN_DGTZ_ETH_V4718);
+    } else {
+        Log::OutError("Unknown Connection = '" + fConnectionStr +
+                      "'. Accepted values: \"auto\", \"USB_A4818\", \"ETH_V4718\".");
         exit(1);
     }
 
-    Log::OutSummary("Digitizer connected.");
+    if (!aperto) {
+        Log::OutError("Cannot connect to the digitizer on any configured link.");
+        if (fConnectionStr != "ETH_V4718")
+            Log::OutError("  USB_A4818: PID configurato = " + std::to_string(fA4818PID) +
+                          " (0 = non configurato). Il PID e' stampato sul modulo.");
+        if (fConnectionStr != "USB_A4818")
+            Log::OutError("  ETH_V4718: indirizzo " + fIPAddress);
+        exit(1);
+    }
+
+    Log::OutSummary("Digitizer connected via " + LinkDescription());
 
     CAEN_DGTZ_GetInfo(fHandle,&fBoardInfo);
     Log::OutSummary("Digitizer model: " + std::string(fBoardInfo.ModelName));
@@ -1891,6 +1950,15 @@ void Digitizer::PrepareOutput() {
             H5::StrType stype(H5::PredType::C_S1, H5T_VARIABLE);
             header.createAttribute("SamplingRate", stype, H5::DataSpace())
                   .write(stype, fSamplingRateStr);
+        }
+
+        {
+            // Da quale collegamento sono stati presi i dati. Con "auto" la
+            // scelta la fa il programma, quindi il file deve dire cosa e'
+            // successo davvero, non cosa chiedeva la configurazione.
+            H5::StrType stype(H5::PredType::C_S1, H5T_VARIABLE);
+            header.createAttribute("Link", stype, H5::DataSpace())
+                  .write(stype, LinkDescription());
         }
 
         {

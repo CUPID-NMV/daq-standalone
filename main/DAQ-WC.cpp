@@ -26,13 +26,18 @@ int main(int argc, char** argv)
     Log::OutSummary("* * * * * * * * * * * * * * *");
     Log::OutSummary();
 
-    // --- Bridge VME (V4718) ---
-    Bridge bridge(theConfig);
-    bridge.Open();
-
     // --- Digitizer V1742 ---
+    // La connessione va aperta PRIMA del bridge: con "Connection = auto" e'
+    // il digitizer a stabilire quale collegamento si usa, e sul percorso
+    // CONET diretto (A4818) il bridge VME non esiste proprio.
     Digitizer digitizer;
     digitizer.SelectBoard();    // 1. Connessione al V1742
+
+    // --- Bridge VME, solo se serve ---
+    Bridge bridge(theConfig);
+    const bool useBridge = digitizer.UsesVMEBridge();
+    if (useBridge)
+        bridge.Open();
     digitizer.Configure();      // 2. Configurazione base (record length, gruppi, canali, offset, ecc.)
     digitizer.InitAcquisition();// 3. Allocazione buffer/evento
 
@@ -59,7 +64,8 @@ int main(int argc, char** argv)
     digitizer.Close();
 
     // 9. Bridge off
-    bridge.Close();
+    if (useBridge)
+        bridge.Close();
 
     return 0;
 }

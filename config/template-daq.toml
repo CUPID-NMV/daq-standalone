@@ -1,4 +1,27 @@
 [digitizer]
+# ---------------------------------------------------------------------------
+#  Collegamento al digitizer
+#
+#  Due percorsi verso la stessa board:
+#    "ETH_V4718"   Ethernet al bridge VME, poi bus VME. Usa IPAddress e
+#                  VMEBaseAddress.
+#    "USB_A4818"   USB3 all'adattatore A4818, poi fibra CONET diretta al
+#                  digitizer. Usa A4818PID; la base VME e' forzata a 0 perche'
+#                  la board e' il nodo CONET, non uno slave su bus VME.
+#    "auto"        prova prima l'A4818 e poi l'Ethernet. L'ordine non e'
+#                  casuale: l'apertura USB fallisce subito se il modulo non
+#                  c'e', quella Ethernet puo' restare appesa su timeout.
+#
+#  Il collegamento effettivamente usato finisce nel log e nell'attributo
+#  "Link" dell'header del file.
+#
+#  Il PID dell'A4818 e' stampato sul modulo. Se vale 0 il percorso USB viene
+#  saltato. Per determinare i parametri di un collegamento nuovo:
+#      python3 tools/probe_link.py --pid <PID> --ip <indirizzo>
+# ---------------------------------------------------------------------------
+Connection      = "auto"
+A4818PID        = 49826
+
 # NOTA: ConnectionType, LinkNumber e VMEBaseAddress NON sono letti dal codice.
 # I valori effettivi sono fissati nel costruttore di Digitizer.cpp
 # (CAEN_DGTZ_ETH_V4718, base address 0x32100000): modificarli qui non ha effetto.

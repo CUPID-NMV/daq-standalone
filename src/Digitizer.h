@@ -38,6 +38,10 @@ public:
     void GetVMElibVersion();
     void SelectBoard();
     void Configure();
+    // Vero solo se il collegamento passa da un bridge VME: sul percorso
+    // CONET diretto il bridge non esiste e non va aperto.
+    bool UsesVMEBridge() const;
+    std::string LinkDescription() const;
 
 private:
 
@@ -51,8 +55,15 @@ private:
     bool fAcqRunning;   // moved to correct order
 
     // ---- CONNECTION ----
+    // Due percorsi possibili verso la stessa board:
+    //   ETH_V4718   Ethernet al bridge VME, poi bus VME -> base 0x32100000
+    //   USB_A4818   USB3 all'adattatore, poi fibra CONET diretta -> base 0
+    // Con "auto" si prova prima l'A4818, che fallisce subito se non c'e',
+    // mentre l'apertura Ethernet puo' restare appesa qualche secondo.
+    std::string fConnectionStr;          // "auto", "ETH_V4718", "USB_A4818"
     CAEN_DGTZ_ConnectionType fConnectionType;
     std::string fIPAddress;
+    uint32_t fA4818PID;
     int fConetNode;
     uint32_t fVMEBaseAddress;
     int fHandle;
@@ -187,6 +198,7 @@ private:
     void SetTransparentMode(bool enable);
     void DumpSelfTriggerRegisters();
     bool HasGlobalTriggerFirmware() const;
+    bool TryOpen(CAEN_DGTZ_ConnectionType type);
     bool MeasureBaseline(std::map<uint32_t,double>& mean,
                          std::map<uint32_t,double>& rms,
                          uint32_t ntriggers,
@@ -233,7 +245,7 @@ private:
     static constexpr uint32_t MAX_SAMPLES  = 100000;
     static constexpr uint32_t MIN_SAMPLES  = 10;
 
-    std::string IntToHex(uint32_t val);
+    static std::string IntToHex(uint32_t val);   // pura: non usa membri
 };
 
 #endif

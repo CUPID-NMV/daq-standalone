@@ -388,16 +388,20 @@ bool Digitizer::TryOpen(CAEN_DGTZ_ConnectionType type)
     uint32_t vme = (type == CAEN_DGTZ_USB_A4818) ? 0u : fVMEBaseAddress;
 
     if (type == CAEN_DGTZ_USB_A4818 && fA4818PID == 0) {
-        Log::OutDebug("  A4818: nessun PID configurato, salto");
+        fLinkFailures += "  USB_A4818: nessun PID configurato (A4818PID = 0)\n";
         return false;
     }
 
     CAEN_DGTZ_ErrorCode err =
         CAEN_DGTZ_OpenDigitizer2(type, arg, fConetNode, vme, &fHandle);
     if (err != CAEN_DGTZ_Success) {
-        Log::OutDebug("  tentativo su " + std::string(
+        // Non si stampa subito: con "auto" un tentativo fallito e' la normalita'
+        // quando il modulo non e' collegato, e stamparlo a ogni avvio abitua a
+        // ignorarlo. Si tiene da parte e si mostra solo se NESSUN collegamento
+        // si apre, che e' il caso in cui serve davvero.
+        fLinkFailures += "  " + std::string(
             type == CAEN_DGTZ_USB_A4818 ? "USB_A4818" : "ETH_V4718") +
-            " fallito, codice " + std::to_string(err));
+            ": codice " + std::to_string(err) + "\n";
         return false;
     }
     fConnectionType = type;
@@ -424,11 +428,10 @@ void Digitizer::SelectBoard()
 
     if (!aperto) {
         Log::OutError("Cannot connect to the digitizer on any configured link.");
-        if (fConnectionStr != "ETH_V4718")
-            Log::OutError("  USB_A4818: PID configurato = " + std::to_string(fA4818PID) +
-                          " (0 = non configurato). Il PID e' stampato sul modulo.");
-        if (fConnectionStr != "USB_A4818")
-            Log::OutError("  ETH_V4718: indirizzo " + fIPAddress);
+        Log::OutError("Tentativi:\n" + fLinkFailures);
+        Log::OutError("  A4818PID = " + std::to_string(fA4818PID) +
+                      " (0 = non configurato, il PID e' stampato sul modulo), "
+                      "IPAddress = " + fIPAddress);
         exit(1);
     }
 

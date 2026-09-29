@@ -64,6 +64,7 @@ private:
     CAEN_DGTZ_ConnectionType fConnectionType;
     std::string fIPAddress;
     uint32_t fA4818PID;
+    std::string fLinkFailures;   // tentativi falliti, mostrati solo se falliscono tutti
     int fConetNode;
     uint32_t fVMEBaseAddress;
     int fHandle;

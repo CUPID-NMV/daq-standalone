@@ -97,6 +97,7 @@ Digitizer::Digitizer()
       fTimestamp_ns(0),
       fTriggerTime(0),
       fSelfTriggerModeStr(fConfig.GetEntry<std::string>("digitizer","SelfTriggerMode","paired")),
+      fTriggerOutStr(fConfig.GetEntry<std::string>("digitizer","TriggerOut","self")),
       fSelfTriggerGlobal(false),
       fSelfTriggerThresholdMode(fConfig.GetEntry<std::string>("digitizer","SelfTriggerThresholdMode","absolute")),
       fSelfTriggerRelative(false),
@@ -1024,6 +1025,75 @@ bool Digitizer::HasGlobalTriggerFirmware() const {
     return rocOK && amcOK;
 }
 
+
+// =======================================================================
+//  TRG-OUT: cosa esce dal connettore del pannello frontale
+// =======================================================================
+void Digitizer::ConfigureTriggerOut()
+{
+    // 0x8110 decide quali sorgenti contribuiscono a TRG-OUT:
+    //   bit [3:0]  il gruppo n partecipa (e' il self-trigger del gruppo)
+    //   bit [9:8]  logica di combinazione: 00 = OR, 01 = AND
+    //   bit [30]   trigger esterno   -- acceso di default dalla board
+    //   bit [31]   trigger software  -- acceso di default dalla board
+    //
+    // Di default i bit [3:0] sono a zero, quindi il self-trigger NON esce:
+    // con ExternalTrigger = false il connettore resta muto. E' il motivo per
+    // cui finora non se ne otteneva nulla.
+    //
+    // Serve per mettere uno scaler sul TRG-OUT e misurare il rate VERO dei
+    // trigger, senza il tempo morto della DAQ: il tetto di lettura attorno
+    // agli 880 Hz ha gia' reso inutilizzabili i punti a soglia bassa di piu'
+    // di uno scan in soglia.
+
+    const uint32_t channelsPerGroup = 8;
+    uint32_t groups = 0;
+    for (auto ch : fSelfTriggerChannels)
+        groups |= (1u << (ch / channelsPerGroup));
+
+    uint32_t val = 0;
+    std::string descr;
+    if (fTriggerOutStr == "off") {
+        val = 0; descr = "niente";
+    } else if (fTriggerOutStr == "self") {
+        val = groups & 0xFu; descr = "self-trigger dei gruppi";
+    } else if (fTriggerOutStr == "all") {
+        val = (groups & 0xFu) | (1u << BIT_TRGOUT_EXTERNAL) | (1u << BIT_TRGOUT_SOFTWARE);
+        descr = "self-trigger dei gruppi + esterno + software";
+    } else if (fTriggerOutStr == "default") {
+        Log::OutSummary("→ TRG-OUT: lasciato come si trova (default della board: "
+                        "esterno + software, self-trigger escluso)");
+        return;
+    } else {
+        Log::OutError("Unknown TriggerOut = '" + fTriggerOutStr +
+                      "'. Accepted values: \"self\", \"all\", \"off\", \"default\".");
+        exit(1);
+    }
+
+    if (CAEN_DGTZ_WriteRegister(fHandle, REG_FP_TRGOUT_MASK, val) != CAEN_DGTZ_Success) {
+        Log::OutWarning("Cannot write the TRG-OUT enable mask (0x8110).");
+        return;
+    }
+
+    // 0x811C[17:16] deve valere 00 perche' TRG-OUT propaghi i trigger secondo
+    // 0x8110. E' il default, ma quel registro contiene anche il livello
+    // NIM/TTL impostato dall'API: lo si verifica invece di riscriverlo alla
+    // cieca e rischiare di azzerare il resto.
+    uint32_t fp = 0;
+    if (CAEN_DGTZ_ReadRegister(fHandle, REG_FRONT_PANEL_IO, &fp) == CAEN_DGTZ_Success) {
+        uint32_t mode = (fp >> TRGOUT_MODE_SHIFT) & 0x3u;
+        if (mode != 0)
+            Log::OutWarning("TRG-OUT is not in Trigger mode: 0x811C[17:16] = " +
+                            std::to_string(mode) + " instead of 0. The connector is "
+                            "propagating probes, not triggers, and 0x8110 has no effect.");
+        if ((fp >> 1) & 0x1u)
+            Log::OutWarning("TRG-OUT is set to high impedance (0x811C[1] = 1): "
+                            "no signal will be seen on the connector.");
+    }
+
+    Log::OutSummary("→ TRG-OUT: " + descr + "  (0x8110 = " + IntToHex(val) + ")");
+}
+
 // =======================================================================
 //  SELF-TRIGGER: configurazione
 // =======================================================================
@@ -1269,6 +1339,10 @@ void Digitizer::DumpSelfTriggerRegisters() {
         Log::OutDebug("  0x8000 (Board Configuration) = " + IntToHex(val));
     if (CAEN_DGTZ_ReadRegister(fHandle, REG_GLOBAL_TRIGGER_MASK, &val) == CAEN_DGTZ_Success)
         Log::OutDebug("  0x810C (Global Trigger Mask) = " + IntToHex(val));
+    if (CAEN_DGTZ_ReadRegister(fHandle, REG_FP_TRGOUT_MASK, &val) == CAEN_DGTZ_Success)
+        Log::OutDebug("  0x8110 (TRG-OUT Enable Mask) = " + IntToHex(val));
+    if (CAEN_DGTZ_ReadRegister(fHandle, REG_FRONT_PANEL_IO, &val) == CAEN_DGTZ_Success)
+        Log::OutDebug("  0x811C (Front Panel I/O Ctrl) = " + IntToHex(val));
 
     for (uint32_t group = 0; group < hwGroups; ++group) {
         uint32_t addr = GroupBaseAddress(group) + REG_GROUP_CH_TRG_MASK;
@@ -1313,6 +1387,8 @@ void Digitizer::ConfigureTrigger() {
     if (!fSelfTrigger && !fExternalTrigger)
         Log::OutWarning("Neither external trigger nor self-trigger is enabled: "
                         "the board will only acquire on software triggers.");
+
+    ConfigureTriggerOut();
 
     DumpSelfTriggerRegisters();
 

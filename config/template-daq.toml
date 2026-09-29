@@ -104,6 +104,26 @@ SelfTrigger     = false      # <<< true = abilitato, false = disabilitato
 #            in modo indipendente (sempre disponibile, AMC >= 0.4)
 # "global" = OR su tutta la board: un canale sopra soglia fa acquisire tutti i
 #            gruppi (richiede firmware >= 4.30_1.08)
+
+# ---------------------------------------------------------------------------
+#  Uscita TRG-OUT del pannello frontale
+#
+#  Di default la board manda su TRG-OUT solo trigger esterno e software: il
+#  self-trigger dei gruppi e' escluso (0x8110 bit[3:0] = 0). Con
+#  ExternalTrigger = false il connettore resta quindi muto.
+#
+#    "self"     il self-trigger dei gruppi usati (default)
+#    "all"      self-trigger + trigger esterno + trigger software, in OR
+#    "off"      niente
+#    "default"  non tocca il registro, lascia il default della board
+#
+#  Serve soprattutto per mettere uno scaler sul TRG-OUT e leggere il rate VERO
+#  dei trigger, che non risente del tempo morto della DAQ. Il tetto di lettura
+#  attorno agli 880 Hz ha gia' reso inutilizzabili i punti a soglia bassa di
+#  piu' di uno scan.
+# ---------------------------------------------------------------------------
+TriggerOut = "self"
+
 SelfTriggerMode = "global"
 
 # Canali che partecipano all'OR di trigger. Se omesso vengono usati tutti i

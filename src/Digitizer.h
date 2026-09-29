@@ -146,6 +146,7 @@ private:
     // "global" = OR su tutta la board (richiede firmware >= 4.30_1.08).
     std::string fSelfTriggerModeStr;
     bool fSelfTriggerGlobal;
+    std::string fTriggerOutStr;   // cosa esce dal connettore TRG-OUT
     // "absolute" = soglia in conteggi ADC assoluti, "relative" = offset rispetto
     // alla baseline misurata in Transparent Mode.
     std::string fSelfTriggerThresholdMode;
@@ -189,6 +190,7 @@ private:
 
     // ---- SELF-TRIGGER HELPERS ----
     void ConfigureSelfTrigger();
+    void ConfigureTriggerOut();
     void ClearSelfTrigger(bool verbose = true);
     void ComputeSelfTriggerThresholds();
     void ApplySelfTriggerThresholds();
@@ -229,6 +231,11 @@ private:
     static constexpr uint32_t REG_BOARD_CONFIG_SET   = 0x8004;  // bit set
     static constexpr uint32_t REG_BOARD_CONFIG_CLEAR = 0x8008;  // bit clear
     static constexpr uint32_t REG_GLOBAL_TRIGGER_MASK= 0x810C;
+    static constexpr uint32_t REG_FP_TRGOUT_MASK     = 0x8110;  // chi arriva su TRG-OUT
+    static constexpr uint32_t REG_FRONT_PANEL_IO     = 0x811C;  // modo del connettore
+    static constexpr uint32_t BIT_TRGOUT_EXTERNAL    = 30;      // 0x8110[30]
+    static constexpr uint32_t BIT_TRGOUT_SOFTWARE    = 31;      // 0x8110[31]
+    static constexpr uint32_t TRGOUT_MODE_SHIFT      = 16;      // 0x811C[17:16]
     static constexpr uint32_t BIT_TRANSPARENT_MODE   = 13;      // 0x8000[13]
     static constexpr uint32_t BIT_SELFTRG_NO_AUTOACQ = 21;      // 0x8000[21]
     static constexpr uint32_t MONITOR_SHIFT          = 28;      // 0x8000[31:28]

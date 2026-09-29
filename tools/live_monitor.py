@@ -437,7 +437,7 @@ class Monitor:
         return t_ns[idx], sig[idx]
 
     def _figura_panoramica(self):
-        """Occupazione, ampiezza e rumore per ogni canale, raggruppati."""
+        """Rate, ampiezza e rumore per ogni canale, raggruppati per gruppo."""
         ov = self.overview()
         if ov is None:
             return self._placeholder()
@@ -451,7 +451,7 @@ class Monitor:
         # figura proporzionale sarebbe da seimila pixel, scomoda da
         # guardare e pesante da rigenerare ogni cinque secondi.
         larg = min(20.0, max(7.0, 0.22 * len(righe) + 3))
-        fig, axes = plt.subplots(3, 1, figsize=(larg, 7.5), sharex=True)
+        fig, axes = plt.subplots(3, 1, figsize=(larg, 5.0), sharex=True)
         # Con pochi canali le barre a larghezza piena sembrano blocchi.
         wbar = 0.8 if len(righe) > 8 else 0.35
         # Bande alternate per gruppo del V1742: con molti canali si perde
@@ -465,9 +465,20 @@ class Monitor:
                              xycoords=("data", "axes fraction"),
                              ha="center", fontsize=8, color="#666")
 
-        axes[0].bar(x, [100 * r["occupazione"] for r in righe], width=wbar, color="#1f77b4")
-        axes[0].set_ylabel("occupazione [%]")
-        axes[0].set_ylim(0, 105)
+        # Il rate per canale non si misura: si ricava dall'occupazione
+        # moltiplicata per il rate totale, perche' il trigger e' l'OR dei
+        # canali e un evento puo' contenere impulsi su piu' di uno. Se il rate
+        # totale non e' ancora noto si ripiega sull'occupazione, dichiarandolo.
+        rtot = self.rate_last(100)
+        if rtot:
+            axes[0].bar(x, [r["occupazione"] * rtot for r in righe],
+                        width=wbar, color="#1f77b4")
+            axes[0].set_ylabel("rate [Hz]")
+        else:
+            axes[0].bar(x, [100 * r["occupazione"] for r in righe],
+                        width=wbar, color="#1f77b4")
+            axes[0].set_ylabel("occupazione [%]")
+            axes[0].set_ylim(0, 105)
 
         axes[1].bar(x, [abs(r["ampiezza"]) * mv for r in righe], width=wbar, color="#2ca02c")
         axes[1].set_ylabel("ampiezza [mV]")
@@ -478,13 +489,15 @@ class Monitor:
 
         for ax in axes:
             ax.grid(alpha=.25, axis="y")
+            ax.tick_params(labelsize=7)
+            ax.yaxis.label.set_size(8)
         # Con molti canali le etichette si diradano invece di sovrapporsi.
         passo = 1 if len(righe) <= 40 else (2 if len(righe) <= 80 else 8)
         axes[2].set_xticks(x[::passo])
-        axes[2].set_xticklabels(etich[::passo], fontsize=7,
+        axes[2].set_xticklabels(etich[::passo], fontsize=6.5,
                                 rotation=90 if len(righe) > 24 else 0)
         fig.suptitle("Panoramica su %d canali  (ultimi %d eventi)"
-                     % (len(righe), ov["eventi"]), fontsize=12)
+                     % (len(righe), ov["eventi"]), fontsize=10)
 
         fig.tight_layout()
         buf = io.BytesIO()

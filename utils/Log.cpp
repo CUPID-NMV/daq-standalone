@@ -1,6 +1,34 @@
 #include "Log.h"
 
 Log::LogLevel Log::fLogLevel = Log::summary;
+std::ofstream Log::fFile;
+std::vector<std::string> Log::fPending;
+
+void Log::ToFile(const std::string& line) {
+    if (fFile.is_open()) {
+        fFile << line << std::endl;
+    } else {
+        // Finche' il file non esiste si tiene tutto da parte. Il limite evita
+        // che una run senza file di log si mangi memoria all'infinito.
+        if (fPending.size() < 5000) fPending.push_back(line);
+    }
+}
+
+void Log::OpenFile(const std::string& path) {
+    if (fFile.is_open()) fFile.close();
+    fFile.open(path, std::ios::out | std::ios::trunc);
+    if (!fFile.is_open()) {
+        Log::OutWarning("Cannot open the log file " + path + ": the log will stay on screen only.");
+        return;
+    }
+    for (const auto& l : fPending) fFile << l << std::endl;
+    fPending.clear();
+    Log::OutSummary("→ Log written to " + path);
+}
+
+void Log::CloseFile() {
+    if (fFile.is_open()) fFile.close();
+}
 
 Log::Log() {
     fLogLevel = Log::summary;
@@ -46,6 +74,7 @@ void Log::Out(const Log::LogLevel& loglevel, const std::string& message) {
         }
         std::cout << Log::ToString(loglevel) << std::boolalpha << message;
         std::cout << "\033[0m"<< std::endl;
+        Log::ToFile(Log::ToString(loglevel) + message);
     }
 
 }

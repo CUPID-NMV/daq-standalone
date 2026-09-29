@@ -5,6 +5,8 @@
 #include <typeinfo>
 #include <vector>
 #include <iostream>
+#include <fstream>
+#include <sstream>
 
 class Log {
 
@@ -27,7 +29,22 @@ public:
 
     static void SetLogLevel(const Log::LogLevel& loglevel);
 
+    /// Duplica su file tutto cio' che viene stampato, dal primo messaggio.
+    ///
+    /// Il nome della run si conosce solo dopo aver aperto il file di uscita,
+    /// quindi i messaggi precedenti vengono tenuti in memoria e riversati qui
+    /// appena il file si apre: senza, mancherebbe proprio la parte piu' utile,
+    /// cioe' connessione, calibrazioni e piedistalli.
+    static void OpenFile(const std::string& path);
+    static void CloseFile();
+
     static void Out(const Log::LogLevel& loglevel, const std::string& message="");
+
+private:
+    static void ToFile(const std::string& line);
+    static std::ofstream           fFile;
+    static std::vector<std::string> fPending;   // prima che il file esista
+public:
     
     static void Out(const std::string& message="") {
         Out(Log::fLogLevel, message);
@@ -61,10 +78,12 @@ public:
 	    } else if (loglevel == Log::LogLevel::debug) {
 		std::cout << "\033[32m";
 	    }
-	    std::cout << Log::ToString(loglevel);
+	    std::ostringstream oss;
+	    oss << Log::ToString(loglevel);
 	    for( auto it: values )
-		std::cout << std::boolalpha << it << "\t";
-	    std::cout << "\033[0m"<< std::endl;
+		oss << std::boolalpha << it << "\t";
+	    std::cout << oss.str() << "\033[0m" << std::endl;
+	    Log::ToFile(oss.str());
 	}
 	
 	return;

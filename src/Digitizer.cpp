@@ -371,7 +371,7 @@ std::string Digitizer::LinkDescription() const
 {
     if (fConnectionType == CAEN_DGTZ_USB_A4818)
         return "USB_A4818 (PID " + std::to_string(fA4818PID) + ", CONET diretto)";
-    return "ETH_V4718 (" + fIPAddress + ", VME 0x" + IntToHex(fVMEBaseAddress) + ")";
+    return "ETH_V4718 (" + fIPAddress + ", VME " + IntToHex(fVMEBaseAddress) + ")";
 }
 
 // Un tentativo di apertura. Le convenzioni per `arg` differiscono fra i due
@@ -1982,6 +1982,19 @@ void Digitizer::PrepareOutput() {
     }
 
     Log::OutSummary("→ HDF5 output path selected: " + fOutputPath);
+
+    // Da qui in poi il log va anche su file, accanto ai dati e con lo stesso
+    // nome. I messaggi gia' stampati -- connessione, calibrazioni, piedistalli,
+    // soglie -- sono stati tenuti da parte e vengono riversati adesso: sono
+    // proprio quelli che servono quando una run va storta.
+    {
+        std::string logpath = fOutputPath;
+        const std::string ext = ".h5";
+        if (logpath.size() > ext.size() &&
+            logpath.compare(logpath.size() - ext.size(), ext.size(), ext) == 0)
+            logpath = logpath.substr(0, logpath.size() - ext.size());
+        Log::OpenFile(logpath + ".log");
+    }
 
     try {
         // SWMR richiede che il file sia scritto con il formato piu' recente.

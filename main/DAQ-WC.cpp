@@ -63,6 +63,8 @@ int main(int argc, char** argv)
     // 8. Chiusura risorse CAEN (Close() libera buffer/eventi e chiude il digitizer)
     digitizer.Close();
 
+    Log::CloseFile();
+
     // 9. Bridge off
     if (useBridge)
         bridge.Close();

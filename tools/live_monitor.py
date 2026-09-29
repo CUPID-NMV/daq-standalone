@@ -1041,6 +1041,12 @@ def main():
     ap.add_argument("-d", "--data-dir", default=None,
                     help="directory dei dati (default: <radice del progetto>/data)")
     ap.add_argument("-p", "--port", type=int, default=8765)
+    ap.add_argument("-b", "--bind", default="127.0.0.1",
+                    help="indirizzo su cui ascoltare. Il default accetta solo "
+                         "connessioni locali, quindi da fuori serve un inoltro "
+                         "di porta. Con 0.0.0.0 il monitor e' raggiungibile "
+                         "direttamente dalla rete e non serve nessun tunnel, "
+                         "che e' un pezzo in meno che si puo' rompere")
     ap.add_argument("-n", "--nevents", type=int, default=1,
                     help="eventi sovrapposti nel grafico (default 1 = solo l'ultimo)")
     ap.add_argument("--tail-cut", type=int, default=Monitor.TAGLIO_CODA,
@@ -1094,7 +1100,7 @@ def main():
                 "hxmin": args.hxmin, "hxmax": args.hxmax, "hlog": args.hlog}
 
     try:
-        server = ThreadingHTTPServer(("127.0.0.1", args.port),
+        server = ThreadingHTTPServer((args.bind, args.port),
                                      make_handler(monitor, args.refresh, defaults))
     except OSError as exc:
         if exc.errno != errno.EADDRINUSE:
@@ -1110,9 +1116,20 @@ def main():
             f"Per usare un'altra porta:   {os.path.basename(sys.argv[0])} -p {args.port + 1}"
         )
 
-    print(f"Monitor attivo su http://localhost:{args.port}")
-    print("In VS Code Remote-SSH la porta viene inoltrata da sola: apri quel")
-    print("link nel browser del Mac. Ctrl+C per fermare.")
+    if args.bind in ("127.0.0.1", "localhost"):
+        print(f"Monitor attivo su http://localhost:{args.port}")
+        print("Ascolta solo in locale: da fuori serve un inoltro di porta.")
+        print("Per raggiungerlo direttamente dalla rete, senza tunnel:")
+        print(f"    python3 {os.path.basename(sys.argv[0])} -b 0.0.0.0 -p {args.port}")
+    else:
+        import socket as _s
+        try:
+            ip = _s.gethostbyname(_s.gethostname())
+        except OSError:
+            ip = args.bind
+        print(f"Monitor attivo su http://{ip}:{args.port}")
+        print("Ascolta su tutta la rete: niente inoltri di porta da mantenere.")
+    print("Ctrl+C per fermare.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

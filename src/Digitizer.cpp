@@ -433,6 +433,8 @@ void Digitizer::SelectBoard()
 
     Log::OutSummary("Digitizer connected via " + LinkDescription());
 
+    CAEN_DGTZ_ErrorCode err;        // riusata dal resto della funzione
+
     CAEN_DGTZ_GetInfo(fHandle,&fBoardInfo);
     Log::OutSummary("Digitizer model: " + std::string(fBoardInfo.ModelName));
     Log::OutSummary("ROC firmware release: " + std::string(fBoardInfo.ROC_FirmwareRel));

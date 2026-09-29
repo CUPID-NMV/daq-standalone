@@ -1116,6 +1116,26 @@ void Digitizer::ConfigureTriggerOut()
         return;
     }
 
+    // I bit [3:0] di 0x8110 aprono il contributo del gruppo, ma il manuale
+    // dice che QUALE segnale sia lo decide 0x8000[31:28]. In modo "paired"
+    // quel campo viene azzerato, e 0000 significa "no signal": il rubinetto e'
+    // aperto su niente, il registro si rilegge giusto e dal connettore non
+    // esce nulla. E' quello che si osservava.
+    //
+    // Il modo "global" usa 0100, valore che il manuale rev.3 non documenta --
+    // le opzioni elencate arrivano a 0011 -- ma che e' evidentemente quello
+    // che instrada l'over-threshold. Lo si imposta anche qui quando si chiede
+    // il self-trigger sul connettore.
+    if (val & 0xFu) {
+        CAEN_DGTZ_WriteRegister(fHandle, REG_BOARD_CONFIG_CLEAR, 0xFu << MONITOR_SHIFT);
+        CAEN_DGTZ_WriteRegister(fHandle, REG_BOARD_CONFIG_SET,
+                                MONITOR_SELFTRG_TO_MB << MONITOR_SHIFT);
+        uint32_t bc = 0;
+        if (CAEN_DGTZ_ReadRegister(fHandle, REG_BOARD_CONFIG, &bc) == CAEN_DGTZ_Success)
+            Log::OutSummary("→ TRG-OUT: instradamento 0x8000[31:28] = " +
+                            std::to_string((bc >> MONITOR_SHIFT) & 0xFu));
+    }
+
     // 0x811C[17:16] deve valere 00 perche' TRG-OUT propaghi i trigger secondo
     // 0x8110. E' il default, ma quel registro contiene anche il livello
     // NIM/TTL impostato dall'API: lo si verifica invece di riscriverlo alla

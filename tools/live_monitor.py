@@ -436,8 +436,70 @@ class Monitor:
         idx = np.clip(idx, 0, len(t_ns) - 1)
         return t_ns[idx], sig[idx]
 
+    def _figura_panoramica(self):
+        """Occupazione, ampiezza e rumore per ogni canale, raggruppati."""
+        ov = self.overview()
+        if ov is None:
+            return self._placeholder()
+        righe = ov["canali"]
+        x = np.arange(len(righe))
+        etich = [r["ch"] for r in righe]
+        gruppi = [r["gruppo"] for r in righe]
+        mv = self.mv_per_count()
+
+        # La larghezza cresce coi canali ma si ferma: a 200 canali una
+        # figura proporzionale sarebbe da seimila pixel, scomoda da
+        # guardare e pesante da rigenerare ogni cinque secondi.
+        larg = min(20.0, max(7.0, 0.22 * len(righe) + 3))
+        fig, axes = plt.subplots(3, 1, figsize=(larg, 7.5), sharex=True)
+        # Con pochi canali le barre a larghezza piena sembrano blocchi.
+        wbar = 0.8 if len(righe) > 8 else 0.35
+        # Bande alternate per gruppo del V1742: con molti canali si perde
+        # subito il conto di dove finisce uno e comincia l'altro.
+        for g in sorted(set(gruppi)):
+            idx = [k for k, gg in enumerate(gruppi) if gg == g]
+            if g % 2 == 0:
+                for ax in axes:
+                    ax.axvspan(idx[0] - .5, idx[-1] + .5, color="#000", alpha=.04)
+            axes[0].annotate("gr%d" % g, xy=((idx[0] + idx[-1]) / 2, 1.02),
+                             xycoords=("data", "axes fraction"),
+                             ha="center", fontsize=8, color="#666")
+
+        axes[0].bar(x, [100 * r["occupazione"] for r in righe], width=wbar, color="#1f77b4")
+        axes[0].set_ylabel("occupazione [%]")
+        axes[0].set_ylim(0, 105)
+
+        axes[1].bar(x, [abs(r["ampiezza"]) * mv for r in righe], width=wbar, color="#2ca02c")
+        axes[1].set_ylabel("ampiezza [mV]")
+
+        axes[2].bar(x, [r["rms"] * mv for r in righe], width=wbar, color="#d62728")
+        axes[2].set_ylabel("rumore [mV]")
+        axes[2].set_xlabel("canale")
+
+        for ax in axes:
+            ax.grid(alpha=.25, axis="y")
+        # Con molti canali le etichette si diradano invece di sovrapporsi.
+        passo = 1 if len(righe) <= 40 else (2 if len(righe) <= 80 else 8)
+        axes[2].set_xticks(x[::passo])
+        axes[2].set_xticklabels(etich[::passo], fontsize=7,
+                                rotation=90 if len(righe) > 24 else 0)
+        fig.suptitle("Panoramica su %d canali  (ultimi %d eventi)"
+                     % (len(righe), ov["eventi"]), fontsize=12)
+
+        fig.tight_layout()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=110)
+        plt.close(fig)
+        return buf.getvalue()
+
     def figure(self, kind, n_show=1, xlim=(None, None), ylim=(None, None),
                hset=None, bw=None):
+        if kind == "panoramica":
+            # Non passa dall'analisi di dettaglio: quella riguarda i soli
+            # canali selezionati e puo' mancare, mentre la panoramica deve
+            # poter rispondere comunque.
+            return self._figura_panoramica()
+
         res = self.analysis()
         if res is None:
             return self._placeholder()
@@ -510,55 +572,6 @@ class Monitor:
                     f"tempo [ns]      (ultimi {self.tail_cut} campioni scartati)")
             else:
                 axes[-1][0].set_xlabel("tempo [ns]")
-
-        elif kind == "panoramica":
-            ov = self.overview()
-            if ov is None:
-                return self._placeholder()
-            righe = ov["canali"]
-            x = np.arange(len(righe))
-            etich = [r["ch"] for r in righe]
-            gruppi = [r["gruppo"] for r in righe]
-            mv = self.mv_per_count()
-
-            # La larghezza cresce coi canali ma si ferma: a 200 canali una
-            # figura proporzionale sarebbe da seimila pixel, scomoda da
-            # guardare e pesante da rigenerare ogni cinque secondi.
-            larg = min(20.0, max(7.0, 0.22 * len(righe) + 3))
-            fig, axes = plt.subplots(3, 1, figsize=(larg, 7.5), sharex=True)
-            # Con pochi canali le barre a larghezza piena sembrano blocchi.
-            wbar = 0.8 if len(righe) > 8 else 0.35
-            # Bande alternate per gruppo del V1742: con molti canali si perde
-            # subito il conto di dove finisce uno e comincia l'altro.
-            for g in sorted(set(gruppi)):
-                idx = [k for k, gg in enumerate(gruppi) if gg == g]
-                if g % 2 == 0:
-                    for ax in axes:
-                        ax.axvspan(idx[0] - .5, idx[-1] + .5, color="#000", alpha=.04)
-                axes[0].annotate("gr%d" % g, xy=((idx[0] + idx[-1]) / 2, 1.02),
-                                 xycoords=("data", "axes fraction"),
-                                 ha="center", fontsize=8, color="#666")
-
-            axes[0].bar(x, [100 * r["occupazione"] for r in righe], width=wbar, color="#1f77b4")
-            axes[0].set_ylabel("occupazione [%]")
-            axes[0].set_ylim(0, 105)
-
-            axes[1].bar(x, [abs(r["ampiezza"]) * mv for r in righe], width=wbar, color="#2ca02c")
-            axes[1].set_ylabel("ampiezza [mV]")
-
-            axes[2].bar(x, [r["rms"] * mv for r in righe], width=wbar, color="#d62728")
-            axes[2].set_ylabel("rumore [mV]")
-            axes[2].set_xlabel("canale")
-
-            for ax in axes:
-                ax.grid(alpha=.25, axis="y")
-            # Con molti canali le etichette si diradano invece di sovrapporsi.
-            passo = 1 if len(righe) <= 40 else (2 if len(righe) <= 80 else 8)
-            axes[2].set_xticks(x[::passo])
-            axes[2].set_xticklabels(etich[::passo], fontsize=7,
-                                    rotation=90 if len(righe) > 24 else 0)
-            fig.suptitle("Panoramica su %d canali  (ultimi %d eventi)"
-                         % (len(righe), ov["eventi"]), fontsize=12)
 
         elif kind == "average":
             fig, ax = plt.subplots(figsize=(9, 4))

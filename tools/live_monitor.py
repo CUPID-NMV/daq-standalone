@@ -34,6 +34,7 @@ matplotlib.use("Agg")          # nessun display: si generano solo PNG
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import daqio
 from daqio import load, baseline_amplitude, DaqFileError
 
 
@@ -60,6 +61,7 @@ class Monitor:
     MIN_EVENTS_FOR_THRESHOLD = 1000
 
     TAGLIO_CODA = 20      # campioni finali scartati: vedi analysis()
+    OVERVIEW_EVENTS = 200 # quanti eventi bastano alle mediane della panoramica
 
     def __init__(self, data_dir, path=None, max_events=2000, min_interval=2.0,
                  vpp=1.0):
@@ -73,6 +75,9 @@ class Monitor:
         self.hdr = None
         self.data = None
         self.tail_cut = self.TAGLIO_CODA
+        self.sel_channels = None      # None = tutti quelli del file
+        self._ov = None               # panoramica: (istante, risultato)
+        self.overview_interval = 5.0  # si aggiorna al massimo ogni 5 s
         self.error = None
         self.path = None
 
@@ -117,6 +122,74 @@ class Monitor:
         except (OSError, ValueError):
             return None
 
+    def select_channels(self, channels):
+        """Limita i grafici di dettaglio a questi canali (None = tutti).
+
+        Cambiarli invalida i dati in memoria: sono stati letti per un altro
+        insieme di canali e non descrivono piu' quello richiesto.
+        """
+        if channels == self.sel_channels:
+            return
+        self.sel_channels = channels
+        self.data = None
+        self._ana = None
+        self._last_read = 0.0
+
+    def overview(self):
+        """Statistiche per canale su TUTTI i canali del file.
+
+        Con molti canali la domanda non e' piu' "che forma ha il segnale" ma
+        "quali canali sono vivi, quali rumorosi, quali morti". Si legge un
+        canale per volta, cosi' la memoria non dipende da quanti sono, e su
+        pochi eventi, perche' per delle mediane bastano.
+        """
+        now = time.time()
+        if self._ov and (now - self._ov[0]) < self.overview_interval:
+            return self._ov[1]
+        try:
+            path = self._latest_file()
+        except DaqFileError:
+            return None
+        try:
+            f, tmp = daqio.open_file(path, live=True)
+        except DaqFileError:
+            return None
+        try:
+            hdr = daqio.read_header(f)
+            ds = f["/events/waveforms"]
+            ds.refresh()
+            tot = ds.shape[0]
+            if tot == 0:
+                return None
+            ns = int(hdr["SamplesPerChannel"])
+            chans = [int(c) for c in hdr["ChannelList"]]
+            n = min(tot, self.OVERVIEW_EVENTS)
+            a = tot - n
+            righe = []
+            for i, ch in enumerate(chans):
+                blocco = np.asarray(ds[a:tot, i * ns:(i + 1) * ns], dtype=np.float32)
+                if self.tail_cut:
+                    blocco = blocco[:, :max(blocco.shape[1] - self.tail_cut, 1)]
+                base = np.median(blocco, axis=1)
+                sig = blocco - base[:, None]
+                rms = float(1.4826 * np.median(np.abs(sig)))
+                amp = sig.min(axis=1)
+                taglio = min(-10.0, -8.0 * rms)
+                ok = amp < taglio
+                righe.append({
+                    "ch": ch,
+                    "gruppo": ch // 8,
+                    "baseline": float(np.median(base)),
+                    "rms": rms,
+                    "occupazione": float(ok.mean()),
+                    "ampiezza": float(np.median(amp[ok])) if ok.sum() > 2 else 0.0,
+                })
+        finally:
+            f.close()
+            daqio._cleanup(tmp)
+        self._ov = (now, {"eventi": n, "canali": righe})
+        return self._ov[1]
+
     def refresh(self, force=False):
         now = time.time()
         if not force and (now - self._last_read) < self.min_interval:
@@ -127,7 +200,8 @@ class Monitor:
             path = self._latest_file()
             # Solo la coda del file: il costo di un aggiornamento non deve
             # crescere con la durata della run.
-            hdr, data = load(path, last=self.max_events, live=True)
+            hdr, data = load(path, last=self.max_events, live=True,
+                             channels=self.sel_channels)
         except DaqFileError as exc:
             self.error = str(exc).splitlines()[0]
             return
@@ -437,6 +511,48 @@ class Monitor:
             else:
                 axes[-1][0].set_xlabel("tempo [ns]")
 
+        elif kind == "panoramica":
+            ov = self.overview()
+            if ov is None:
+                return self._placeholder()
+            righe = ov["canali"]
+            x = np.arange(len(righe))
+            etich = [r["ch"] for r in righe]
+            gruppi = [r["gruppo"] for r in righe]
+            mv = self.mv_per_count()
+
+            fig, axes = plt.subplots(3, 1, figsize=(max(7, 0.22 * len(righe) + 3), 7.5),
+                                     sharex=True)
+            # Bande alternate per gruppo del V1742: con molti canali si perde
+            # subito il conto di dove finisce uno e comincia l'altro.
+            for g in sorted(set(gruppi)):
+                idx = [k for k, gg in enumerate(gruppi) if gg == g]
+                if g % 2 == 0:
+                    for ax in axes:
+                        ax.axvspan(idx[0] - .5, idx[-1] + .5, color="#000", alpha=.04)
+                axes[0].annotate("gr%d" % g, xy=((idx[0] + idx[-1]) / 2, 1.02),
+                                 xycoords=("data", "axes fraction"),
+                                 ha="center", fontsize=8, color="#666")
+
+            axes[0].bar(x, [100 * r["occupazione"] for r in righe], color="#1f77b4")
+            axes[0].set_ylabel("occupazione [%]")
+            axes[0].set_ylim(0, 105)
+
+            axes[1].bar(x, [abs(r["ampiezza"]) * mv for r in righe], color="#2ca02c")
+            axes[1].set_ylabel("ampiezza [mV]")
+
+            axes[2].bar(x, [r["rms"] * mv for r in righe], color="#d62728")
+            axes[2].set_ylabel("rumore [mV]")
+            axes[2].set_xlabel("canale")
+
+            for ax in axes:
+                ax.grid(alpha=.25, axis="y")
+            axes[2].set_xticks(x)
+            axes[2].set_xticklabels(etich, fontsize=7,
+                                    rotation=90 if len(righe) > 24 else 0)
+            fig.suptitle("Panoramica su %d canali  (ultimi %d eventi)"
+                         % (len(righe), ov["eventi"]), fontsize=12)
+
         elif kind == "average":
             fig, ax = plt.subplots(figsize=(9, 4))
             for i, ch in enumerate(channels):
@@ -591,6 +707,7 @@ PAGE = """<!DOCTYPE html>
   <label>y max [ADC]<input id="ymax" value="__YMAX__" placeholder="auto"></label>
   <label>eventi<input id="nev" value="__NEVENTS__" style="width:60px"></label>
   <label>banda [MHz]<input id="bw" value="__BW__" placeholder="off" style="width:70px"></label>
+  <label>canali<input id="canali" value="" placeholder="tutti  es. 8,9,12-15" style="width:150px"></label>
   <button id="reset">Autoscale</button>
   <span class="hint">forme d'onda · campi vuoti = autoscale</span>
 </div>
@@ -600,6 +717,7 @@ PAGE = """<!DOCTYPE html>
 <th>amp. minima [mV]</th><th>amp. minima [ADC]</th></tr></thead><tbody></tbody></table>
 <div id="boot" class="err">JavaScript non eseguito: la pagina non puo' aggiornarsi.
 Apri la console del browser per vedere l'errore.</div>
+<img id="pano" alt="panoramica per canale">
 <img id="w" alt="forme d'onda"><img id="a" alt="media"><img id="h" alt="ampiezze">
 <script>
 document.getElementById('boot').style.display = 'none';
@@ -613,7 +731,7 @@ function setAlert(msg) {
   if (msg) a.textContent = msg;
   document.body.classList.toggle('stale', !!msg);
 }
-const FIELDS = ['xmin','xmax','ymin','ymax','nev','bw'];
+const FIELDS = ['xmin','xmax','ymin','ymax','nev','bw','canali'];
 
 // I limiti scelti sopravvivono a un reload della pagina. localStorage puo'
 // essere inaccessibile (finestra privata, cookie bloccati): mai fatale.
@@ -726,6 +844,13 @@ async function tick() {
     p.set('t', Date.now());
     for (const [id, name] of [['w','waveforms'],['a','average'],['h','amplitudes']])
       document.getElementById(id).src = name + '.png?' + p.toString();
+    // La panoramica copre tutti i canali e non risente della selezione, quindi
+    // non serve rigenerarla a ogni giro: si aggiorna ogni 5 s per conto suo.
+    const pano = document.getElementById('pano');
+    if (!pano.dataset.t || (Date.now() - pano.dataset.t) > 5000) {
+      pano.dataset.t = Date.now();
+      pano.src = 'panoramica.png?t=' + pano.dataset.t;
+    }
   } catch (e) {
     // Le immagini restano quelle di prima: senza un avviso vistoso la pagina
     // sembrerebbe viva mentre mostra dati fermi.
@@ -743,6 +868,39 @@ async function tick() {
 }
 tick(); setInterval(tick, REFRESH);
 </script></body></html>"""
+
+
+def parse_channels(testo):
+    """Interpreta "8,9,12-15" come [8, 9, 12, 13, 14, 15]. Vuoto = tutti.
+
+    Un intervallo scritto al contrario o un pezzo non numerico vengono
+    ignorati: e' una casella di testo in una pagina, e non deve poter far
+    cadere il server.
+    """
+    testo = (testo or "").strip()
+    if not testo:
+        return None
+    fuori = []
+    for pezzo in testo.replace(";", ",").split(","):
+        pezzo = pezzo.strip()
+        if not pezzo:
+            continue
+        if "-" in pezzo:
+            a, _, b = pezzo.partition("-")
+            try:
+                a, b = int(a), int(b)
+            except ValueError:
+                continue
+            if a <= b:
+                fuori.extend(range(a, b + 1))
+        else:
+            try:
+                fuori.append(int(pezzo))
+            except ValueError:
+                continue
+    # senza duplicati e in ordine, cosi' i grafici non dipendono da come si
+    # e' scritto l'elenco
+    return sorted(set(fuori)) or None
 
 
 def _fmt(v):
@@ -810,13 +968,15 @@ def make_handler(monitor, refresh, defaults):
 
 
             with monitor.lock:
+                monitor.select_channels(parse_channels(qs.get("canali", [""])[0]))
                 monitor.refresh()
 
                 if route == "stats.json":
                     return self._send(200, "application/json",
                                       json.dumps(monitor.stats()).encode())
 
-                kinds = {"waveforms.png": "waveforms",
+                kinds = {"panoramica.png": "panoramica",
+                         "waveforms.png": "waveforms",
                          "average.png": "average",
                          "amplitudes.png": "amplitudes"}
                 if route in kinds:

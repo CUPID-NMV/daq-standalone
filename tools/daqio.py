@@ -99,7 +99,7 @@ def read_header(f):
     return hdr
 
 
-def _read_v2(f, hdr, max_events, live, last=None):
+def _read_v2(f, hdr, max_events, live, last=None, chan_idx=None):
     ds = f["/events/waveforms"]
     if live:
         ds.refresh()          # senza refresh si vede solo lo stato all'apertura
@@ -112,10 +112,22 @@ def _read_v2(f, hdr, max_events, live, last=None):
         # Solo la coda: il monitor si aggiorna a ritmo costante anche su run
         # lunghe, invece di rileggere tutto il file a ogni giro.
         n_ev = min(total, last)
-        flat = np.asarray(ds[total - n_ev:total], dtype=np.float64)
+        a, z = total - n_ev, total
     else:
         n_ev = min(total, max_events) if max_events else total
-        flat = np.asarray(ds[:n_ev], dtype=np.float64)
+        a, z = 0, n_ev
+
+    if chan_idx is None:
+        flat = np.asarray(ds[a:z], dtype=np.float64)
+    else:
+        # Un canale e' una fetta contigua della riga, quindi si puo' leggere da
+        # solo. Serve con molti canali: leggerli tutti per mostrarne due
+        # significa spostare (e convertire in float64) decine di volte i dati
+        # che servono davvero.
+        ns = int(hdr["SamplesPerChannel"])
+        flat = np.concatenate(
+            [np.asarray(ds[a:z, i * ns:(i + 1) * ns], dtype=np.float64)
+             for i in chan_idx], axis=1)
 
     return flat, n_ev, total
 
@@ -141,19 +153,42 @@ def _read_v1(f, hdr, max_events, live, last=None):
     return flat, len(keys), total
 
 
-def load(path, max_events=None, live=False, last=None):
+def load(path, max_events=None, live=False, last=None, channels=None):
     """Carica un file di dati.
 
     Ritorna (header, data) con data di forma (n_eventi, n_canali, n_campioni).
     `last` legge solo gli ultimi N eventi, utile per il monitoraggio dal vivo:
     il costo resta costante anche mentre il file cresce. Il numero totale di
     eventi presenti nel file finisce comunque in hdr["NEventsInFile"].
+
+    `channels` limita la lettura ai canali indicati (numeri di canale, non
+    indici). Con molti canali e' la differenza fra leggere qualche megabyte e
+    qualche gigabyte. In quel caso hdr["ChannelList"] descrive i canali
+    effettivamente letti, coerente con la forma dei dati, e la lista completa
+    del file resta in hdr["ChannelListFile"].
     """
     f, tmp = open_file(path, live=live)
     try:
         hdr = read_header(f)
-        reader = _read_v2 if hdr["FormatVersion"] >= 2 else _read_v1
-        flat, n_ev, total = reader(f, hdr, max_events, live, last)
+        tutti = [int(c) for c in hdr["ChannelList"]]
+        chan_idx = None
+        if channels is not None:
+            voluti = [int(c) for c in channels]
+            mancanti = [c for c in voluti if c not in tutti]
+            if mancanti:
+                raise DaqFileError(
+                    "Canali non presenti nel file: " +
+                    ", ".join(str(c) for c in mancanti) +
+                    ". Il file contiene " + ", ".join(str(c) for c in tutti) + ".")
+            chan_idx = [tutti.index(c) for c in voluti]
+            hdr["ChannelListFile"] = tutti
+            hdr["ChannelList"] = voluti
+        if hdr["FormatVersion"] >= 2:
+            flat, n_ev, total = _read_v2(f, hdr, max_events, live, last, chan_idx)
+        else:
+            if chan_idx is not None:
+                raise DaqFileError("La selezione dei canali richiede il formato v2.")
+            flat, n_ev, total = _read_v1(f, hdr, max_events, live, last)
     finally:
         f.close()
         _cleanup(tmp)

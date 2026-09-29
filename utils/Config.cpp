@@ -24,7 +24,6 @@ void Config::Read( char* filename )
     Log::OutDebug( "Reading file " + std::string(fFileName) );
 
     fTbl = toml::parse_file(fFileName);
-    std::cout << fTbl << std::endl;
 
     const int verbosity = fTbl["settings"]["verbosity"].value_or(3);
     Log::OpenLog(verbosity );

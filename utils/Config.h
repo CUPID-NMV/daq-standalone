@@ -92,62 +92,55 @@ public:
 	return found;
     }
     
-    template <typename T>
-    void CheckDefault( std::string category,
-		       std::string key,
-		       T value,
-		       T defvalue )
+    // Avvisa quando una chiave MANCA, non quando il suo valore coincide con il
+    // default. Il controllo precedente confrontava i valori, quindi una chiave
+    // scritta esplicitamente nel file faceva scattare "Using default value"
+    // solo perche' il valore corrispondeva: il messaggio diceva il falso, e ne
+    // uscivano quindici per ogni avvio, che e' il modo migliore per non
+    // leggerne piu' nessuno.
+    void WarnMissing( const std::string& category,
+		      const std::string& key )
     {
-	if( value == defvalue )
-	    Log::OutWarning( "Using default value for [" + category + "][" + key + "]" );
-	
-	return;
+	Log::OutWarning( "[" + category + "][" + key + "] not in the config file: "
+			 "using the built-in default" );
     }
-    
+
     template <typename T>
     T GetEntry( std::string category,
 		std::string key,
 		T defvalue )
     {
-	T value = fTbl[category][key].value_or(defvalue);
-	CheckDefault( category, key, value, defvalue );
-	return value;
+	auto node = fTbl[category][key];
+	if( !node )
+	    {
+		WarnMissing( category, key );
+		return defvalue;
+	    }
+	return node.value_or(defvalue);
     }
 
     uint32_t GetTime( std::string category,
 		      std::string key,
 		      toml::time defvalue )
     {
-	toml::time value = fTbl[category][key].value_or(defvalue);
-	CheckDefault( category, key, value, defvalue );
+	auto node = fTbl[category][key];
+	if( !node ) WarnMissing( category, key );
+	toml::time value = node ? node.value_or(defvalue) : defvalue;
 	
 	return 3600*value.hour + 60*value.minute + value.second;
     }
 
     template <typename Tin, typename Tout>
-    void CheckDefault( std::string category,
-		       std::string key,
-		       Tout value,
-		       Tin defvalue )
-    {
-	if( value == static_cast<Tout>(defvalue) )
-	    Log::OutWarning("Using default value for [" + category + "][" + key + "]" );
-	return;
-    }
-    
-    template <typename Tin, typename Tout>
     Tout GetEntry( std::string category,
 		   std::string key,
 		   Tin defvalue )
     {
-	Tout value = static_cast<Tout>(std::stod(fTbl[category][key].value_or(defvalue)));
-	CheckDefault<Tin,Tout>( category, key, value, defvalue );
-	return value;
+	auto node = fTbl[category][key];
+	if( !node ) WarnMissing( category, key );
+	return static_cast<Tout>(std::stod(node ? node.value_or(defvalue) : defvalue));
     }
 
-    template <typename T>
-    void CheckDefault( std::string category,
-		       std::string subcategory,
+
 		       std::string key,
 		       T value,
 		       T defvalue )
@@ -170,26 +163,14 @@ public:
     }
 
     template <typename Tin, typename Tout>
-    void CheckDefault( std::string category,
-		       std::string subcategory,
-		       std::string key,
-		       Tout value,
-		       Tin defvalue )
-    {
-	if( value == static_cast<Tout>(defvalue) )
-	    Log::OutWarning( "Using default value for [" + category + "][" + subcategory + "][" + key + "]" );
-	return;
-    }
-    
-    template <typename Tin, typename Tout>
     Tout GetSubEntry( std::string category,
 		      std::string subcategory,
 		      std::string key,
 		      Tin defvalue )
     {
-	Tout value = static_cast<Tout>(std::stod(fTbl[category][subcategory][key].value_or(defvalue)));
-	CheckDefault<Tin,Tout>( category, subcategory, key, value, defvalue );
-	return value;
+	auto node = fTbl[category][subcategory][key];
+	if( !node ) WarnMissing( category, subcategory, key );
+	return static_cast<Tout>(std::stod(node ? node.value_or(defvalue) : defvalue));
     }
 
     // Legge un elemento di una lista del TOML.
@@ -216,21 +197,6 @@ public:
     }
 
     template <typename T>
-    void CheckDefault( std::string category,
-		       std::string key,
-		       std::vector<T>& value,
-		       T defvalue )
-    {
-	size_t nequal = 0;
-	for( auto it: value )
-	    if( it == defvalue )
-		nequal++;
-	if( nequal == value.size() )
-	    Log::OutWarning( "Using default value for [" + category + "][" + key + "]" );
-	return;
-    }
-    
-    template <typename T>
     std::vector<T> GetEntryList( std::string category,
 				 std::string key,
 				 T defvalue,
@@ -254,31 +220,15 @@ public:
 		    }
 	    }
 	else
-	    for( size_t i=0; i<size; i++ )
-		value.emplace_back(defvalue);
-
-	if( value.size() > 0 )
-	    CheckDefault( category, key, value, defvalue );
+	    {
+		WarnMissing( category, key );
+		for( size_t i=0; i<size; i++ )
+		    value.emplace_back(defvalue);
+	    }
 
 	return value;
     }
 
-    template <typename T>
-    void CheckDefault( std::string category,
-		       std::string subcategory,
-		       std::string key,
-		       std::vector<T>& value,
-		       T defvalue )
-    {
-	size_t nequal = 0;
-	for( auto it: value )
-	    if( it == defvalue )
-		nequal++;
-	if( nequal == value.size() )
-	    Log::OutWarning( "Using default value for [" + category + "][" + subcategory + "][" + key + "]" );
-	return;
-    }
-    
     template <typename T>
     std::vector<T> GetSubEntryList( std::string category,
 				    std::string subcategory,
@@ -305,11 +255,11 @@ public:
 		    }
 	    }
 	else
-	    for( size_t i=0; i<size; i++ )
-		value.emplace_back(defvalue);
-
-	if( value.size() > 0 )
-	    CheckDefault( category, subcategory, key, value, defvalue );
+	    {
+		WarnMissing( category, subcategory, key );
+		for( size_t i=0; i<size; i++ )
+		    value.emplace_back(defvalue);
+	    }
 
 	return value;
     }

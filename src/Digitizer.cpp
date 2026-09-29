@@ -2031,6 +2031,16 @@ void Digitizer::PrepareOutput() {
         }
         fH5Rows = 0;
 
+        {
+            // Quando la run e' iniziata, in secondi dall'epoca. Senza, il
+            // monitor non puo' dare un rate medio vero: il suo primo
+            // aggiornamento non e' l'inizio della presa dati, perche' puo'
+            // essere stato avviato a run gia' in corso.
+            double t0 = static_cast<double>(std::time(nullptr));
+            header.createAttribute("StartTime", H5::PredType::NATIVE_DOUBLE,
+                                   H5::DataSpace()).write(H5::PredType::NATIVE_DOUBLE, &t0);
+        }
+
         header.createAttribute("RunNumber", H5::PredType::NATIVE_INT,
                                H5::DataSpace()).write(H5::PredType::NATIVE_INT, &fRunNumber);
 

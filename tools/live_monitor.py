@@ -21,6 +21,7 @@ import io
 import json
 import os
 import sys
+import collections
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -77,6 +78,7 @@ class Monitor:
 
         self.n_events = 0
         self.rate = 0.0
+        self.start_time = None
 
         self.status = None        # live-status.json pubblicato dalla DAQ
         self.gen = None           # generazione delle soglie gia' vista
@@ -86,6 +88,11 @@ class Monitor:
         self._ana = None          # analisi gia' calcolata per questo refresh
         self._last_read = 0.0
         self._prev = None                 # (n_eventi, timestamp)
+        # Storia (timestamp, eventi totali) per ricavare il rate su un numero
+        # fisso di eventi invece che sull'intervallo fra due aggiornamenti: a
+        # rate basso due aggiornamenti possono non contenere alcun evento, e il
+        # numero mostrato sarebbe zero pur stando acquisendo.
+        self._hist = collections.deque(maxlen=4000)
 
     # -- lettura -------------------------------------------------------
 
@@ -138,7 +145,10 @@ class Monitor:
             if dt > 0 and total >= prev_n:
                 self.rate = (total - prev_n) / dt
         self._prev = (total, now)
+        if not self._hist or total != self._hist[-1][1]:
+            self._hist.append((now, total))
 
+        self.start_time = hdr.get("StartTime") or None
         self.n_events = total
         self.hdr = hdr
         self.data = data          # gia' limitato alla coda da load(last=...)
@@ -184,6 +194,41 @@ class Monitor:
         self._is_new = is_new
 
     # -- analisi -------------------------------------------------------
+
+    def rate_last(self, n=100):
+        """Rate sugli ultimi n eventi, dalla storia dei conteggi.
+
+        Si cerca il campione piu' recente in cui i totali erano almeno n
+        indietro: la differenza di tempo e' quella in cui quegli n eventi sono
+        arrivati. Se non ce ne sono ancora n, si usa tutto quello che c'e'.
+        """
+        if len(self._hist) < 2:
+            return None
+        t_now, n_now = self._hist[-1]
+        bersaglio = n_now - n
+        for t, k in reversed(self._hist):
+            if k <= bersaglio:
+                return (n_now - k) / (t_now - t) if t_now > t else None
+        t0, k0 = self._hist[0]
+        return (n_now - k0) / (t_now - t0) if t_now > t0 else None
+
+    def rate_avg(self):
+        """Rate medio dall'inizio della run, se il file dice quando e' iniziata.
+
+        Il monitor puo' essere stato avviato a run gia' in corso, quindi la sua
+        prima osservazione non e' l'inizio: senza StartTime nel file si ripiega
+        su quella, e lo si dichiara.
+        """
+        if not self._hist:
+            return None, ""
+        t_now, n_now = self._hist[-1]
+        t0 = self.start_time
+        if t0:
+            return (n_now / (t_now - t0), "") if t_now > t0 else (None, "")
+        t0, n0 = self._hist[0]
+        if t_now <= t0:
+            return None, ""
+        return (n_now - n0) / (t_now - t0), " (dal monitor)"
 
     def analysis(self):
         """(hdr, base, corr, amp, t_ns) oppure None se non ci sono ancora dati."""
@@ -252,6 +297,9 @@ class Monitor:
             "file": os.path.basename(self.path) if self.path else None,
             "events": int(self.n_events),
             "rate": round(self.rate, 2),
+            "rate100": (lambda r: round(r, 2) if r else None)(self.rate_last(100)),
+            "ratemed": (lambda t: round(t[0], 2) if t[0] else None)(self.rate_avg()),
+            "ratemednota": self.rate_avg()[1],
             "error": self.error,
             "shown": 0,
             "channels": [],
@@ -530,7 +578,8 @@ PAGE = """<!DOCTYPE html>
 <h1>DAQ V1742 — monitor online</h1>
 <div class="sub"><span id="file">…</span> · <span id="upd">in attesa del primo aggiornamento</span></div>
 <div class="bar">
-  <div><b id="rate">–</b> <span>Hz</span></div>
+  <div><b id="rate100">–</b> <span>Hz · ultimi 100 ev</span></div>
+  <div><b id="ratemed">–</b> <span id="ratemednota">Hz · media run</span></div>
   <div><b id="events">–</b> <span>eventi</span></div>
   <div><b id="shown">–</b> <span>nei grafici</span></div>
   <div><span id="err" class="err"></span></div>
@@ -656,7 +705,10 @@ async function tick() {
     setAlert(null);
     document.getElementById('upd').textContent =
       'aggiornato alle ' + lastOk.toLocaleTimeString();
-    show('rate', s.rate); show('events', s.events); show('shown', s.shown);
+    show('rate100', s.rate100); show('ratemed', s.ratemed);
+    document.getElementById('ratemednota').textContent =
+        'Hz · media run' + (s.ratemednota || '');
+    show('events', s.events); show('shown', s.shown);
     document.getElementById('err').textContent    = s.error || '';
     document.getElementById('file').textContent   =
       (s.file || 'nessun file') + (s.sampling ? ' · ' + s.sampling : '');

@@ -698,7 +698,8 @@ class Monitor:
                 # disegnare il testo oltre il riquadro e allarga la figura.
                 if off is not None and kw["range"][0] <= off <= kw["range"][1]:
                     ax.axvline(off, color="#2ca02c", lw=1.4)
-                    ax.annotate("soglia %g  (%.0f mV)" % (off, off * mv_off),
+                    ax.annotate("soglia self-trigger %g  (%.0f mV)"
+                                % (off, off * mv_off),
                                 xy=(off, 0.97), xycoords=("data", "axes fraction"),
                                 fontsize=8, color="#1a6b1a", rotation=90,
                                 ha="right", va="top",
@@ -716,7 +717,11 @@ class Monitor:
                 taglio = qcut if qcut is not None else float(kw["range"][0])
                 sopra = float((cur > taglio).mean()) * 100.0 if cur.size else float("nan")
                 ax.axvline(taglio, color="#d62728", lw=1.2, ls="--")
-                ax.text(0.5, 1.02, "%.1f%% sopra %.1f offset  (%.0f mV)"
+                # Il taglio di conteggio e la soglia del self-trigger sono due
+                # numeri diversi nelle stesse unita', e chiamarli entrambi
+                # "offset" li fa scambiare: qui si dice esplicitamente che
+                # questo e' il taglio del conteggio, non la soglia.
+                ax.text(0.5, 1.02, "%.1f%% sopra il taglio %.1f  (%.0f mV)"
                         % (sopra, taglio, taglio * mv_off),
                         transform=ax.transAxes, ha="center", va="bottom",
                         fontsize=9, color="#d62728")

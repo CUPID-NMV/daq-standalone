@@ -183,7 +183,13 @@ class Monitor:
                 return None
             ns = int(hdr["SamplesPerChannel"])
             chans = [int(c) for c in hdr["ChannelList"]]
-            n = min(tot, self.OVERVIEW_EVENTS)
+            # Anche la panoramica riparte dall'azzeramento: legge dal file per
+            # conto suo, quindi senza questo continuerebbe a mostrare eventi
+            # che i grafici hanno gia' scartato.
+            disponibili = max(tot - self.origin, 0)
+            if disponibili == 0:
+                return None
+            n = min(disponibili, self.OVERVIEW_EVENTS)
             a = tot - n
             righe = []
             for i, ch in enumerate(chans):
@@ -419,7 +425,10 @@ class Monitor:
     def stats(self):
         out = {
             "file": os.path.basename(self.path) if self.path else None,
-            "events": int(self.n_events),
+            # Dopo un azzeramento il conteggio riparte: mostrare il totale del
+            # file contraddirebbe "come se non ci fossero dati prima".
+            "events": int(max((self.n_events or 0) - self.origin, 0)),
+            "events_file": int(self.n_events or 0),
             "rate": round(self.rate, 2),
             "rate100": (lambda r: round(r, 2) if r else None)(self.rate_last(100)),
             "ratemed": (lambda t: round(t[0], 2) if t[0] else None)(self.rate_avg()),

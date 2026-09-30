@@ -692,39 +692,41 @@ class Monitor:
                 # dell'asse: e' il motivo per cui l'asse e' in offset, cioe'
                 # vedere quanta parte dello spettro il self-trigger sta
                 # tagliando.
+                # Questi grafici servono a vedere l'EFFETTO della soglia
+                # impostata: la percentuale va quindi calcolata alla soglia in
+                # vigore su questo canale, non a un valore scollegato. La
+                # casella della pagina resta come scavalcamento, per provare
+                # altri valori senza toccare la DAQ.
                 mv_off = self.attenuazione() * self.mv_per_count()
                 off = self.offsets.get(int(ch))
-                # Solo se cade dentro l'asse: annotare fuori dai limiti fa
-                # disegnare il testo oltre il riquadro e allarga la figura.
-                if off is not None and kw["range"][0] <= off <= kw["range"][1]:
-                    ax.axvline(off, color="#2ca02c", lw=1.4)
-                    ax.annotate("soglia self-trigger %g  (%.0f mV)"
-                                % (off, off * mv_off),
-                                xy=(off, 0.97), xycoords=("data", "axes fraction"),
-                                fontsize=8, color="#1a6b1a", rotation=90,
-                                ha="right", va="top",
-                                annotation_clip=True)
+                if qcut is not None:
+                    taglio, e_soglia = float(qcut), False
                 elif off is not None:
-                    ax.text(0.99, 0.97, "soglia %g fuori scala" % off,
-                            transform=ax.transAxes, ha="right", va="top",
-                            fontsize=8, color="#1a6b1a")
+                    taglio, e_soglia = float(off), True
+                else:
+                    taglio, e_soglia = float(kw["range"][0]), False
 
-                # Frazione di eventi SOPRA la soglia: su un asse positivo sono
-                # quelli che il self-trigger lascia passare, ed e' la domanda
-                # utile. Il default e' l'estremo inferiore dell'istogramma,
-                # quindi li conta tutti: si parte da 100% e si alza la soglia
-                # per vedere quanta parte dello spettro sopravvive.
-                taglio = qcut if qcut is not None else float(kw["range"][0])
                 sopra = float((cur > taglio).mean()) * 100.0 if cur.size else float("nan")
-                ax.axvline(taglio, color="#d62728", lw=1.2, ls="--")
-                # Il taglio di conteggio e la soglia del self-trigger sono due
-                # numeri diversi nelle stesse unita', e chiamarli entrambi
-                # "offset" li fa scambiare: qui si dice esplicitamente che
-                # questo e' il taglio del conteggio, non la soglia.
-                ax.text(0.5, 1.02, "%.1f%% sopra il taglio %.1f  (%.0f mV)"
-                        % (sopra, taglio, taglio * mv_off),
+
+                dentro = kw["range"][0] <= taglio <= kw["range"][1]
+                if dentro:
+                    ax.axvline(taglio, color="#2ca02c" if e_soglia else "#d62728",
+                               lw=1.4, ls="-" if e_soglia else "--")
+                # La soglia in vigore si disegna comunque, anche quando il
+                # conteggio usa un altro valore: e' il riferimento fisico.
+                if (not e_soglia and off is not None
+                        and kw["range"][0] <= off <= kw["range"][1]):
+                    ax.axvline(off, color="#2ca02c", lw=1.4)
+
+                etichetta = ("soglia self-trigger %g" % off) if e_soglia else \
+                            ("taglio %.1f" % taglio)
+                ax.text(0.5, 1.02, "%.1f%% sopra %s  (%.0f mV)"
+                        % (sopra, etichetta, taglio * mv_off),
                         transform=ax.transAxes, ha="center", va="bottom",
-                        fontsize=9, color="#d62728")
+                        fontsize=9, color="#1a6b1a" if e_soglia else "#d62728")
+                if not dentro:
+                    ax.text(0.99, 0.97, "fuori scala", transform=ax.transAxes,
+                            ha="right", va="top", fontsize=8, color="#888")
 
                 # "ADC" da solo e' ambiguo: in questo progetto convivono i
                 # conteggi della forma d'onda registrata (questi) e quelli

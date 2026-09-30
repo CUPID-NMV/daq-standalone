@@ -337,10 +337,15 @@ class Monitor:
 
         dt_ns = float(self.hdr.get("SamplingTime", 1e-9)) * 1e9
         t_ns = np.arange(d.shape[2]) * dt_ns
-        # In unita' di offset: e' l'ampiezza divisa per l'attenuazione del
-        # Transparent Mode, cosi' lo spettro si legge nelle stesse unita' della
-        # soglia del self-trigger e si vede cosa taglia.
-        q = np.abs(amp) / self.attenuazione()
+        # L'ampiezza dell'impulso e' l'escursione NEGATIVA: con polarita'
+        # falling il segnale va in giu'. Prendere il valore assoluto
+        # dell'escursione maggiore, com'era prima, faceva entrare nello spettro
+        # anche i picchi positivi di rumore come se fossero segnale.
+        #
+        # In unita' di offset, cioe' divisa per l'attenuazione del Transparent
+        # Mode, lo spettro si legge nelle stesse unita' della soglia del
+        # self-trigger e si vede cosa taglia.
+        q = np.maximum(-corr.min(axis=2), 0.0) / self.attenuazione()
         self._ana = (self.hdr, base, corr, amp, t_ns, noise, q)
         return self._ana
 
@@ -689,13 +694,19 @@ class Monitor:
                 # tagliando.
                 mv_off = self.attenuazione() * self.mv_per_count()
                 off = self.offsets.get(int(ch))
-                if off is not None:
+                # Solo se cade dentro l'asse: annotare fuori dai limiti fa
+                # disegnare il testo oltre il riquadro e allarga la figura.
+                if off is not None and kw["range"][0] <= off <= kw["range"][1]:
                     ax.axvline(off, color="#2ca02c", lw=1.4)
                     ax.annotate("soglia %g  (%.0f mV)" % (off, off * mv_off),
-                                xy=(off, 0.92),
-                                xycoords=("data", "axes fraction"),
+                                xy=(off, 0.97), xycoords=("data", "axes fraction"),
                                 fontsize=8, color="#1a6b1a", rotation=90,
-                                ha="right", va="top")
+                                ha="right", va="top",
+                                annotation_clip=True)
+                elif off is not None:
+                    ax.text(0.99, 0.97, "soglia %g fuori scala" % off,
+                            transform=ax.transAxes, ha="right", va="top",
+                            fontsize=8, color="#1a6b1a")
 
                 taglio = qcut if qcut is not None else float(kw["range"][1])
                 sotto = float((cur < taglio).mean()) * 100.0 if cur.size else float("nan")

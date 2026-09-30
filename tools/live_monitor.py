@@ -773,9 +773,18 @@ class Monitor:
         return buf.getvalue()
 
     def _placeholder(self):
+        # Uno schermo vuoto dopo un azzeramento sembra un guasto: va detto che
+        # si sta aspettando, e da quando.
+        if self.error:
+            msg = self.error
+        elif self.origin:
+            msg = ("In attesa di eventi dopo l'azzeramento\n"
+                   "(dall'evento %d; nel file ce ne sono %d)"
+                   % (self.origin, self.n_events or 0))
+        else:
+            msg = "In attesa di eventi…"
         fig, ax = plt.subplots(figsize=(9, 2.5))
-        ax.text(0.5, 0.5, self.error or "In attesa di eventi…",
-                ha="center", va="center", fontsize=12, wrap=True)
+        ax.text(0.5, 0.5, msg, ha="center", va="center", fontsize=12, wrap=True)
         ax.axis("off")
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=100)

@@ -77,6 +77,7 @@ class Monitor:
         self.tail_cut = self.TAGLIO_CODA
         self.sel_channels = None      # None = tutti quelli del file
         self.att_forzata = None       # attenuazione imposta, invece che dedotta
+        self.origin = 0               # primo evento assoluto da considerare
         self._ov = None               # panoramica: (istante, risultato)
         self.overview_interval = 5.0  # si aggiorna al massimo ogni 5 s
         self.error = None
@@ -122,6 +123,24 @@ class Monitor:
                 return json.load(f)
         except (OSError, ValueError):
             return None
+
+    def azzera(self):
+        """Riparte da adesso: scarta gli eventi gia' acquisiti e la storia.
+
+        Il monitor non accumula dati propri -- rilegge sempre la coda del file
+        -- ma gli istogrammi contengono comunque tutto cio' che e' stato preso
+        prima, e dopo un cambio di condizioni quella parte sporca il confronto.
+        Si segna il numero d'evento attuale e da li' in avanti si guarda solo
+        cio' che arriva.
+        """
+        self.origin = int(self.n_events or 0)
+        self._hist.clear()
+        self.frozen = {}
+        self.frozen_offsets = {}
+        self._ana = None
+        self._ov = None
+        self._prev = None
+        self.rate = 0.0
 
     def select_channels(self, channels):
         """Limita i grafici di dettaglio a questi canali (None = tutti).
@@ -226,7 +245,13 @@ class Monitor:
         self.start_time = hdr.get("StartTime") or None
         self.n_events = total
         self.hdr = hdr
-        self.data = data          # gia' limitato alla coda da load(last=...)
+        # Indice assoluto del primo evento letto: serve sia per scartare quelli
+        # precedenti all'azzeramento, sia piu' sotto per distinguere gli eventi
+        # presi prima e dopo l'ultimo cambio di soglia.
+        primo = total - data.shape[0]
+        if self.origin > primo:
+            data = data[self.origin - primo:]
+        self.data = data
         self._ana = None          # ricalcolata sotto, una volta sola
 
         res = self.analysis()
@@ -824,6 +849,7 @@ PAGE = """<!DOCTYPE html>
   <label>canali<input id="canali" value="" placeholder="tutti  es. 8,9,12-15" style="width:150px"></label>
   <label>soglia [offset]<input id="qcut" value="" placeholder="tutto lo spettro" style="width:110px"></label>
   <button id="reset">Autoscale</button>
+  <button id="azzera" title="scarta gli eventi gia' acquisiti e riparte da adesso">Azzera dati</button>
   <span class="hint">forme d'onda · campi vuoti = autoscale</span>
 </div>
 <div id="hctl"></div>
@@ -919,6 +945,13 @@ function params() {
   }
   return p;
 }
+
+document.getElementById('azzera').onclick = async () => {
+  // Non ricarica la pagina: l'azzeramento vive nel server, e il giro
+  // successivo ritrova gli istogrammi vuoti da soli.
+  try { await fetch('azzera?t=' + Date.now()); } catch (e) {}
+  tick();
+};
 
 document.getElementById('reset').onclick = () => {
   for (const f of ['xmin','xmax','ymin','ymax']) document.getElementById(f).value = '';
@@ -1085,6 +1118,12 @@ def make_handler(monitor, refresh, defaults):
             with monitor.lock:
                 monitor.select_channels(parse_channels(qs.get("canali", [""])[0]))
                 monitor.refresh()
+
+                if route == "azzera":
+                    monitor.azzera()
+                    return self._send(200, "application/json",
+                                      json.dumps({"ok": True,
+                                                  "da_evento": monitor.origin}).encode())
 
                 if route == "stats.json":
                     return self._send(200, "application/json",

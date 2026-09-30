@@ -321,3 +321,146 @@
  netto.
 
 ================================================================================
+
+
+--------------------------------------------------------------------------------
+ 8. LA SEQUENZA COMPLETA, PASSO PER PASSO
+--------------------------------------------------------------------------------
+
+ Le chiamate nell'ordine in cui vanno fatte. L'ordine non e' arbitrario: dove
+ conta, e' annotato il perche'.
+
+ A. APRIRE E PARTIRE DA UNO STATO NOTO
+ -------------------------------------
+   CAEN_DGTZ_OpenDigitizer2(link, arg, conet, vme, &h)
+   CAEN_DGTZ_GetInfo(h, &info)              modello, firmware, seriale
+
+   CAEN_DGTZ_SWStopAcquisition(h)           una board lasciata in acquisizione
+                                            non si riconfigura
+   CAEN_DGTZ_Reset(h)                       registri ai valori di default
+   CAEN_DGTZ_ClearData(h)                   svuota il buffer di uscita
+
+   >>> Questi tre PRIMA di qualunque configurazione. Una sessione morta male
+       lascia i registri come capitava, e la successiva ci costruisce sopra.
+
+   CAEN_DGTZ_SetDRS4SamplingFrequency(h, freq)
+   CAEN_DGTZ_LoadDRS4CorrectionData(h, freq)   le tabelle sono PER FREQUENZA,
+                                               quindi va caricata dopo averla
+                                               impostata
+   CAEN_DGTZ_Calibrate(h)
+
+ B. CONFIGURAZIONE DI BASE
+ -------------------------
+   CAEN_DGTZ_SetRecordLength(h, 1024)
+   CAEN_DGTZ_SetGroupEnableMask(h, maschera)     un bit per gruppo di 8 canali
+   CAEN_DGTZ_SetChannelEnableMask(h, maschera)
+   CAEN_DGTZ_SetPostTriggerSize(h, percento)     decide dove cade l'impulso
+   CAEN_DGTZ_SetAcquisitionMode(h, SW_CONTROLLED)
+   CAEN_DGTZ_SetIOLevel(h, IOLevel_NIM)          NIM = impulsi NEGATIVI sui
+                                                 connettori del pannello
+   CAEN_DGTZ_SetMaxNumEventsBLT(h, n)
+   CAEN_DGTZ_SetTriggerPolarity(h, ch, polarita) falling per impulsi negativi
+   CAEN_DGTZ_SetChannelDCOffset(h, ch, offset)
+
+ C. ALLOCARE I BUFFER
+ --------------------
+   CAEN_DGTZ_MallocReadoutBuffer(h, &buf, &size)
+   CAEN_DGTZ_AllocateEvent(h, &evt)
+   CAEN_DGTZ_EnableDRS4Correction(h)   oppure Disable
+
+   >>> L'abilitazione della correzione va QUI, non prima: la libreria
+       costruisce il proprio stato a partire dalla configurazione corrente, e
+       farlo prima di SetRecordLength e della Malloc lo lascia incoerente.
+
+ D. MISURARE IL PIEDISTALLO IN TRANSPARENT MODE  (solo per soglia relativa)
+ -------------------------------------------------------------------------
+   CAEN_DGTZ_DisableDRS4Correction(h)     obbligatorio: le tabelle sono tarate
+                                          sull'Output Mode e qui gonfiano
+                                          l'RMS di ~40 volte
+   WriteRegister(h, 0x8004, 1<<13)        Transparent Mode ON
+   CAEN_DGTZ_ClearData(h)
+   CAEN_DGTZ_SWStartAcquisition(h)
+   ripetere N volte:
+       CAEN_DGTZ_SendSWtrigger(h)
+       CAEN_DGTZ_ReadData(h, SLAVE_TERMINATED_READOUT_MBLT, buf, &size)
+       CAEN_DGTZ_GetNumEvents(h, buf, size, &n)
+       CAEN_DGTZ_GetEventInfo(h, buf, size, i, &info, &ptr)
+       CAEN_DGTZ_DecodeEvent(h, ptr, (void**)&evt)
+       -> media e RMS dei campioni
+   CAEN_DGTZ_SWStopAcquisition(h)
+   WriteRegister(h, 0x8008, 1<<13)        Transparent Mode OFF
+   ripristinare lo stato della correzione
+
+   soglia = piedistallo - offset   (falling)   oppure + offset (rising)
+
+ E. SELF-TRIGGER
+ ---------------
+   Azzerare prima:
+       per ogni gruppo g:  WriteRegister(0x1000+0x100*g+0xA8, 0)
+       WriteRegister(0x8008, 1<<21)        acquisizione automatica abilitata
+       WriteRegister(0x8008, 0xF<<28)      nessun instradamento
+       ReadRegister(0x810C) e riscrivere con bits[3:0] azzerati
+       CAEN_DGTZ_SetExtTriggerInputMode(h, TRGMODE_DISABLED)
+
+   Soglie, un canale per volta:
+       WriteRegister(0x1000+0x100*(ch/8)+0x80,
+                     ((ch%8) & 0xF) << 12 | (soglia & 0xFFF))
+
+   Maschere, TUTTI i gruppi anche quelli vuoti:
+       WriteRegister(0x1000+0x100*g+0xA8, maschera_del_gruppo & 0xFF)
+
+   Modo "paired":
+       WriteRegister(0x8008, 1<<21)        acquisizione automatica ABILITATA
+       WriteRegister(0x8008, 0xF<<28)
+       0x810C con bits[3:0] azzerati
+
+   Modo "global":
+       WriteRegister(0x8004, 1<<21)        acquisizione automatica DISABILITATA
+       WriteRegister(0x8008, 0xF<<28)
+       WriteRegister(0x8004, 0x4<<28)      over-threshold -> motherboard
+       0x810C con il bit del gruppo acceso
+
+   TRG-OUT, se lo si vuole sul connettore:
+       WriteRegister(0x8110, maschera_gruppi)
+       WriteRegister(0x8004, 0x4<<28)      senza instradamento i bit di gruppo
+                                           aprono su "nessun segnale"
+
+   Rileggere 0x8000, 0x810C, 0x8110, 0x811C e stamparli: costa cinque righe e
+   distingue "configurato male" da "non triggera".
+
+ F. TRIGGER ESTERNO  (opzionale, va in OR con il self-trigger)
+ -------------------------------------------------------------
+   CAEN_DGTZ_SetExtTriggerInputMode(h, TRGMODE_ACQ_ONLY)
+
+ G. ACQUISIRE E LEGGERE
+ ----------------------
+   CAEN_DGTZ_ClearData(h)                 niente residui nel primo blocco
+   CAEN_DGTZ_SWStartAcquisition(h)
+
+   ciclo:
+       CAEN_DGTZ_ReadData(h, SLAVE_TERMINATED_READOUT_MBLT, buf, &size)
+           -> size == 0 significa "nessun evento pronto", non errore:
+              aspettare poco (100 ms) e riprovare, non un secondo, per non
+              lasciare il collegamento inattivo
+           -> un errore puo' essere transitorio: riprovare qualche volta
+              prima di arrendersi
+       CAEN_DGTZ_GetNumEvents(h, buf, size, &n)
+       per ogni evento i:
+           CAEN_DGTZ_GetEventInfo(h, buf, size, i, &info, &ptr)
+           CAEN_DGTZ_DecodeEvent(h, ptr, (void**)&evt)
+
+           i campioni stanno in una struttura per gruppo:
+               nsamples = evt->DataGroup[gruppo].ChSize[ch % 8]
+               float* w = evt->DataGroup[gruppo].DataChannel[ch % 8]
+           con gruppo = ch / 8. Sono float, gia' in conteggi ADC.
+
+   CAEN_DGTZ_SWStopAcquisition(h)
+
+ H. CHIUDERE
+ -----------
+   CAEN_DGTZ_SWStopAcquisition(h)
+   CAEN_DGTZ_FreeEvent(h, (void**)&evt)
+   CAEN_DGTZ_FreeReadoutBuffer(&buf)
+   CAEN_DGTZ_CloseDigitizer(h)
+
+================================================================================

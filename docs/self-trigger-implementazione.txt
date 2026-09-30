@@ -7,7 +7,16 @@
  particolare: sono i registri, l'ordine in cui scriverli, e le cose che ci
  sono costate tempo.
 
- Riferimenti CAEN: UM4279 (manuale V1742), UM5698 (registri).
+ Riferimenti CAEN: UM4279 (manuale V1742), UM5698 (registri),
+ GD5695 Quick Start Guide sez. 2.6.3 e 2.6.4 (procedura ufficiale per
+ self-trigger e global trigger; documenta il valore 0100 di 0x8000[31:28] che
+ UM5698 rev.3 non elenca).
+
+ NOTA sulla procedura ufficiale: la Quick Start sceglie la soglia GUARDANDO
+ l'impulso in Transparent Mode, e per questo richiede impulsi piu' larghi di
+ 30 ns -- lo dice esplicitamente. Sotto quella larghezza in Transparent Mode
+ non si vede nulla e la soglia va ricavata dal piedistallo piu' una distanza,
+ come descritto al paragrafo 4.
 
 
 --------------------------------------------------------------------------------

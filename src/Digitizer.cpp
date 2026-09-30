@@ -1122,10 +1122,12 @@ void Digitizer::ConfigureTriggerOut()
     // aperto su niente, il registro si rilegge giusto e dal connettore non
     // esce nulla. E' quello che si osservava.
     //
-    // Il modo "global" usa 0100, valore che il manuale rev.3 non documenta --
-    // le opzioni elencate arrivano a 0011 -- ma che e' evidentemente quello
-    // che instrada l'over-threshold. Lo si imposta anche qui quando si chiede
-    // il self-trigger sul connettore.
+    // Il valore 0100 non compare nel manuale dei registri (UM5698 rev.3, che
+    // elenca solo fino a 0011), ma e' documentato nella Quick Start Guide
+    // GD5695 rev.3, sez. 2.6.4: "Set bits[31:28] = 0100 to send the
+    // over-threshold signal from CH0 to the motherboard", con l'esempio
+    // WRITE_REGISTER 8000 40200000 F0200000. Lo si imposta anche qui quando si
+    // chiede il self-trigger sul connettore.
     if (val & 0xFu) {
         CAEN_DGTZ_WriteRegister(fHandle, REG_BOARD_CONFIG_CLEAR, 0xFu << MONITOR_SHIFT);
         CAEN_DGTZ_WriteRegister(fHandle, REG_BOARD_CONFIG_SET,

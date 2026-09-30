@@ -76,7 +76,7 @@ class Monitor:
         self.data = None
         self.tail_cut = self.TAGLIO_CODA
         self.sel_channels = None      # None = tutti quelli del file
-        self.finestra_ns = 40.0       # larghezza della finestra di integrazione
+        self.att_forzata = None       # attenuazione imposta, invece che dedotta
         self._ov = None               # panoramica: (istante, risultato)
         self.overview_interval = 5.0  # si aggiorna al massimo ogni 5 s
         self.error = None
@@ -122,14 +122,6 @@ class Monitor:
                 return json.load(f)
         except (OSError, ValueError):
             return None
-
-    def set_finestra(self, ns):
-        """Larghezza della finestra di integrazione. Cambiarla invalida la cache."""
-        ns = float(ns) if ns else 40.0
-        if ns == self.finestra_ns:
-            return
-        self.finestra_ns = ns
-        self._ana = None
 
     def select_channels(self, channels):
         """Limita i grafici di dettaglio a questi canali (None = tutti).
@@ -313,47 +305,20 @@ class Monitor:
             return None, ""
         return (n_now - n0) / (t_now - t0), " (dal monitor)"
 
-    LATENZA_NS = {"paired": 330.0, "global": 420.0}
+    ATTENUAZIONE = {"2.5GHz": 16.1, "1GHz": 12.8}   # misurate su impulsi da 1.6 ns
 
-    def posizione_attesa(self):
-        """Dove il self-trigger mette l'impulso, in ns dall'inizio della traccia.
+    def attenuazione(self):
+        """Quanto il Transparent Mode riduce un impulso stretto.
 
-        Non e' una costante: dipende da campionamento e PostTriggerSize. A
-        2.5 GS/s con PostTriggerSize 10% cade a ~50 ns, a 1 GS/s a ~580.
-            posizione = (1 - PostTriggerSize) * finestra - latenza
+        E' il fattore che lega l'ampiezza nella forma d'onda registrata a
+        quella che vede il comparatore del self-trigger, cioe' che permette di
+        leggere lo spettro nelle stesse unita' della soglia. Misurato su
+        impulsi da 1.6 ns, la larghezza degli impulsi dei PMT: per impulsi
+        larghi vale molto meno (1.9 a 100 ns) e questa conversione non varrebbe.
         """
-        h = self.hdr or {}
-        try:
-            dt = float(h["SamplingTime"]) * 1e9
-            n = int(h["SamplesPerChannel"]) - (self.tail_cut or 0)
-            post = float(h["PostTriggerSize"]) / 100.0
-            lat = self.LATENZA_NS.get(str(h.get("SelfTriggerMode", "paired")), 330.0)
-        except (KeyError, TypeError, ValueError):
-            return None
-        return (1.0 - post) * (n * dt) - lat
-
-    def carica(self, corr, t_ns, larghezza_ns):
-        """Carica per evento e canale, in pC, positiva.
-
-        E' l'integrale del segnale con il piedistallo gia' sottratto, su una
-        finestra centrata dove il self-trigger mette l'impulso. Integrare tutta
-        la traccia sommerebbe soprattutto rumore: a 1 GS/s sono mille campioni
-        per un impulso che ne occupa due.
-
-        Su 50 ohm un mV*ns vale 1/50 di pC, quindi Q[pC] = integrale[mV*ns] / 50.
-        Il segno viene invertito perche' gli impulsi sono negativi e una carica
-        raccolta si esprime positiva.
-        """
-        dt = float(t_ns[1] - t_ns[0]) if t_ns.size > 1 else 1.0
-        centro = self.posizione_attesa()
-        if centro is None or not (t_ns[0] <= centro <= t_ns[-1]):
-            sel = slice(None)            # senza una posizione attesa, tutto
-        else:
-            a = np.searchsorted(t_ns, centro - larghezza_ns / 2.0)
-            b = np.searchsorted(t_ns, centro + larghezza_ns / 2.0)
-            sel = slice(max(a, 0), max(b, a + 1))
-        integ = -corr[:, :, sel].sum(axis=2) * dt      # conteggi * ns
-        return integ * self.mv_per_count() / 50.0      # conteggi*ns -> mV*ns -> pC
+        if self.att_forzata:
+            return self.att_forzata
+        return self.ATTENUAZIONE.get(str((self.hdr or {}).get("SamplingRate", "")), 16.1)
 
     def analysis(self):
         """(hdr, base, corr, amp, t_ns) oppure None se non ci sono ancora dati."""
@@ -372,7 +337,10 @@ class Monitor:
 
         dt_ns = float(self.hdr.get("SamplingTime", 1e-9)) * 1e9
         t_ns = np.arange(d.shape[2]) * dt_ns
-        q = self.carica(corr, t_ns, self.finestra_ns)
+        # In unita' di offset: e' l'ampiezza divisa per l'attenuazione del
+        # Transparent Mode, cosi' lo spettro si legge nelle stesse unita' della
+        # soglia del self-trigger e si vede cosa taglia.
+        q = np.abs(amp) / self.attenuazione()
         self._ana = (self.hdr, base, corr, amp, t_ns, noise, q)
         return self._ana
 
@@ -715,10 +683,22 @@ class Monitor:
                 # l'estremo superiore dell'istogramma, quindi conta tutto: si
                 # parte da 100% e si abbassa la soglia per vedere quanta parte
                 # dello spettro sta sopra una certa carica.
+                # La soglia in vigore su questo canale, nelle stesse unita'
+                # dell'asse: e' il motivo per cui l'asse e' in offset, cioe'
+                # vedere quanta parte dello spettro il self-trigger sta
+                # tagliando.
+                off = self.offsets.get(int(ch))
+                if off is not None:
+                    ax.axvline(off, color="#2ca02c", lw=1.4)
+                    ax.annotate("soglia %g" % off, xy=(off, 0.92),
+                                xycoords=("data", "axes fraction"),
+                                fontsize=8, color="#1a6b1a", rotation=90,
+                                ha="right", va="top")
+
                 taglio = qcut if qcut is not None else float(kw["range"][1])
                 sotto = float((cur < taglio).mean()) * 100.0 if cur.size else float("nan")
                 ax.axvline(taglio, color="#d62728", lw=1.2, ls="--")
-                ax.text(0.5, 1.02, "%.1f%% con carica < %.3g pC" % (sotto, taglio),
+                ax.text(0.5, 1.02, "%.1f%% sotto %.1f offset" % (sotto, taglio),
                         transform=ax.transAxes, ha="center", va="bottom",
                         fontsize=9, color="#d62728")
 
@@ -726,10 +706,9 @@ class Monitor:
                 # conteggi della forma d'onda registrata (questi) e quelli
                 # della distanza soglia-piedistallo del self-trigger, che
                 # vivono in Transparent Mode e differiscono per l'attenuazione.
-                pos = self.posizione_attesa()
-                dove = ("finestra %.0f ns attorno a %.0f ns"
-                        % (self.finestra_ns, pos)) if pos is not None else "tutta la traccia"
-                ax.set_xlabel("carica [pC]   (%s)" % dove)
+                ax.set_xlabel("ampiezza [unita' di offset]"
+                              "   (attenuazione %.1f, impulsi da ~1.6 ns)"
+                              % self.attenuazione())
                 ax.set_ylabel("eventi" + (" (log)" if logy else ""))
                 ax.set_title(f"ch{ch}", fontsize=10, pad=18)
                 ax.grid(alpha=0.25)
@@ -815,8 +794,7 @@ PAGE = """<!DOCTYPE html>
   <label>eventi<input id="nev" value="__NEVENTS__" style="width:60px"></label>
   <label>banda [MHz]<input id="bw" value="__BW__" placeholder="off" style="width:70px"></label>
   <label>canali<input id="canali" value="" placeholder="tutti  es. 8,9,12-15" style="width:150px"></label>
-  <label>soglia carica [pC]<input id="qcut" value="" placeholder="tutto lo spettro" style="width:120px"></label>
-  <label>finestra [ns]<input id="qwin" value="" placeholder="40" style="width:80px"></label>
+  <label>soglia [offset]<input id="qcut" value="" placeholder="tutto lo spettro" style="width:110px"></label>
   <button id="reset">Autoscale</button>
   <span class="hint">forme d'onda · campi vuoti = autoscale</span>
 </div>
@@ -840,7 +818,7 @@ function setAlert(msg) {
   if (msg) a.textContent = msg;
   document.body.classList.toggle('stale', !!msg);
 }
-const FIELDS = ['xmin','xmax','ymin','ymax','nev','bw','canali','qcut','qwin'];
+const FIELDS = ['xmin','xmax','ymin','ymax','nev','bw','canali','qcut'];
 
 // I limiti scelti sopravvivono a un reload della pagina. localStorage puo'
 // essere inaccessibile (finestra privata, cookie bloccati): mai fatale.
@@ -1078,7 +1056,6 @@ def make_handler(monitor, refresh, defaults):
 
             with monitor.lock:
                 monitor.select_channels(parse_channels(qs.get("canali", [""])[0]))
-                monitor.set_finestra(self._num(qs, "qwin", defaults["qwin"]))
                 monitor.refresh()
 
                 if route == "stats.json":
@@ -1120,12 +1097,13 @@ def main():
                     help="directory dei dati (default: <radice del progetto>/data)")
     ap.add_argument("-p", "--port", type=int, default=8765)
     ap.add_argument("--qcut", type=float, default=None,
-                    help="soglia in pC per la frazione di eventi mostrata sopra "
+                    help="soglia in unita' di offset per la frazione di eventi mostrata sopra "
                          "gli istogrammi. Vuoto = estremo superiore dello "
                          "spettro, cioe' conta tutti gli eventi")
-    ap.add_argument("--qwin", type=float, default=40.0,
-                    help="larghezza in ns della finestra di integrazione della "
-                         "carica, centrata dove il self-trigger mette l'impulso")
+    ap.add_argument("--attenuazione", type=float, default=None,
+                    help="attenuazione del Transparent Mode usata per convertire "
+                         "l'ampiezza in unita' di offset. Vuoto = quella misurata "
+                         "per la frequenza in uso, valida per impulsi da ~1.6 ns")
     ap.add_argument("-b", "--bind", default="127.0.0.1",
                     help="indirizzo su cui ascoltare. Il default accetta solo "
                          "connessioni locali, quindi da fuori serve un inoltro "
@@ -1179,8 +1157,8 @@ def main():
     monitor = Monitor(data_dir, args.file, args.max_events,
                       min_interval=max(0.3, args.refresh / 2), vpp=args.vpp)
     monitor.tail_cut = max(0, args.tail_cut)
+    monitor.att_forzata = args.attenuazione
     defaults = {"n": args.nevents, "bw": args.bw, "qcut": args.qcut,
-                "qwin": args.qwin,
                 "xmin": args.xmin, "xmax": args.xmax,
                 "ymin": args.ymin, "ymax": args.ymax,
                 "hxmin": args.hxmin, "hxmax": args.hxmax, "hlog": args.hlog}

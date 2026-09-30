@@ -663,12 +663,17 @@ class Monitor:
                 sotto = float((cur < taglio).mean()) * 100.0 if cur.size else float("nan")
                 ax.axvline(taglio, color="#d62728", lw=1.2, ls="--")
                 ax.text(0.5, 1.02,
-                        "%.1f%% con ampiezza < %.0f ADC  (%.1f mV)"
+                        "%.1f%% con ampiezza < %.0f cnt  (%.1f mV)"
                         % (sotto, taglio, taglio * self.mv_per_count()),
                         transform=ax.transAxes, ha="center", va="bottom",
                         fontsize=9, color="#d62728")
 
-                ax.set_xlabel("ampiezza di picco [ADC]")
+                # "ADC" da solo e' ambiguo: in questo progetto convivono i
+                # conteggi della forma d'onda registrata (questi) e quelli
+                # della distanza soglia-piedistallo del self-trigger, che
+                # vivono in Transparent Mode e differiscono per l'attenuazione.
+                ax.set_xlabel("ampiezza di picco [conteggi ADC, Output Mode]"
+                              "   1 cnt = %.3f mV" % self.mv_per_count())
                 ax.set_ylabel("eventi" + (" (log)" if logy else ""))
                 ax.set_title(f"ch{ch}", fontsize=10, pad=18)
                 ax.grid(alpha=0.25)

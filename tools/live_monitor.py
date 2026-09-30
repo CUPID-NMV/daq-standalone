@@ -506,7 +506,7 @@ class Monitor:
         return buf.getvalue()
 
     def figure(self, kind, n_show=1, xlim=(None, None), ylim=(None, None),
-               hset=None, bw=None):
+               hset=None, bw=None, qcut=None):
         if kind == "panoramica":
             # Non passa dall'analisi di dettaglio: quella riguarda i soli
             # canali selezionati e puo' mancare, mentre la panoramica deve
@@ -655,9 +655,22 @@ class Monitor:
                 if logy:
                     ax.set_yscale("log")
 
+                # Frazione di eventi sotto una soglia in ampiezza. Il default
+                # e' l'estremo superiore dell'istogramma, quindi conta tutto:
+                # si parte da 100% e si abbassa la soglia per vedere quanta
+                # parte dello spettro sta sopra una certa ampiezza.
+                taglio = qcut if qcut is not None else float(kw["range"][1])
+                sotto = float((cur < taglio).mean()) * 100.0 if cur.size else float("nan")
+                ax.axvline(taglio, color="#d62728", lw=1.2, ls="--")
+                ax.text(0.5, 1.02,
+                        "%.1f%% con ampiezza < %.0f ADC  (%.1f mV)"
+                        % (sotto, taglio, taglio * self.mv_per_count()),
+                        transform=ax.transAxes, ha="center", va="bottom",
+                        fontsize=9, color="#d62728")
+
                 ax.set_xlabel("ampiezza di picco [ADC]")
                 ax.set_ylabel("eventi" + (" (log)" if logy else ""))
-                ax.set_title(f"ch{ch}", fontsize=10)
+                ax.set_title(f"ch{ch}", fontsize=10, pad=18)
                 ax.grid(alpha=0.25)
 
         fig.tight_layout()
@@ -741,6 +754,7 @@ PAGE = """<!DOCTYPE html>
   <label>eventi<input id="nev" value="__NEVENTS__" style="width:60px"></label>
   <label>banda [MHz]<input id="bw" value="__BW__" placeholder="off" style="width:70px"></label>
   <label>canali<input id="canali" value="" placeholder="tutti  es. 8,9,12-15" style="width:150px"></label>
+  <label>soglia ampiezza [ADC]<input id="qcut" value="" placeholder="tutto lo spettro" style="width:120px"></label>
   <button id="reset">Autoscale</button>
   <span class="hint">forme d'onda · campi vuoti = autoscale</span>
 </div>
@@ -764,7 +778,7 @@ function setAlert(msg) {
   if (msg) a.textContent = msg;
   document.body.classList.toggle('stale', !!msg);
 }
-const FIELDS = ['xmin','xmax','ymin','ymax','nev','bw','canali'];
+const FIELDS = ['xmin','xmax','ymin','ymax','nev','bw','canali','qcut'];
 
 // I limiti scelti sopravvivono a un reload della pagina. localStorage puo'
 // essere inaccessibile (finestra privata, cookie bloccati): mai fatale.
@@ -1026,8 +1040,9 @@ def make_handler(monitor, refresh, defaults):
                         )
                     return self._send(200, "image/png",
                                       monitor.figure(kinds[route], n, xlim, ylim,
-                                                     hset, self._num(qs, "bw",
-                                                                     defaults["bw"])))
+                                                     hset,
+                                                     self._num(qs, "bw", defaults["bw"]),
+                                                     self._num(qs, "qcut", defaults["qcut"])))
 
             self._send(404, "text/plain", b"not found")
 
@@ -1041,6 +1056,10 @@ def main():
     ap.add_argument("-d", "--data-dir", default=None,
                     help="directory dei dati (default: <radice del progetto>/data)")
     ap.add_argument("-p", "--port", type=int, default=8765)
+    ap.add_argument("--qcut", type=float, default=None,
+                    help="soglia in ADC per la frazione di eventi mostrata sopra "
+                         "gli istogrammi. Vuoto = estremo superiore dello "
+                         "spettro, cioe' conta tutti gli eventi")
     ap.add_argument("-b", "--bind", default="127.0.0.1",
                     help="indirizzo su cui ascoltare. Il default accetta solo "
                          "connessioni locali, quindi da fuori serve un inoltro "
@@ -1094,7 +1113,7 @@ def main():
     monitor = Monitor(data_dir, args.file, args.max_events,
                       min_interval=max(0.3, args.refresh / 2), vpp=args.vpp)
     monitor.tail_cut = max(0, args.tail_cut)
-    defaults = {"n": args.nevents, "bw": args.bw,
+    defaults = {"n": args.nevents, "bw": args.bw, "qcut": args.qcut,
                 "xmin": args.xmin, "xmax": args.xmax,
                 "ymin": args.ymin, "ymax": args.ymax,
                 "hxmin": args.hxmin, "hxmax": args.hxmax, "hlog": args.hlog}

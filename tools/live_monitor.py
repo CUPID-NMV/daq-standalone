@@ -1112,9 +1112,9 @@ def main():
                     help="directory dei dati (default: <radice del progetto>/data)")
     ap.add_argument("-p", "--port", type=int, default=8765)
     ap.add_argument("--qcut", type=float, default=None,
-                    help="soglia in unita' di offset per la frazione di eventi mostrata sopra "
-                         "gli istogrammi. Vuoto = estremo superiore dello "
-                         "spettro, cioe' conta tutti gli eventi")
+                    help="soglia in unita' di offset: sopra gli istogrammi compare la "
+                         "frazione di eventi che la supera. Vuoto = estremo inferiore "
+                         "dello spettro, cioe' conta tutti gli eventi")
     ap.add_argument("--attenuazione", type=float, default=None,
                     help="attenuazione del Transparent Mode usata per convertire "
                          "l'ampiezza in unita' di offset. Vuoto = quella misurata "

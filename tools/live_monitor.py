@@ -585,6 +585,24 @@ class Monitor:
             if ylim[0] is not None or ylim[1] is not None:
                 ax.set_ylim(bottom=ylim[0], top=ylim[1])
 
+        def etichetta_tempo():
+            """Dichiara sull'asse quando la vista e' ritagliata.
+
+            Un grafico zoomato e uno i cui dati finiscono davvero li' sono
+            altrimenti identici, e la differenza non e' innocua: un asse che
+            si ferma a 700 ns su una run a 1 GS/s sembra un errore di
+            frequenza di campionamento. E' gia' costato un falso allarme.
+            """
+            parti = []
+            if self.tail_cut:
+                parti.append(f"ultimi {self.tail_cut} campioni scartati")
+            if xlim[0] is not None or xlim[1] is not None:
+                a = xlim[0] if xlim[0] is not None else float(t_ns[0])
+                b = xlim[1] if xlim[1] is not None else float(t_ns[-1])
+                parti.append(f"ZOOM {a:.0f}-{b:.0f} ns dei "
+                             f"{t_ns[0]:.0f}-{t_ns[-1]:.0f} acquisiti")
+            return "tempo [ns]" + (f"      ({' · '.join(parti)})" if parti else "")
+
         if kind == "waveforms":
             fig, axes = plt.subplots(len(channels), 1, figsize=(9, 2.9 * len(channels)),
                                      squeeze=False, sharex=True)
@@ -639,11 +657,7 @@ class Monitor:
                 ax.set_ylabel("ADC − baseline")
                 ax.grid(alpha=0.25)
                 apply_limits(ax)
-            if self.tail_cut:
-                axes[-1][0].set_xlabel(
-                    f"tempo [ns]      (ultimi {self.tail_cut} campioni scartati)")
-            else:
-                axes[-1][0].set_xlabel("tempo [ns]")
+            axes[-1][0].set_xlabel(etichetta_tempo())
 
         elif kind == "average":
             fig, ax = plt.subplots(figsize=(9, 4))
@@ -656,7 +670,7 @@ class Monitor:
                     ax.axhline(eff, color=line.get_color(), lw=1.0, ls="--", alpha=.7,
                                label=f"amp. minima ch{ch}: {eff:.0f} ADC")
             ax.axhline(0, color="k", lw=0.8, ls=":")
-            ax.set_xlabel("tempo [ns]")
+            ax.set_xlabel(etichetta_tempo())
             ax.set_ylabel("ADC − baseline")
             ax.set_title(f"Media su {corr.shape[0]} eventi", fontsize=10)
             ax.legend()

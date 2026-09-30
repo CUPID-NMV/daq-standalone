@@ -1,0 +1,70 @@
+{
+  "descrizione": "Larghezza degli impulsi dei PMT misurata a 2.5 GS/s (passo 0.4 ns), per verificare quale punto della calibrazione soglia-vs-larghezza sia quello applicabile. Nasce da un'osservazione dell'utente: a occhio gli impulsi sembrano larghi 5-6 ns, non 1.6.",
+  "data": "2026-09-30",
+  "motivo": "A 1 GS/s la FWHM cade su 2 soli campioni: la misura e' al limite di risoluzione e non distingue 1.6 da 2.5 ns. A 2.5 GS/s ce ne sono ~4-5.",
+  "configurazione": {
+    "SamplingRate": "2.5GHz",
+    "passo_ns": 0.4,
+    "RecordLength": 1024,
+    "PostTriggerSize": 10,
+    "SelfTriggerMode": "paired",
+    "SelfTriggerChannels": [8, 9],
+    "DRS4Correction": true,
+    "sorgente": "PMT"
+  },
+  "metodo": {
+    "selezione": "ampiezza < min(-15, -8*rms) sulla forma d'onda con piedistallo sottratto",
+    "larghezza": "attraversamenti della frazione del picco interpolati linearmente fra i campioni; il conteggio intero dei campioni quantizza di 0.4 ns",
+    "nota_confrontabilita": "il punto di calibrazione a 1.6 ns fu misurato contando i campioni; qui il conteggio da' 2.00 ns e l'interpolazione 1.80 ns, quindi il confronto col generatore va fatto sapendo quale dei due si sta usando"
+  },
+  "run": [
+    {
+      "file": "PMT_selftrig_0175_2.5Gs_10PT.h5.gz",
+      "offset": 4,
+      "eventi": 3000,
+      "durata_s": 17.657508,
+      "rate_hz": 169.9,
+      "canali": {
+        "8": {"impulsi": 1843, "ampiezza_mediana_mV": 24.9, "rumore_adc": 2.97,
+              "fwhm_ns": 1.79, "fwhm_10_90": [1.70, 1.95], "larghezza_al_10pc_ns": 3.21, "larghezza_sopra_2rms_ns": 3.52,
+              "fwhm_quarto_ampiezze_piccole": {"ampiezza_mV": 14.6, "fwhm_ns": 1.80},
+              "fwhm_quarto_ampiezze_grandi":  {"ampiezza_mV": 38.1, "fwhm_ns": 1.80}},
+        "9": {"impulsi": 1803, "ampiezza_mediana_mV": 23.7, "rumore_adc": 2.97,
+              "fwhm_ns": 1.82, "fwhm_10_90": [1.71, 2.03], "larghezza_al_10pc_ns": 3.26, "larghezza_sopra_2rms_ns": 3.55,
+              "fwhm_quarto_ampiezze_piccole": {"ampiezza_mV": 14.2, "fwhm_ns": 1.82},
+              "fwhm_quarto_ampiezze_grandi":  {"ampiezza_mV": 37.1, "fwhm_ns": 1.82}}
+      }
+    },
+    {
+      "file": "PMT_selftrig_0176_2.5Gs_10PT.h5.gz",
+      "offset": 8,
+      "eventi": 3000,
+      "durata_s": 46.318573,
+      "rate_hz": 64.8,
+      "canali": {
+        "8": {"impulsi": 2105, "ampiezza_mediana_mV": 31.5, "rumore_adc": 2.97,
+              "fwhm_ns": 1.80, "fwhm_10_90": [1.72, 2.11], "larghezza_al_10pc_ns": 3.23, "larghezza_sopra_2rms_ns": 3.64,
+              "fwhm_quarto_ampiezze_piccole": {"ampiezza_mV": 21.2, "fwhm_ns": 1.81},
+              "fwhm_quarto_ampiezze_grandi":  {"ampiezza_mV": 44.7, "fwhm_ns": 1.82}},
+        "9": {"impulsi": 1943, "ampiezza_mediana_mV": 30.5, "rumore_adc": 2.97,
+              "fwhm_ns": 1.82, "fwhm_10_90": [1.73, 2.27], "larghezza_al_10pc_ns": 3.27, "larghezza_sopra_2rms_ns": 3.70,
+              "fwhm_quarto_ampiezze_piccole": {"ampiezza_mV": 19.0, "fwhm_ns": 1.81},
+              "fwhm_quarto_ampiezze_grandi":  {"ampiezza_mV": 43.7, "fwhm_ns": 1.85}},
+        "10": {"impulsi": 129, "ampiezza_mediana_mV": 13.2, "rumore_adc": 1.48, "fwhm_ns": 1.56,
+               "nota": "canale non in self-trigger: sono gli artefatti spuri del V1742, non segnale"},
+        "11": {"impulsi": 129, "ampiezza_mediana_mV": 12.7, "rumore_adc": 1.48, "fwhm_ns": 1.57,
+               "nota": "come ch10: stesso numero di impulsi e stessa ampiezza, coerente con l'artefatto a 12.69 mV gia' documentato"}
+      }
+    }
+  ],
+  "risultato": {
+    "fwhm_pmt_ns": 1.80,
+    "incertezza_ns": 0.02,
+    "larghezza_al_10pc_ns": 3.2,
+    "larghezza_alla_base_ns": 3.6,
+    "bias_di_selezione": "assente: la FWHM non cambia fra offset 4 e offset 8 (1.79-1.82 ns in entrambi), ne' fra il quarto di impulsi piu' piccoli e quello piu' grande dentro la stessa run (14.6 mV -> 1.80 ns, 38.1 mV -> 1.80 ns). Era il dubbio principale, perche' il comparatore attenua di piu' gli impulsi stretti e una soglia alta avrebbe potuto selezionare i piu' larghi",
+    "conclusione": "il punto di calibrazione applicabile e' quello a 1.6 ns, non quello a 7.6 ns. Gli impulsi dei PMT sono il 12% piu' larghi del punto misurato col generatore, il che con la dipendenza ~1/larghezza porta la calibrazione da 3.96 a ~3.5 mV per unita' di offset a 2.5 GS/s (da 3.08 a ~2.7 a 1 GS/s)",
+    "riconciliazione_con_l_oscilloscopio": "FWHM 1.8 ns ma 3.2 ns al 10% del picco e ~3.6 ns dove l'impulso si stacca dal rumore. A occhio, guardando da dove parte a dove torna sulla linea di base, si leggono i 5-6 ns riportati dall'utente: sono la stessa forma d'onda misurata a due altezze diverse"
+  },
+  "verifica_indipendente": "il V1742 non puo' aver stretto l'impulso: ha ~500 MHz di banda analogica, cioe' ~0.7 ns di tempo di salita, e puo' allargare un impulso stretto ma non trasformarne uno da 5-6 ns in uno da 1.8 ns"
+}

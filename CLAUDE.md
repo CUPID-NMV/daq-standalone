@@ -68,10 +68,16 @@ aggiorna. Le chiavi nuove vanno aggiunte lì a parte, con un backup, dicendolo.
 ## Cose misurate, da non ri-derivare
 
 - **La calibrazione della soglia dipende dalla larghezza dell'impulso**, e
-  molto: 0.46 mV per unità di offset a 96 ns, **3.93 a 1.6 ns** (la larghezza
-  degli impulsi dei PMT). L'attenuazione del Transparent Mode passa da 1.9 a
-  16.1. Usare la calibrazione degli impulsi larghi sottostima la soglia di un
-  fattore 8.
+  molto: 0.46 mV per unità di offset a 96 ns, **3.93 a 1.6 ns**.
+  L'attenuazione del Transparent Mode passa da 1.9 a 16.1. Usare la
+  calibrazione degli impulsi larghi sottostima la soglia di un fattore 8.
+- **Gli impulsi dei PMT hanno FWHM 1.80 ± 0.02 ns**, misurata a 2.5 GS/s su due
+  soglie diverse: il punto di calibrazione applicabile è quello a 1.6 ns, non
+  quello a 7.6 ns. Ma sono larghi 3.2 ns al 10% del picco e ~3.6 ns dove si
+  staccano dal rumore, ed è quest'ultima la larghezza che si legge a occhio
+  all'oscilloscopio: chi dice "5-6 ns" non è in disaccordo, sta guardando
+  un'altra altezza. **A 1 GS/s la FWHM cade su 2 soli campioni e la misura non
+  è risolta**: va fatta a 2.5 GS/s.
 - **Dipende anche dalla frequenza di campionamento**: 3.96 mV/offset a
   2.5 GS/s contro 3.08 a 1 GS/s, il 29% di differenza. Il meccanismo non è
   capito. La risposta è invece **lineare nell'ampiezza**, verificata entro il

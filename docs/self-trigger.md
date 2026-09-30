@@ -188,6 +188,30 @@ Un impulso stretto perde molto più di uno largo, mentre il rumore perde solo il
 fattore ~1.9. Tradurre una soglia in millivolt usando la calibrazione sbagliata
 porta a sottostimarla di un fattore 8.
 
+**Quale riga usare.** Gli impulsi dei PMT sono stati misurati a 2.5 GS/s:
+FWHM **1.80 ± 0.02 ns**. Vale quindi la riga a 1.6 ns, con una correzione del
+~12% per la larghezza in più (la dipendenza va circa come 1/larghezza): ~3.5 mV
+per unità di offset a 2.5 GS/s, ~2.7 a 1 GS/s.
+
+Due avvertenze su come si misura quella larghezza, perché è facile prendere il
+numero sbagliato e finire sulla riga sbagliata:
+
+- **A 1 GS/s la misura non è risolta.** Il passo è 1 ns, quindi la FWHM cade su
+  due soli campioni e legge 2.0 ns qualunque sia il valore vero fra ~1.5 e
+  ~2.5. Serve 2.5 GS/s, dove i campioni sono 4-5.
+- **FWHM non è la larghezza che si vede a occhio.** Lo stesso impulso misura
+  1.8 ns a metà altezza, 3.2 ns al 10% del picco e ~3.6 ns da dove si stacca
+  dal rumore a dove ci ritorna. All'oscilloscopio si legge quest'ultima, ed è
+  normale riportare "5-6 ns" per un impulso che qui è catalogato come 1.8.
+
+La selezione del self-trigger non distorce la misura, ed è stato verificato
+invece che assunto: la FWHM è la stessa a offset 4 e a offset 8, e la stessa
+per il quarto di impulsi più piccoli e per quello più grande dentro la stessa
+run. Il dubbio era legittimo, perché il comparatore attenua di più gli impulsi
+stretti e una soglia alta avrebbe potuto selezionare i più larghi.
+
+Dati in `measurements/larghezza_pmt_20260930.json`.
+
 I dati stanno in `measurements/larghezza_impulso_20260924.json` e
 `measurements/calibrazione_1p6ns_20260925.json`; le figure si rigenerano con
 `tools/plot_width_dependence.py` e `tools/plot_diagnostica_1p6ns.py`.

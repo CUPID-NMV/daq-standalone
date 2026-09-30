@@ -687,10 +687,12 @@ class Monitor:
                 # dell'asse: e' il motivo per cui l'asse e' in offset, cioe'
                 # vedere quanta parte dello spettro il self-trigger sta
                 # tagliando.
+                mv_off = self.attenuazione() * self.mv_per_count()
                 off = self.offsets.get(int(ch))
                 if off is not None:
                     ax.axvline(off, color="#2ca02c", lw=1.4)
-                    ax.annotate("soglia %g" % off, xy=(off, 0.92),
+                    ax.annotate("soglia %g  (%.0f mV)" % (off, off * mv_off),
+                                xy=(off, 0.92),
                                 xycoords=("data", "axes fraction"),
                                 fontsize=8, color="#1a6b1a", rotation=90,
                                 ha="right", va="top")
@@ -706,9 +708,11 @@ class Monitor:
                 # conteggi della forma d'onda registrata (questi) e quelli
                 # della distanza soglia-piedistallo del self-trigger, che
                 # vivono in Transparent Mode e differiscono per l'attenuazione.
-                ax.set_xlabel("ampiezza [unita' di offset]"
-                              "   (attenuazione %.1f, impulsi da ~1.6 ns)"
-                              % self.attenuazione())
+                # Quanto vale un'unita' di offset in millivolt all'ingresso:
+                # e' l'attenuazione per il passo dell'ADC, cioe' la
+                # calibrazione della soglia misurata su impulsi da 1.6 ns.
+                ax.set_xlabel("ampiezza [unita' di offset]   "
+                              "1 offset = %.2f mV   (impulsi da ~1.6 ns)" % mv_off)
                 ax.set_ylabel("eventi" + (" (log)" if logy else ""))
                 ax.set_title(f"ch{ch}", fontsize=10, pad=18)
                 ax.grid(alpha=0.25)

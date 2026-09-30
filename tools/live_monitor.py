@@ -708,10 +708,16 @@ class Monitor:
                             transform=ax.transAxes, ha="right", va="top",
                             fontsize=8, color="#1a6b1a")
 
-                taglio = qcut if qcut is not None else float(kw["range"][1])
-                sotto = float((cur < taglio).mean()) * 100.0 if cur.size else float("nan")
+                # Frazione di eventi SOPRA la soglia: su un asse positivo sono
+                # quelli che il self-trigger lascia passare, ed e' la domanda
+                # utile. Il default e' l'estremo inferiore dell'istogramma,
+                # quindi li conta tutti: si parte da 100% e si alza la soglia
+                # per vedere quanta parte dello spettro sopravvive.
+                taglio = qcut if qcut is not None else float(kw["range"][0])
+                sopra = float((cur > taglio).mean()) * 100.0 if cur.size else float("nan")
                 ax.axvline(taglio, color="#d62728", lw=1.2, ls="--")
-                ax.text(0.5, 1.02, "%.1f%% sotto %.1f offset" % (sotto, taglio),
+                ax.text(0.5, 1.02, "%.1f%% sopra %.1f offset  (%.0f mV)"
+                        % (sopra, taglio, taglio * mv_off),
                         transform=ax.transAxes, ha="center", va="bottom",
                         fontsize=9, color="#d62728")
 

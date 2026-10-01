@@ -73,38 +73,79 @@ def artefatti(ev):
 
 # ----------------------------------------------------------------------
 def fig_efficienza(cal, seg, out):
+    """Efficienza del self-trigger, quattro serie: due ampiezze x due frequenze.
+
+    Il colore codifica la FREQUENZA e il marker l'AMPIEZZA, non il contrario:
+    il confronto che conta e' fra 2.5 e 1 GS/s, e va messo sul canale
+    percettivo piu' forte. La versione precedente usava quattro tinte (due blu
+    e due verdi) con lo stesso marker tondo: fra i due verdi la distanza
+    percettiva valeva 14 su una soglia di 15, cioe' non si distinguevano
+    nemmeno a vista normale. Blu e arancio sono anche la coppia che regge
+    meglio il daltonismo.
+
+    Testi in inglese: le etichette delle serie si ricostruiscono dai campi
+    numerici del JSON invece di usare "etichetta", cosi' il file di misura
+    non va toccato.
+    """
     serie = cal["serie"]
-    colori = ["#1f77b4", "#5fa8d3", "#2ca02c", "#8bc34a"]
+
+    COLORE = {"2.5GHz": "#2a78d6", "1GHz": "#eb6834"}
+    MARKER = ["o", "s"]          # ampiezza grande / piccola, dentro la stessa frequenza
+    TRATTO = ["-", "--"]
+    SUPERFICIE = "white"         # anello attorno ai marker, per quando si sovrappongono
+
+    def etichetta_frequenza(sr):
+        return "2.5 GS/s" if sr["campionamento"].startswith("2.5") else "1 GS/s"
+
+    # Dentro ogni frequenza, l'ampiezza piu' grande prende il cerchio e il
+    # tratto pieno; la piu' piccola il quadrato e il tratteggio.
+    stile = {}
+    for freq in set(sr["campionamento"] for sr in serie):
+        gruppo = [i for i, sr in enumerate(serie) if sr["campionamento"] == freq]
+        gruppo.sort(key=lambda i: -serie[i]["ampiezza_mv"])
+        for rango, i in enumerate(gruppo):
+            stile[i] = (COLORE[freq], MARKER[rango % 2], TRATTO[rango % 2])
+
+    def nome(sr):
+        n = "%.1f mV @ %s" % (sr["ampiezza_mv"], etichetta_frequenza(sr))
+        if "run" in sr:
+            n += "  (run %s)" % sr["run"].split("_")[2]
+        return n
+
     fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.0))
 
     # --- a sinistra: le due ampiezze come sono state misurate
     ax = axes[0]
-    for sr, col in zip(serie, colori):
+    for i, sr in enumerate(serie):
+        col, mk, ls = stile[i]
         d = np.array([p["distanza"] for p in sr["punti"]])
         e = np.array([p["rate_hz"] for p in sr["punti"]]) / sr["rate_generatore_hz"]
         n = np.array([p["rate_hz"] for p in sr["punti"]]) * 30
         ax.errorbar(d, 100 * e, yerr=100 * e * np.sqrt(1 / np.maximum(n, 1)),
-                    fmt="o", ms=8, capsize=4, lw=1.7, color=col,
-                    label="%s\n%.2f mV/offset, attenuazione %.1f"
-                          % (sr["etichetta"], sr["mv_per_offset"],
+                    fmt=mk, ls=ls, ms=8, capsize=4, lw=2.0, color=col,
+                    mec=SUPERFICIE, mew=1.2,
+                    label="%s\n%.2f mV/offset, attenuation %.1f"
+                          % (nome(sr), sr["mv_per_offset"],
                              sr["mv_per_offset"] / (1000.0 / 4096)))
-        ax.axvline(sr["distanza_50pc"], color=col, lw=1, ls=":")
+        ax.axvline(sr["distanza_50pc"], color=col, lw=1, ls=":", alpha=.7)
 
-    # previsione con la SOLA dispersione delle ampiezze, tarata sul 50% misurato
+    # previsione con la SOLA dispersione delle ampiezze, tarata sul 50% misurato.
+    # In grigio neutro: e' un modello di riferimento, non una quinta serie, e
+    # in rosso litigava con l'arancio.
     reali = seg["amp"][:, 0][seg["amp"][:, 0] < -90]
     k = abs(np.median(reali)) / serie[0]["distanza_50pc"]
     g = np.linspace(0, 15, 400)
     ax.plot(g, 100 * np.array([(np.abs(reali) > k * x).mean() for x in g]),
-            lw=2.0, ls="--", color="#c0392b",
-            label="previsione dalla sola\ndispersione delle ampiezze")
+            lw=2.0, ls=(0, (6, 3)), color="#52514e",
+            label="prediction from amplitude\nspread alone")
 
     ax.axhline(50, color="#999", lw=.8, ls=":")
-    ax.axvspan(0, 3.2, color="#c0392b", alpha=.09)
-    ax.annotate("escluso: rumore\ne artefatti", xy=(1.6, 12), ha="center",
-                fontsize=8.5, color="#8a2020")
-    ax.set_xlabel("distanza soglia-piedistallo  [conteggi]")
-    ax.set_ylabel("efficienza del self-trigger  [%]")
-    ax.set_title("Impulso da %.1f ns: due ampiezze x due frequenze"
+    ax.axvspan(0, 3.2, color="#7f8c8d", alpha=.13)
+    ax.annotate("excluded: noise\nand artefacts", xy=(1.6, 12), ha="center",
+                fontsize=8.5, color="#52514e")
+    ax.set_xlabel("threshold-to-baseline distance  [counts]")
+    ax.set_ylabel("self-trigger efficiency  [%]")
+    ax.set_title("%.1f ns pulse: two amplitudes x two sampling rates"
                  % cal["larghezza_ns"], fontsize=11)
     ax.set_xlim(0, 15); ax.set_ylim(-2, 105)
     ax.grid(alpha=.3); ax.legend(fontsize=8.5, loc="upper right")
@@ -112,27 +153,29 @@ def fig_efficienza(cal, seg, out):
     # --- a destra: stessa cosa normalizzata all'ampiezza. Se la risposta e'
     #     lineare le due curve devono sovrapporsi, ed e' il test di linearita'
     ax = axes[1]
-    for sr, col in zip(serie, colori):
+    for i, sr in enumerate(serie):
+        col, mk, ls = stile[i]
         d = np.array([p["distanza"] for p in sr["punti"]]) / sr["ampiezza_conteggi"]
         e = np.array([p["rate_hz"] for p in sr["punti"]]) / sr["rate_generatore_hz"]
-        ax.plot(1e3 * d, 100 * e, "o-", ms=8, lw=1.7, color=col, label=sr["etichetta"])
+        ax.plot(1e3 * d, 100 * e, marker=mk, ls=ls, ms=8, lw=2.0, color=col,
+                mec=SUPERFICIE, mew=1.2, label=nome(sr))
         ax.axvline(1e3 * sr["distanza_50pc"] / sr["ampiezza_conteggi"],
-                   color=col, lw=1, ls=":")
+                   color=col, lw=1, ls=":", alpha=.7)
     ax.axhline(50, color="#999", lw=.8, ls=":")
-    ax.set_xlabel("soglia / ampiezza dell'impulso  [x1000]")
-    ax.set_ylabel("efficienza  [%]")
-    ax.set_title("Normalizzate all'ampiezza: si separano per frequenza, non per ampiezza",
+    ax.set_xlabel("threshold / pulse amplitude  [x1000]")
+    ax.set_ylabel("efficiency  [%]")
+    ax.set_title("Normalised to amplitude: curves split by sampling rate, not by amplitude",
                  fontsize=11)
     ax.set_ylim(-2, 105)
     ax.grid(alpha=.3); ax.legend(fontsize=8.5)
-    ax.annotate("Le coppie alla stessa frequenza coincidono entro il 3 per\n"
-                "cento: la risposta e' lineare nell'ampiezza a entrambe. Le due\n"
-                "frequenze restano separate del 29 per cento: il comparatore\n"
-                "vede lo stesso impulso piu' grande col clock DRS4 piu' lento.",
-                xy=(.03, .04), xycoords="axes fraction", fontsize=8, color="#444",
+    ax.annotate("The two pairs taken at the same sampling rate agree to within\n"
+                "3 per cent: the response is linear in amplitude at both rates.\n"
+                "The two rates stay 29 per cent apart: the comparator sees the\n"
+                "same pulse as larger when the DRS4 clock is slower.",
+                xy=(.03, .04), xycoords="axes fraction", fontsize=8, color="#52514e",
                 bbox=dict(fc="white", ec="#ddd", alpha=.9))
 
-    fig.suptitle("Calibrazione della soglia alla larghezza degli impulsi dei PMT",
+    fig.suptitle("Threshold calibration at the PMT pulse width",
                  fontsize=12.5)
     salva(fig, out)
 

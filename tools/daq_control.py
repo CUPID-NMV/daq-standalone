@@ -4,6 +4,16 @@
     python3 tools/daq_control.py                 # solo da questa macchina
     python3 tools/daq_control.py -b 0.0.0.0      # raggiungibile dalla rete
 
+Staccato dal terminale, cosi' sopravvive alla caduta della rete:
+
+    setsid nohup python3 /home/daq/daq-standalone/tools/daq_control.py \
+        -b 0.0.0.0 < /dev/null > /tmp/daq_control.out 2>&1 &
+
+Il percorso ASSOLUTO non e' pignoleria: lanciandolo con un percorso relativo
+da una directory qualsiasi -- tipo build/, dove si finisce dopo aver avviato
+la DAQ a mano -- python non trova il file e il servizio muore all'istante,
+lasciando un browser che non si collega e nessun indizio evidente.
+
 Sta deliberatamente SEPARATO da live_monitor.py. Il monitor e' in sola
 lettura, lo puoi riavviare quando vuoi e un errore nel disegnare un grafico
 non puo' fare danni; questo processo invece possiede il ciclo di vita della
@@ -503,13 +513,14 @@ def main():
     args = ap.parse_args()
 
     ctrl = Controllo(args.config, args.log)
-    print("Configurazione : %s" % ctrl.toml)
-    print("Binario        : %s%s" % (BINARIO, "" if os.path.exists(BINARIO) else "   NON ESISTE"))
-    print("Uscita DAQ     : %s" % args.log)
+    stampa = lambda s: print(s, flush=True)
+    stampa("Configurazione : %s" % ctrl.toml)
+    stampa("Binario        : %s%s" % (BINARIO, "" if os.path.exists(BINARIO) else "   NON ESISTE"))
+    stampa("Uscita DAQ     : %s" % args.log)
     if args.token:
-        print("Token          : attivo")
+        stampa("Token          : attivo")
     pid = trova_daq()
-    print("DAQ            : %s" % ("in esecuzione, pid %d" % pid if pid else "ferma"))
+    stampa("DAQ            : %s" % ("in esecuzione, pid %d" % pid if pid else "ferma"))
 
     try:
         server = ThreadingHTTPServer((args.bind, args.port), crea_handler(ctrl, args.token))
@@ -519,7 +530,7 @@ def main():
         sys.exit("\nLa porta %d e' gia' in uso: c'e' gia' un controllore attivo?\n"
                  "Trova il processo con:  ss -ltnp | grep %d" % (args.port, args.port))
 
-    print("\nPagina su http://%s:%d/" % (args.bind, args.port))
+    stampa("\nPagina su http://%s:%d/" % (args.bind, args.port))
     try:
         server.serve_forever()
     except KeyboardInterrupt:

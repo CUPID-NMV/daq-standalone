@@ -18,17 +18,39 @@ html = urllib.request.urlopen(url, timeout=10).read().decode()
 body = html.split("<body>", 1)[-1].split("<script>", 1)[0]
 script = html.split("<script>", 1)[-1].rsplit("</script>", 1)[0]
 
-present = set(re.findall(r'id="([A-Za-z0-9_]+)"', body))
+present = set(re.findall(r'id="([A-Za-z0-9_-]+)"', body))
 # Gli id creati dinamicamente dal JS non stanno nell'HTML statico
-dynamic = set(re.findall(r'id="([A-Za-z0-9_]+)_\$\{', script))
+dynamic = set(re.findall(r'id="([A-Za-z0-9_-]+)_\$\{', script))
 
-wanted = set(re.findall(r"getElementById\('([A-Za-z0-9_]+)'\)", script))
+# Apici singoli o doppi: cercare solo i primi faceva passare a vuoto una
+# pagina intera scritta con i secondi.
+wanted = set(re.findall(r"""getElementById\(\s*['"]([A-Za-z0-9_-]+)['"]""", script))
+
+# Molte pagine si definiscono una scorciatoia, tipo
+#     const $ = id => document.getElementById(id);
+# e poi scrivono $("badge"). Senza riconoscerla, qui non si vedrebbe nessun
+# riferimento e il controllo direbbe OK senza aver guardato niente.
+for alias in re.findall(r"(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
+                        r"\w+\s*=>\s*document\.getElementById", script):
+    wanted |= set(re.findall(r"%s\(\s*['\"]([A-Za-z0-9_-]+)['\"]\s*\)"
+                             % re.escape(alias), script))
+
 missing = {w for w in wanted
            if w not in present and not any(w.startswith(d + "_") for d in dynamic)}
 
 print(f"url          : {url}")
 print(f"id nel body  : {len(present)}")
 print(f"id cercati   : {len(wanted)}")
+
+# Un controllo che non trova niente da controllare non e' un controllo
+# passato: e' un controllo che non ha guardato. E' successo, e la pagina
+# aveva comunque bisogno di essere verificata a mano.
+if present and not wanted:
+    print("\nERRORE: nel body ci sono id ma nel JS non si vede nessun "
+          "riferimento.\nQuasi certamente la pagina usa una forma che questo "
+          "controllo non riconosce: va esteso, non ignorato.")
+    sys.exit(1)
+
 if missing:
     print("\nERRORE: il JS cerca id che nel body non esistono:")
     for m in sorted(missing):

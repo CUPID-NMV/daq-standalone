@@ -22,6 +22,7 @@
 
 #include "Digitizer.h"
 #include "Log.h"
+#include "Stop.h"
 #include <CAENDigitizer.h>
 #include <CAENDigitizerType.h>
 #include <H5Cpp.h>
@@ -1556,6 +1557,13 @@ void Digitizer::AcquireEvents() {
     auto lastFlush = std::chrono::steady_clock::now();
 
     while (totalEvents < maxEvents && retry < maxRetries) {
+        // Uscita pulita su richiesta: si esce di qui, non si muore dove
+        // capita, cosi' il file viene chiuso e compresso e la board resettata.
+        if (Stop::Requested()) {
+            Log::OutSummary("→ Arresto richiesto: chiudo la run dopo " +
+                            std::to_string(totalEvents) + " eventi.");
+            break;
+        }
         re = CAEN_DGTZ_ReadData(
             fHandle,
             CAEN_DGTZ_SLAVE_TERMINATED_READOUT_MBLT,
@@ -1819,6 +1827,11 @@ void Digitizer::AcquireTransparent()
     const int maxidle = 600;            // ~60 s senza trigger e si rinuncia
 
     while (written < fTransparentDumpEvents) {
+
+        if (Stop::Requested()) {
+            Log::OutSummary("→ Arresto richiesto: interrompo il dump in Transparent Mode.");
+            break;
+        }
 
         if (!selftrig && CAEN_DGTZ_SendSWtrigger(fHandle) != CAEN_DGTZ_Success) break;
 

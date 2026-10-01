@@ -2,6 +2,7 @@
 
 #include "Config.h"
 #include "Log.h"
+#include "Stop.h"
 #include "Bridge.h"
 #include "CFD.h"
 #include "Digitizer.h"
@@ -14,6 +15,12 @@ int main(int argc, char** argv)
         std::cout << "Usage: ./GAGG-DAQ /path/to/config-file.toml" << std::endl;
         return 1;
     }
+
+    // Installato subito: da qui in poi un Ctrl-C, o il SIGTERM che manda chi
+    // ferma la run da fuori, chiude la run per la porta buona invece di
+    // ucciderla. Un secondo segnale esce comunque, per quando il link e'
+    // appeso e il ciclo non risponde.
+    Stop::Install();
 
     // --- Config ---
     Config& theConfig = Config::GetInstance();

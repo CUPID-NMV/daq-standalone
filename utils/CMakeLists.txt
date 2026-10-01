@@ -8,6 +8,7 @@
 add_library(daqutils SHARED
   Log.cpp
   Config.cpp
+  Stop.cpp
 )
 
 message( "source dir detector " ${CMAKE_SOURCE_DIR})

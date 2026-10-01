@@ -58,6 +58,30 @@ ATTESA_ARRESTO_S = 30
 # Sequenze di colore con cui la DAQ decora l'uscita.
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
+# Le righe di log vere e proprie cominciano con una di queste etichette.
+# Servono a staccare il contatore degli eventi da cio' che gli finisce
+# incollato dietro: la DAQ non va a capo dopo il contatore, quindi il
+# messaggio successivo si attacca in coda alla stessa riga.
+PREFISSI = re.compile(r"(?=(?:Summary|Warning|Error|Debug)\s*:|\[INFO\])")
+
+
+def righe_terminale(testo):
+    """Il testo come lo mostrerebbe un terminale.
+
+    La DAQ riscrive il contatore degli eventi sulla stessa riga usando \r.
+    Convertire ogni \r in un a capo, come facevo prima, produce una riga per
+    ogni evento: dopo mille eventi il riquadro del log e' mille volte la
+    stessa frase. Un terminale invece tiene solo l'ULTIMO segmento fra due
+    a capo, ed e' quello che si vuole vedere qui.
+    """
+    righe = []
+    for blocco in ANSI.sub("", testo).split("\n"):
+        blocco = blocco.split("\r")[-1]
+        for pezzo in PREFISSI.split(blocco):
+            if pezzo.strip():
+                righe.append(pezzo.rstrip())
+    return righe
+
 
 # ---------------------------------------------------------------------------
 #  Processi
@@ -181,15 +205,7 @@ class Controllo:
                 testo = f.read().decode("utf-8", "replace")
         except OSError:
             return []
-        # Il contatore di eventi usa \r per riscrivere la stessa riga: senza
-        # convertirlo si vedrebbe una riga sola lunga chilometri. E la DAQ
-        # colora l'uscita, quindi vanno tolte le sequenze ANSI: altrimenti
-        # finiscono nel <pre> della pagina come caratteri strani, e peggio
-        # ancora si attaccano in coda ai valori estratti da qui, tipo il nome
-        # del file della run.
-        testo = ANSI.sub("", testo)
-        righe = [r for r in testo.replace("\r", "\n").split("\n") if r.strip()]
-        return righe[-n:]
+        return righe_terminale(testo)[-n:]
 
     def testa_log(self, n=300):
         """Prime righe del log. Il file viene troncato a ogni avvio, quindi
@@ -199,8 +215,7 @@ class Controllo:
                 testo = f.read(200000).decode("utf-8", "replace")
         except OSError:
             return []
-        testo = ANSI.sub("", testo)
-        return [r for r in testo.replace("\r", "\n").split("\n") if r.strip()][:n]
+        return righe_terminale(testo)[:n]
 
     def eventi_correnti(self):
         """(decodificati, richiesti, file) dal log della run.

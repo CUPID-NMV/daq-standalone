@@ -97,6 +97,19 @@ CAMPI = [
 # la domanda "ho cambiato il campionamento e non succede niente".
 A_CALDO = {("digitizer", "SelfTriggerThresholdOffset")}
 
+# Chiavi che la pagina mostra come tabella per canale invece che come lista
+# da scrivere a mano. Sono due tabelle e non una perche' i canali del V1742
+# (0-31) e gli ingressi del V812 (0-15) sono numerazioni DIVERSE: l'ingresso
+# 3 del CFD e' quello dove hai infilato il cavo, e quale canale del digitizer
+# gli corrisponda dipende dal cablaggio, che il software non puo' sapere.
+TABELLA = {
+    ("digitizer", "ChannelList"): "dig",
+    ("digitizer", "SelfTriggerChannels"): "dig",
+    ("digitizer", "SelfTriggerThresholdOffset"): "dig",
+    ("cfd", "Channels"): "cfd",
+    ("cfd", "Threshold"): "cfd",
+}
+
 
 def _ui_da_toml(tipo, grezzo):
     """Dal testo nel file a quello che si mostra nella casella."""
@@ -149,6 +162,98 @@ def _toml_da_ui(tipo, valore, dettagli, etichetta):
             numeri.append(p)
         return "[" + ", ".join(numeri) + "]"
     raise ValueError("tipo sconosciuto: %s" % tipo)
+
+
+# Latenza del self-trigger, in nanosecondi: e' il tempo fra il superamento
+# della soglia e l'arresto del DRS4, e sposta l'impulso dentro la finestra.
+LATENZA_NS = {"paired": 320.0, "global": 420.0}
+PASSO_NS = {"5GHz": 0.2, "2.5GHz": 0.4, "1GHz": 1.0, "750MHz": 1.333}
+
+
+def coerenza(d):
+    """Controlli sulla configurazione nel suo insieme. Torna (errori, avvisi).
+
+    Un campo per volta puo' essere legittimo e l'insieme no: e' qui che si
+    intercettano le combinazioni che fanno perdere una serata. Gli errori
+    bloccano la scrittura, gli avvisi no -- alcune combinazioni strane sono
+    volute, per esempio triggerare su un canale che non si registra, che e'
+    esattamente come si misura l'efficienza di un trigger con un altro.
+    """
+    errori, avvisi = [], []
+    g = d.get("digitizer", {})
+    c = d.get("cfd", {})
+
+    def lista(x):
+        if x is None:
+            return []
+        return list(x) if isinstance(x, (list, tuple)) else [x]
+
+    canali = lista(g.get("ChannelList"))
+    if not canali:
+        errori.append("ChannelList e' vuota: non si registrerebbe niente.")
+
+    self_on = bool(g.get("SelfTrigger"))
+    est_on = bool(g.get("ExternalTrigger"))
+    modo = str(g.get("SelfTriggerMode", "paired"))
+    freq = str(g.get("SamplingRate", ""))
+
+    if not self_on and not est_on and not c.get("Enabled"):
+        avvisi.append("Ne self-trigger ne trigger esterno: resterebbe solo il "
+                      "trigger software, e la run non acquisirebbe niente da sola.")
+
+    if self_on:
+        sch = lista(g.get("SelfTriggerChannels")) or canali
+        fuori = [x for x in sch if x not in canali]
+        if fuori:
+            avvisi.append("Canali in self-trigger ma non registrati: %s. Legittimo "
+                          "se vuoi triggerare su uno e guardarne un altro, sbagliato "
+                          "se non era quello che volevi." % fuori)
+        off = lista(g.get("SelfTriggerThresholdOffset"))
+        if len(off) > 1 and len(off) != len(sch):
+            avvisi.append("%d soglie per %d canali in self-trigger: la DAQ replica "
+                          "l'ultima sui rimanenti." % (len(off), len(sch)))
+
+        if freq == "5GHz":
+            errori.append("A 5 GHz il self-trigger non puo' funzionare: la finestra "
+                          "dura meno della latenza, l'impulso cade sempre fuori.")
+        elif freq == "2.5GHz" and modo == "global":
+            avvisi.append("A 2.5 GHz in modo global la latenza (~420 ns) supera la "
+                          "finestra (410 ns): l'impulso rischia di restare fuori. "
+                          "In paired funziona.")
+
+        # Dove cade l'impulso nella finestra. E' il conto che ci ha gia' fatto
+        # registrare eventi vuoti senza capire perche'.
+        passo = PASSO_NS.get(freq)
+        rl = g.get("RecordLength")
+        pt = g.get("PostTriggerSize")
+        if passo and isinstance(rl, int) and isinstance(pt, (int, float)):
+            finestra = rl * passo
+            pos = (1.0 - pt / 100.0) * finestra - LATENZA_NS.get(modo, 320.0)
+            if pos < 0:
+                errori.append("Con questi valori l'impulso cadrebbe %.0f ns PRIMA "
+                              "dell'inizio della finestra: abbassa il post-trigger "
+                              "o rallenta il campionamento." % (-pos))
+            elif pos > finestra * 0.9:
+                avvisi.append("L'impulso cadrebbe a %.0f ns su una finestra di %.0f: "
+                              "troppo vicino alla fine, rischi di tagliarne la coda."
+                              % (pos, finestra))
+
+    if c.get("Enabled"):
+        if str(g.get("Connection", "")) == "USB_A4818":
+            errori.append("Col CFD acceso serve il bridge: su USB_A4818 la fibra va "
+                          "dritta al digitizer e sul bus VME non c'e' nessun master.")
+        if not est_on:
+            avvisi.append("CFD acceso ma trigger esterno spento: l'OR del V812 entra "
+                          "da TRG-IN, quindi cosi' non fa niente.")
+        cch = lista(c.get("Channels"))
+        cth = lista(c.get("Threshold"))
+        if not cch:
+            errori.append("Il CFD e' acceso ma non ha nessun ingresso abilitato.")
+        if len(cth) > 1 and len(cth) != len(cch):
+            avvisi.append("%d soglie CFD per %d ingressi: viene replicata l'ultima."
+                          % (len(cth), len(cch)))
+
+    return errori, avvisi
 
 
 # Quanto si aspetta che la DAQ chiuda dopo SIGTERM prima di dire che non
@@ -321,6 +426,7 @@ class Controllo:
                 "presente": grezzo is not None,
                 "valore": _ui_da_toml(tipo, grezzo) if grezzo is not None else "",
                 "a_caldo": (sezione, chiave) in A_CALDO,
+                "tabella": TABELLA.get((sezione, chiave)),
             })
         return {"file": self.toml, "mtime": mtime, "campi": fuori}
 
@@ -363,13 +469,23 @@ class Controllo:
             # Il controllo che conta: il file che sto per scrivere e' ancora
             # TOML valido? Se no non lo scrivo affatto, invece di scoprirlo al
             # prossimo avvio della DAQ.
+            avvisi = []
             try:
                 import tomllib
-                tomllib.loads(nuovo)
+                d = tomllib.loads(nuovo)
             except ImportError:
-                pass
+                d = None
             except Exception as e:
                 return False, "La modifica produrrebbe un TOML non valido: %s" % e, []
+
+            if d is not None:
+                # I singoli campi erano gia' validi: qui si guarda l'insieme,
+                # che e' dove stanno le combinazioni che fanno perdere la
+                # serata senza che nessun valore sia sbagliato di per se'.
+                errori, avvisi = coerenza(d)
+                if errori:
+                    return False, "Configurazione incoerente:\n" + "\n".join(
+                        "- " + e for e in errori), []
 
             # Il nome deve essere unico anche per due salvataggi nello stesso
             # secondo: con la sola ora, il secondo backup sovrascriveva il
@@ -386,7 +502,10 @@ class Controllo:
             except OSError as e:
                 return False, "Scrittura fallita: %s" % e, []
 
-            return True, "Salvato. Backup in %s" % os.path.basename(backup), diff
+            messaggio = "Salvato. Backup in %s" % os.path.basename(backup)
+            if avvisi:
+                messaggio += "\n\nDa guardare:\n" + "\n".join("- " + a for a in avvisi)
+            return True, messaggio, diff
 
     def soglie_a_caldo(self, offsets):
         """Scrive il file di comando delle soglie del self-trigger.
@@ -550,7 +669,12 @@ class Controllo:
 # ---------------------------------------------------------------------------
 #  Pagina
 # ---------------------------------------------------------------------------
-PAGINA = """<!doctype html>
+# Stringa GREZZA (r"""): le barre rovesce devono arrivare al JavaScript come
+# sono scritte. Senza la r, un "\n" dentro una stringa JS diventa un a capo
+# vero quando Python compone la pagina, e in JavaScript una stringa con un a
+# capo dentro e' un errore di sintassi: lo script intero non parte e la pagina
+# resta muta, senza che niente lo segnali.
+PAGINA = r"""<!doctype html>
 <html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Controllo DAQ</title>
@@ -570,6 +694,11 @@ PAGINA = """<!doctype html>
  table{border-collapse:collapse;width:100%}
  td{padding:3px 8px 3px 0;vertical-align:top}
  td.k{color:#6b6a65;white-space:nowrap}
+ .cantab{max-height:240px;overflow:auto;border:1px solid #eee;border-radius:6px}
+ .cantab table{font-size:12px}
+ .cantab td{padding:2px 10px 2px 6px}
+ .cantab thead td{position:sticky;top:0;background:#fafaf8;color:#6b6a65;font-weight:600}
+ .cantab input[type=text]{width:58px;padding:2px 5px;font-size:12px}
  pre{background:#1a1a19;color:#e6e6e2;padding:10px;border-radius:6px;overflow:auto;
      max-height:260px;font-size:12px;margin:0;white-space:pre-wrap}
  .msg{padding:9px 12px;border-radius:6px;margin:10px 0;display:none}
@@ -598,6 +727,8 @@ PAGINA = """<!doctype html>
   <div class="box" style="flex:2 1 520px"><h2>Configurazione</h2>
     <div id="cfgfile" style="font-size:12px;color:#6b6a65;margin-bottom:8px"></div>
     <div id="cfg"></div>
+    <div id="tabdig" style="margin-top:14px"></div>
+    <div id="tabcfd" style="margin-top:14px"></div>
     <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button id="salva" style="background:#2a78d6;color:#fff">Salva nel TOML</button>
       <button id="ricarica" style="background:#ececea">Rileggi il file</button>
@@ -654,7 +785,7 @@ async function azione(nome, conferma){
 
 $("avvia").onclick = () => azione("avvia", "Avviare una nuova run?");
 $("ferma").onclick = () => azione("ferma",
-  "Fermare la run in corso?\\n\\nLa DAQ chiude il file e resetta la board: " +
+  "Fermare la run in corso?\n\nLa DAQ chiude il file e resetta la board: " +
   "non si perde niente di quello che e' gia' stato acquisito.");
 
 async function aggiorna(){
@@ -678,7 +809,7 @@ async function aggiorna(){
        ["in corso da", s.da_secondi === null ? "—" : Math.round(s.da_secondi) + " s"]]
     : [["", "nessuna run in corso"]]);
 
-  $("log").textContent = (s.log || []).join("\\n");
+  $("log").textContent = (s.log || []).join("\n");
   $("azioni").innerHTML = (s.azioni || []).slice().reverse().map(a =>
     `${a.quando} &middot; <b>${a.chi}</b> da ${a.da}: ${a.azione} &rarr; ${a.esito}`
   ).join("<br>") || "nessuna azione registrata";
@@ -690,7 +821,91 @@ async function aggiorna(){
 // o a richiesta.
 let CFG = null;
 
+// --- tabelle per canale ---------------------------------------------------
+// Due e non una: i canali del V1742 (0-31) e gli ingressi del V812 (0-15)
+// sono numerazioni diverse, e la corrispondenza fra loro e' il cablaggio.
+function numeri(testo){
+  return (testo || "").split(/[\s,]+/).filter(x => x !== "").map(Number);
+}
+
+function campoDi(ch, chiave){ return $("t_" + chiave + "_" + ch); }
+
+function tabellaCanali(dest, titolo, n, colonne, iniziale){
+  let h = `<div style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+           color:#6b6a65;margin-bottom:4px">${titolo}</div><div class="cantab"><table>
+           <thead><tr><td>ch</td>` +
+           colonne.map(c => `<td>${c.titolo}</td>`).join("") + "</tr></thead><tbody>";
+  for(let ch = 0; ch < n; ch++){
+    h += `<tr><td style="color:#6b6a65">${ch}</td>`;
+    for(const c of colonne){
+      const id = "t_" + c.chiave + "_" + ch;
+      if(c.tipo === "flag")
+        h += `<td><input type="checkbox" id="${id}"${iniziale[c.chiave].includes(ch) ? " checked" : ""}></td>`;
+      else{
+        const v = iniziale[c.chiave][ch];
+        h += `<td><input type="text" id="${id}" value="${v === undefined ? "" : v}"></td>`;
+      }
+    }
+    h += "</tr>";
+  }
+  $(dest).innerHTML = h + "</tbody></table></div>";
+}
+
+function valoreDi(chiave){
+  for(const c of CFG.campi) if(c.chiave === chiave) return c.valore;
+  return "";
+}
+
+// Le soglie nel TOML sono una lista parallela ai canali abilitati, e l'ultima
+// vale per tutti i rimanenti: va srotolata su ogni canale per poterla
+// mostrare riga per riga, e riarrotolata al salvataggio.
+function srotola(canali, soglie){
+  const fuori = {};
+  canali.forEach((ch, i) => { fuori[ch] = soglie[Math.min(i, soglie.length - 1)]; });
+  return fuori;
+}
+
+function disegnaTabelle(){
+  const reg  = numeri(valoreDi("ChannelList"));
+  const self = numeri(valoreDi("SelfTriggerChannels"));
+  const off  = numeri(valoreDi("SelfTriggerThresholdOffset"));
+  tabellaCanali("tabdig", "canali del digitizer V1742", 32, [
+    {chiave: "reg",  titolo: "registra",     tipo: "flag"},
+    {chiave: "self", titolo: "self-trigger", tipo: "flag"},
+    {chiave: "off",  titolo: "offset",       tipo: "testo"},
+  ], {reg: reg, self: self, off: srotola(self, off)});
+
+  const cch = numeri(valoreDi("Channels"));
+  const cth = numeri(valoreDi("Threshold"));
+  tabellaCanali("tabcfd", "ingressi del CFD V812  (numerazione del modulo, non del digitizer)",
+    16, [
+      {chiave: "cfd",  titolo: "abilitato",   tipo: "flag"},
+      {chiave: "cthr", titolo: "soglia [mV]", tipo: "testo"},
+    ], {cfd: cch, cthr: srotola(cch, cth)});
+}
+
+function dalleTabelle(){
+  const reg = [], self = [], off = [], cch = [], cth = [];
+  for(let ch = 0; ch < 32; ch++){
+    if(campoDi(ch, "reg") && campoDi(ch, "reg").checked) reg.push(ch);
+    if(campoDi(ch, "self") && campoDi(ch, "self").checked){
+      self.push(ch);
+      off.push((campoDi(ch, "off").value || "").trim());
+    }
+  }
+  for(let ch = 0; ch < 16; ch++){
+    if(campoDi(ch, "cfd") && campoDi(ch, "cfd").checked){
+      cch.push(ch);
+      cth.push((campoDi(ch, "cthr").value || "").trim());
+    }
+  }
+  return {ChannelList: reg.join(", "), SelfTriggerChannels: self.join(", "),
+          SelfTriggerThresholdOffset: off.join(", "),
+          Channels: cch.join(", "), Threshold: cth.join(", ")};
+}
+
 function campoHtml(c){
+  if(c.tabella) return "";   // sta in una tabella, non nel form
   const id = "f_" + c.sezione + "_" + c.chiave;
   const marchio = c.a_caldo ? ' <span style="color:#15603a;font-size:11px">a caldo</span>' : "";
   if(!c.presente)
@@ -722,6 +937,7 @@ async function caricaConfig(){
     html += campoHtml(c);
   }
   $("cfg").innerHTML = html + "</table>";
+  disegnaTabelle();
 }
 
 function valoreCampo(c){
@@ -734,10 +950,12 @@ $("ricarica").onclick = caricaConfig;
 $("salva").onclick = async () => {
   if(!CFG) return;
   const mod = [];
+  const tab = dalleTabelle();
   for(const c of CFG.campi){
     if(!c.presente) continue;
-    const v = valoreCampo(c);
-    if(v !== null && v !== c.valore) mod.push([c.sezione, c.chiave, v]);
+    const v = c.tabella ? tab[c.chiave] : valoreCampo(c);
+    if(v !== null && v !== undefined && v !== c.valore)
+      mod.push([c.sezione, c.chiave, v]);
   }
   if(!mod.length){ msg("Nessuna modifica da salvare.", true); return; }
   const elenco = mod.map(m => "  " + m[1] + "  ->  " + m[2]).join("\n");

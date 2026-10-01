@@ -9,7 +9,10 @@ che azzera l'intero script e lascia la pagina muta. Questo controllo lo trova.
     python3 tools/check_page.py [url]
 """
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import urllib.request
 
 url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8765/"
@@ -57,3 +60,24 @@ if missing:
         print("  -", m)
     sys.exit(1)
 print("\nOK: ogni getElementById ha il suo elemento.")
+
+# --- sintassi del JavaScript -----------------------------------------------
+# Serve davvero: la pagina e' generata da una stringa Python, e una barra
+# rovescia interpretata da Python invece che dal browser trasforma "\n" in un
+# a capo vero dentro una stringa JS. Quella e' una stringa non terminata: lo
+# script intero non parte e la pagina resta muta, senza che niente lo dica.
+node = shutil.which("node")
+if not node:
+    print("\nATTENZIONE: node non c'e', la sintassi del JavaScript non e' stata"
+          " controllata.")
+    sys.exit(0)
+
+with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+    f.write(script)
+    tmp = f.name
+esito = subprocess.run([node, "--check", tmp], capture_output=True, text=True)
+if esito.returncode != 0:
+    print("\nERRORE: il JavaScript della pagina non e' valido.")
+    print(esito.stderr.strip()[:800])
+    sys.exit(1)
+print("OK: il JavaScript e' sintatticamente valido.")

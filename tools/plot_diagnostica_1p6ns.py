@@ -124,7 +124,7 @@ def fig_efficienza(cal, seg, out):
         ax.errorbar(d, 100 * e, yerr=100 * e * np.sqrt(1 / np.maximum(n, 1)),
                     fmt=mk, ls=ls, ms=8, capsize=4, lw=2.0, color=col,
                     mec=SUPERFICIE, mew=1.2,
-                    label="%s\n%.2f mV/offset, attenuation %.1f"
+                    label="%s  -  %.2f mV/offset, att. %.1f"
                           % (nome(sr), sr["mv_per_offset"],
                              sr["mv_per_offset"] / (1000.0 / 4096)))
         ax.axvline(sr["distanza_50pc"], color=col, lw=1, ls=":", alpha=.7)
@@ -137,7 +137,7 @@ def fig_efficienza(cal, seg, out):
     g = np.linspace(0, 15, 400)
     ax.plot(g, 100 * np.array([(np.abs(reali) > k * x).mean() for x in g]),
             lw=2.0, ls=(0, (6, 3)), color="#52514e",
-            label="prediction from amplitude\nspread alone")
+            label="prediction from amplitude spread alone")
 
     ax.axhline(50, color="#999", lw=.8, ls=":")
     ax.axvspan(0, 3.2, color="#7f8c8d", alpha=.13)
@@ -147,8 +147,9 @@ def fig_efficienza(cal, seg, out):
     ax.set_ylabel("self-trigger efficiency  [%]")
     ax.set_title("%.1f ns pulse: two amplitudes x two sampling rates"
                  % cal["larghezza_ns"], fontsize=11)
-    ax.set_xlim(0, 15); ax.set_ylim(-2, 105)
-    ax.grid(alpha=.3); ax.legend(fontsize=8.5, loc="upper right")
+    ax.set_xlim(0, 15); ax.set_ylim(-2, 128)
+    ax.grid(alpha=.3)
+    ax.legend(fontsize=8, loc="upper right", framealpha=.95)
 
     # --- a destra: stessa cosa normalizzata all'ampiezza. Se la risposta e'
     #     lineare le due curve devono sovrapporsi, ed e' il test di linearita'
@@ -168,11 +169,13 @@ def fig_efficienza(cal, seg, out):
                  fontsize=11)
     ax.set_ylim(-2, 105)
     ax.grid(alpha=.3); ax.legend(fontsize=8.5)
-    ax.annotate("The two pairs taken at the same sampling rate agree to within\n"
-                "3 per cent: the response is linear in amplitude at both rates.\n"
-                "The two rates stay 29 per cent apart: the comparator sees the\n"
-                "same pulse as larger when the DRS4 clock is slower.",
-                xy=(.03, .04), xycoords="axes fraction", fontsize=8, color="#52514e",
+    ax.annotate("Same sampling rate, two amplitudes:\n"
+                "the curves agree to within 3 per cent,\n"
+                "so the response is linear in amplitude.\n"
+                "The two rates stay 29 per cent apart:\n"
+                "the comparator sees the same pulse as\n"
+                "larger when the DRS4 clock is slower.",
+                xy=(.02, .03), xycoords="axes fraction", fontsize=7.5, color="#52514e",
                 bbox=dict(fc="white", ec="#ddd", alpha=.9))
 
     fig.suptitle("Threshold calibration at the PMT pulse width",

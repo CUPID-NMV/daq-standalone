@@ -796,12 +796,28 @@ class Controllo:
                 os.killpg(s["pgid"], signal.SIGTERM)
             except OSError as e:
                 return False, "Segnale fallito: %s" % e
+            fermo = None
             for i in range(80):
                 time.sleep(0.5)
                 if not trova_scan():
+                    fermo = (i + 1) * 0.5
+                    break
+            if fermo is None:
+                return False, "Lo scan non risponde da 40 s."
+
+            # Lo script muore prima della DAQ che aveva lanciato: quella sta
+            # chiudendo il file e comprimendolo, e ci mette il suo. Tornare
+            # qui senza aspettarla farebbe trovare alla prossima azione una
+            # DAQ ancora viva, con un messaggio incomprensibile.
+            for j in range(60):
+                if not trova_daq():
                     return True, ("Scan interrotto in %.1f s. Il TOML e' stato "
-                                  "ripristinato dallo script." % ((i + 1) * 0.5))
-            return False, "Lo scan non risponde da 40 s."
+                                  "ripristinato e la run dell'ultimo punto e' "
+                                  "stata chiusa regolarmente." % fermo)
+                time.sleep(0.5)
+            return True, ("Scan interrotto in %.1f s e TOML ripristinato, ma la run "
+                          "dell'ultimo punto sta ancora chiudendo: aspetta qualche "
+                          "secondo prima di avviarne un'altra." % fermo)
 
     # -- azioni ------------------------------------------------------------
     def avvia(self):

@@ -59,6 +59,7 @@ AZIONI = os.path.join(ROOT, "data", "azioni.jsonl")
 # tracce, e un processo che nessuno sorveglia piu' e' peggio di nessun processo.
 SCAN_STATO = os.path.join(ROOT, "data", "scan-in-corso.json")
 SCAN_LOG = os.path.join(ROOT, "data", "scan-console.log")
+GRAFICI = os.path.join(ROOT, "plots")
 
 SCAN = {
     "v1742": {
@@ -362,6 +363,38 @@ def trova_daq():
         if exe == BINARIO or exe == BINARIO + " (deleted)":
             return int(voce)
     return None
+
+
+def elenco_grafici(n=12):
+    """I grafici piu' recenti prodotti dagli scan."""
+    try:
+        nomi = [f for f in os.listdir(GRAFICI) if f.endswith(".png")]
+    except OSError:
+        return []
+    fuori = []
+    for nome in nomi:
+        try:
+            st = os.stat(os.path.join(GRAFICI, nome))
+        except OSError:
+            continue
+        fuori.append({"nome": nome, "quando": st.st_mtime, "byte": st.st_size})
+    fuori.sort(key=lambda x: -x["quando"])
+    return fuori[:n]
+
+
+def percorso_grafico(nome):
+    """Percorso del grafico, oppure None se il nome non e' accettabile.
+
+    Si accetta solo un nome semplice dentro plots/, e si verifica anche il
+    percorso risolto: una pagina raggiungibile dalla VPN non deve poter
+    diventare un modo per leggere file qualunque della macchina.
+    """
+    if not nome or "/" in nome or "\\" in nome or not nome.endswith(".png"):
+        return None
+    percorso = os.path.realpath(os.path.join(GRAFICI, nome))
+    if os.path.dirname(percorso) != os.path.realpath(GRAFICI):
+        return None
+    return percorso if os.path.isfile(percorso) else None
 
 
 def trova_scan():
@@ -979,6 +1012,16 @@ PAGINA = r"""<!doctype html>
   <pre id="scanlog" style="margin-top:12px;display:none"></pre>
 </div>
 
+<div class="box" style="margin-top:14px"><h2>Grafici degli scan</h2>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <select id="gsel" style="font:inherit;padding:6px 8px;border:1px solid #d5d5d0;border-radius:6px;min-width:280px"></select>
+    <button id="ggo" style="background:#ececea">Aggiorna elenco</button>
+    <a id="gapri" href="#" target="_blank" style="font-size:12px">apri a tutta pagina</a>
+  </div>
+  <div id="gvuoto" style="color:#6b6a65;font-size:12px;margin-top:8px"></div>
+  <img id="gimg" style="margin-top:10px;max-width:100%;border:1px solid #e2e2de;border-radius:6px;display:none">
+</div>
+
 <div class="box" style="margin-top:14px"><h2>Log della DAQ</h2><pre id="log"></pre></div>
 <div class="box" style="margin-top:14px"><h2>Ultime azioni</h2><div id="azioni" class="az"></div></div>
 <p style="color:#6b6a65;font-size:12px">Grafici e DQM: <a id="mon" href="#">monitor</a></p>
@@ -1043,6 +1086,10 @@ async function aggiorna(){
     : [["", "nessuna run in corso"]]);
 
   const sc = s.scan;
+  // Appena uno scan finisce compare il suo grafico, senza doverlo chiedere:
+  // e' il momento in cui lo si vuole guardare.
+  if(window._scanPrima && !sc) caricaGrafici();
+  window._scanPrima = !!sc;
   $("scanstato").innerHTML = sc
     ? `<span class="stato corso">SCAN IN CORSO</span>
        <span style="margin-left:12px;color:#52514e">${sc.etichetta} &middot;
@@ -1263,6 +1310,43 @@ $("sstop").onclick = async () => {
   aggiorna();
 };
 
+// --- grafici --------------------------------------------------------------
+function mostraGrafico(){
+  const nome = $("gsel").value;
+  if(!nome){ $("gimg").style.display = "none"; return; }
+  // Il parametro t serve solo a non far ripescare al browser la versione
+  // precedente: uno scan rifatto produce un file nuovo con lo stesso nome.
+  const url = "/grafico?nome=" + encodeURIComponent(nome) +
+              "&token=" + TOKEN + "&t=" + Date.now();
+  $("gimg").src = url;
+  $("gimg").style.display = "block";
+  $("gapri").href = url;
+}
+
+async function caricaGrafici(){
+  let d;
+  try{ d = await (await fetch("/api/grafici?token=" + TOKEN)).json(); }
+  catch(e){ return; }
+  const g = d.grafici || [];
+  const scelto = $("gsel").value;
+  $("gsel").innerHTML = g.map(x => {
+    const q = new Date(x.quando * 1000).toLocaleString();
+    return `<option value="${x.nome}">${x.nome}  —  ${q}</option>`;
+  }).join("");
+  $("gvuoto").textContent = g.length ? "" :
+    "Nessun grafico in plots/. Ne compare uno appena finisce uno scan.";
+  if(g.length){
+    $("gsel").value = g.some(x => x.nome === scelto) ? scelto : g[0].nome;
+    mostraGrafico();
+  }else{
+    $("gimg").style.display = "none";
+  }
+}
+
+$("gsel").onchange = mostraGrafico;
+$("ggo").onclick = caricaGrafici;
+
+caricaGrafici();
 caricaConfig();
 aggiorna();
 setInterval(aggiorna, 2000);
@@ -1296,6 +1380,29 @@ def crea_handler(ctrl, token):
             qs = urllib.parse.parse_qs(parti.query)
             if parti.path == "/":
                 return self._manda(200, "text/html; charset=utf-8", PAGINA.encode())
+            if parti.path == "/api/grafici":
+                if not self._autorizzato(qs):
+                    return self._json({"errore": "token mancante o sbagliato"}, 403)
+                return self._json({"grafici": elenco_grafici()})
+
+            if parti.path == "/grafico":
+                if not self._autorizzato(qs):
+                    return self._manda(403, "text/plain", b"token")
+                percorso = percorso_grafico(qs.get("nome", [""])[0])
+                if not percorso:
+                    return self._manda(404, "text/plain", b"non trovato")
+                with open(percorso, "rb") as f:
+                    dati = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(dati)))
+                # I grafici vengono rifatti con lo stesso nome quando si
+                # ripete uno scan: senza questo il browser mostrerebbe quello
+                # vecchio convinto di avere ragione.
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return self.wfile.write(dati)
+
             if parti.path in ("/api/stato", "/api/config"):
                 if not self._autorizzato(qs):
                     return self._json({"errore": "token mancante o sbagliato"}, 403)

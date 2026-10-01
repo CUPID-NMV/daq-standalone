@@ -201,6 +201,34 @@ def coerenza(d):
         avvisi.append("Ne self-trigger ne trigger esterno: resterebbe solo il "
                       "trigger software, e la run non acquisirebbe niente da sola.")
 
+    # Due sorgenti accese insieme sono previste dalla board e vanno in OR: non
+    # e' un errore. Ma negli eventi non resta scritto QUALE ha fatto scattare
+    # il trigger, quindi da quel momento ogni rate misurato e' il rate dell'OR
+    # e non si puo' piu' attribuire. E' la stessa ragione per cui lo scan del
+    # V812 si rifiuta di partire col self-trigger acceso.
+    if self_on and est_on:
+        chi = "il CFD, che entra da TRG-IN" if c.get("Enabled") else "il TRG-IN"
+        avvisi.append("Self-trigger e %s sono accesi insieme: le due sorgenti vanno "
+                      "in OR. E' legittimo, ma nell'evento non resta traccia di quale "
+                      "abbia triggerato, quindi ogni rate misurato e' quello dell'OR. "
+                      "Per misurarne una sola, spegni l'altra." % chi)
+
+    # TRG-OUT in modo "self" prende la maschera dai soli gruppi del
+    # self-trigger: col self-trigger spento il connettore resta muto, e uno
+    # scaler attaccato li' legge zero mentre la DAQ sta acquisendo.
+    tout = str(g.get("TriggerOut", "default"))
+    if tout == "self" and not self_on:
+        avvisi.append("TriggerOut = \"self\" ma il self-trigger e' spento: su TRG-OUT "
+                      "non uscira' niente. Serve \"all\" per vedere anche i trigger "
+                      "esterni e software.")
+
+    # TailCut scarta i campioni finali: se arriva a mangiarsi tutto l'evento,
+    # la run scrive forme d'onda di lunghezza zero.
+    rl0, tc = g.get("RecordLength"), g.get("TailCut")
+    if isinstance(rl0, int) and isinstance(tc, int) and tc >= rl0:
+        errori.append("TailCut (%d) scarterebbe tutti i %d campioni dell'evento: "
+                      "non resterebbe niente da salvare." % (tc, rl0))
+
     if self_on:
         sch = lista(g.get("SelfTriggerChannels")) or canali
         fuori = [x for x in sch if x not in canali]

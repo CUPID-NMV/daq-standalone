@@ -150,7 +150,10 @@ SelfTriggerThreshold = [2000]
 SelfTriggerThresholdOffset = 100
 
 
-# Polarità segnale in ingresso (es: impulsi positivi = 0, negativi = 1)
+# NOTA: PulsePolarity NON e' letto dal codice. Viene caricato dal TOML nel
+# costruttore di Digitizer e poi non usato da nessuna parte: il fronte di
+# discriminazione lo decide TriggerPolarity, qui sopra. Cambiarlo non ha
+# effetto, come per ConnectionType, LinkNumber, ExtTriggerMode e Duration.
 PulsePolarity   = 0
 
 # Soglie per il salvataggio eventi

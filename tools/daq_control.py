@@ -207,7 +207,7 @@ def coerenza(d):
     # e non si puo' piu' attribuire. E' la stessa ragione per cui lo scan del
     # V812 si rifiuta di partire col self-trigger acceso.
     if self_on and est_on:
-        chi = "il CFD, che entra da TRG-IN" if c.get("Enabled") else "il TRG-IN"
+        chi = "TRG-IN, dove arriva il CFD," if c.get("Enabled") else "TRG-IN"
         avvisi.append("Self-trigger e %s sono accesi insieme: le due sorgenti vanno "
                       "in OR. E' legittimo, ma nell'evento non resta traccia di quale "
                       "abbia triggerato, quindi ogni rate misurato e' quello dell'OR. "

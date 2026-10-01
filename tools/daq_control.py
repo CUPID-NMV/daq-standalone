@@ -371,7 +371,15 @@ class Controllo:
             except Exception as e:
                 return False, "La modifica produrrebbe un TOML non valido: %s" % e, []
 
-            backup = "%s.bak-pagina-%s" % (self.toml, time.strftime("%Y%m%d-%H%M%S"))
+            # Il nome deve essere unico anche per due salvataggi nello stesso
+            # secondo: con la sola ora, il secondo backup sovrascriveva il
+            # primo e si perdeva proprio la versione da cui si voleva tornare
+            # indietro. E' successo alla prima prova.
+            base = "%s.bak-pagina-%s" % (self.toml, time.strftime("%Y%m%d-%H%M%S"))
+            backup, n = base, 1
+            while os.path.exists(backup):
+                backup = "%s.%d" % (base, n)
+                n += 1
             try:
                 io.open(backup, "w", encoding="utf-8").write(testo)
                 io.open(self.toml, "w", encoding="utf-8").write(nuovo)

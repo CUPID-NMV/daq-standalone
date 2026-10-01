@@ -165,7 +165,7 @@ def fig_efficienza(cal, seg, out):
     ax.axhline(50, color="#999", lw=.8, ls=":")
     ax.set_xlabel("threshold / pulse amplitude  [x1000]")
     ax.set_ylabel("efficiency  [%]")
-    ax.set_title("Normalised to amplitude: curves split by sampling rate, not by amplitude",
+    ax.set_title("Normalised to amplitude: curves split by rate, not by amplitude",
                  fontsize=11)
     ax.set_ylim(-2, 105)
     ax.grid(alpha=.3); ax.legend(fontsize=8.5)

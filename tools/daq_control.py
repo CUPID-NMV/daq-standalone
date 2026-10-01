@@ -191,10 +191,26 @@ class Controllo:
         righe = [r for r in testo.replace("\r", "\n").split("\n") if r.strip()]
         return righe[-n:]
 
+    def testa_log(self, n=300):
+        """Prime righe del log. Il file viene troncato a ogni avvio, quindi
+        l'inizio e' l'inizio di QUESTA run."""
+        try:
+            with open(self.log_path, "rb") as f:
+                testo = f.read(200000).decode("utf-8", "replace")
+        except OSError:
+            return []
+        testo = ANSI.sub("", testo)
+        return [r for r in testo.replace("\r", "\n").split("\n") if r.strip()][:n]
+
     def eventi_correnti(self):
-        """(decodificati, richiesti, file) dall'ultima riga di avanzamento."""
+        """(decodificati, richiesti, file) dal log della run.
+
+        Il contatore si legge in coda, il nome del file in testa: quella riga
+        la DAQ la stampa una volta sola all'avvio, e cercarla in fondo
+        funzionava solo finche' la run era giovane. Dopo qualche centinaio di
+        eventi era scorsa fuori dalla finestra e il nome spariva dalla pagina.
+        """
         eventi = richiesti = None
-        runfile = None
         for riga in self.coda_log(400):
             if "Events decoded:" in riga:
                 try:
@@ -202,6 +218,9 @@ class Controllo:
                     eventi, richiesti = int(a), int(b)
                 except (ValueError, IndexError):
                     pass
+
+        runfile = None
+        for riga in self.testa_log():
             if "HDF5 output path selected:" in riga:
                 runfile = riga.split("HDF5 output path selected:")[1].strip()
         return eventi, richiesti, runfile

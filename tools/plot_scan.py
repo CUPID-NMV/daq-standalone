@@ -94,6 +94,13 @@ def main():
         col, mk, ls = COLORE[tipo], MARKER[tipo], TRATTO[tipo]
         visti.append(tipo)
 
+        # I punti stanno nel JSON nell'ordine in cui sono stati misurati, che
+        # non e' detto sia crescente in soglia: gli scan a volte ripetono un
+        # punto in fondo per verificare la riproducibilita'. Senza riordinare,
+        # la spezzata torna indietro e sembra un secondo ramo della curva.
+        ordine = np.argsort(x)
+        x, y, lim = x[ordine], y[ordine], lim[ordine]
+
         vis = ~lim
         if vis.any():
             ax.semilogy(x[vis], np.maximum(y[vis], 1e-3), marker=mk, ls=ls, ms=8,

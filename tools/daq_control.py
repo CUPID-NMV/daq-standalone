@@ -54,6 +54,27 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BINARIO = os.path.join(ROOT, "build", "main", "DAQ-WC")
 AZIONI = os.path.join(ROOT, "data", "azioni.jsonl")
 
+# Stato dello scan in corso. Sta su file e non in memoria come tutto il resto:
+# riavviare il controllore mentre uno scan va avanti non deve perderne le
+# tracce, e un processo che nessuno sorveglia piu' e' peggio di nessun processo.
+SCAN_STATO = os.path.join(ROOT, "data", "scan-in-corso.json")
+SCAN_LOG = os.path.join(ROOT, "data", "scan-console.log")
+
+SCAN = {
+    "v1742": {
+        "script": os.path.join(ROOT, "tools", "scan_v1742.sh"),
+        "etichetta": "self-trigger V1742",
+        "opzione": "-o",
+        "serve_run": True,   # cambia le soglie a caldo: la run deve esserci
+    },
+    "v812": {
+        "script": os.path.join(ROOT, "tools", "scan_v812.sh"),
+        "etichetta": "CFD V812",
+        "opzione": "-t",
+        "serve_run": False,  # ogni punto e' una run sua: la DAQ deve essere ferma
+    },
+}
+
 # ---------------------------------------------------------------------------
 #  Quali chiavi si possono cambiare dalla pagina
 #
@@ -343,6 +364,36 @@ def trova_daq():
     return None
 
 
+def trova_scan():
+    """Lo scan in corso, oppure None.
+
+    Non basta che il pid esista: dopo un riavvio della macchina quel numero
+    puo' essere di tutt'altro processo. Si controlla che la riga di comando
+    contenga ancora lo script, che e' l'unico modo onesto di riconoscerlo --
+    uno script di shell non ha un eseguibile proprio da leggere in /proc, al
+    contrario della DAQ.
+    """
+    try:
+        with open(SCAN_STATO) as f:
+            s = json.load(f)
+    except (OSError, ValueError):
+        return None
+    try:
+        with open("/proc/%d/cmdline" % s["pid"], "rb") as f:
+            riga = f.read().decode("utf-8", "replace")
+    except (OSError, KeyError, TypeError):
+        riga = ""
+    if s.get("script") and s["script"] in riga:
+        return s
+    # Finito o sparito: si toglie di mezzo, se no la pagina direbbe per sempre
+    # che c'e' uno scan in corso.
+    try:
+        os.remove(SCAN_STATO)
+    except OSError:
+        pass
+    return None
+
+
 def avvio_processo(pid):
     """Istante di avvio del processo, in secondi epoch."""
     try:
@@ -614,9 +665,20 @@ class Controllo:
 
     def stato(self):
         pid = trova_daq()
+        scan = trova_scan()
         s = {"in_corso": pid is not None, "pid": pid,
              "config": self.config(), "log": self.coda_log(25),
-             "azioni": ultime_azioni(), "adesso": time.time()}
+             "azioni": ultime_azioni(), "adesso": time.time(),
+             "scan": None}
+        if scan:
+            s["scan"] = {
+                "tipo": scan["tipo"],
+                "etichetta": SCAN[scan["tipo"]]["etichetta"],
+                "valori": scan.get("valori"),
+                "secondi": scan.get("secondi"),
+                "da_secondi": round(time.time() - scan.get("avviato", time.time()), 1),
+                "log": self.coda_scan(),
+            }
         if pid:
             avvio = avvio_processo(pid)
             s["da_secondi"] = round(time.time() - avvio, 1) if avvio else None
@@ -643,9 +705,109 @@ class Controllo:
         de = self.storia[-1][1] - self.storia[0][1]
         return round(de / dt, 2) if dt > 0.5 else None
 
+    # -- scan --------------------------------------------------------------
+    def coda_scan(self, n=30):
+        try:
+            with open(SCAN_LOG, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                f.seek(max(0, f.tell() - 40000))
+                return righe_terminale(f.read().decode("utf-8", "replace"))[-n:]
+        except OSError:
+            return []
+
+    def avvia_scan(self, tipo, valori, secondi):
+        """Lancia uno scan. I due hanno prerequisiti OPPOSTI, e la pagina deve
+        dirlo chiaro invece di limitarsi a fallire: quello del V1742 cambia le
+        soglie a caldo e vuole una run gia' in corso, quello del V812 fa una
+        run per punto e vuole la DAQ ferma."""
+        with self.lock:
+            if tipo not in SCAN:
+                return False, "Scan sconosciuto: %s" % tipo
+            if trova_scan():
+                return False, "C'e' gia' uno scan in corso."
+            spec = SCAN[tipo]
+
+            in_corso = trova_daq() is not None
+            if spec["serve_run"] and not in_corso:
+                return False, ("Lo scan del self-trigger cambia le soglie a run in "
+                               "corso: la run va avviata prima.")
+            if not spec["serve_run"] and in_corso:
+                return False, ("Lo scan del CFD fa una run per ogni punto: ferma "
+                               "prima quella in corso.")
+
+            # I valori finiscono in argv, mai in una shell, ma si controllano
+            # lo stesso: un carattere strano qui sarebbe un refuso, non un
+            # attacco, e vale la pena dirlo subito invece di farlo scoprire
+            # allo script.
+            pezzi = [x for x in str(valori).replace(",", " ").split() if x]
+            if not pezzi:
+                return False, "Non hai indicato nessun valore da provare."
+            for x in pezzi:
+                try:
+                    float(x)
+                except ValueError:
+                    return False, "'%s' non e' un numero." % x
+            try:
+                sec = float(secondi)
+                if not 1 <= sec <= 3600:
+                    raise ValueError
+            except (TypeError, ValueError):
+                return False, "I secondi per punto devono stare fra 1 e 3600."
+
+            try:
+                log = open(SCAN_LOG, "wb")
+            except OSError as e:
+                return False, "Non riesco a scrivere %s: %s" % (SCAN_LOG, e)
+            try:
+                proc = subprocess.Popen(
+                    ["bash", spec["script"], spec["opzione"], " ".join(pezzi),
+                     "-s", str(int(sec))],
+                    cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL, start_new_session=True)
+            except OSError as e:
+                return False, "Avvio fallito: %s" % e
+            finally:
+                log.close()
+
+            stato = {"pid": proc.pid, "pgid": proc.pid, "tipo": tipo,
+                     "script": spec["script"], "valori": " ".join(pezzi),
+                     "secondi": sec, "avviato": time.time()}
+            try:
+                with open(SCAN_STATO, "w") as f:
+                    json.dump(stato, f)
+            except OSError:
+                pass
+            return True, "Scan %s avviato su %d punti." % (spec["etichetta"], len(pezzi))
+
+    def ferma_scan(self):
+        """SIGTERM al GRUPPO, mai KILL.
+
+        Il gruppo perche' lo scan ha figli -- la DAQ di ogni punto -- e vanno
+        fermati anche loro. SIGTERM perche' e' quello che fa scattare il trap
+        dello script, che rimette a posto il TOML, e che fa chiudere la DAQ
+        per la porta buona. Un kill -9 lascerebbe il tuo file con la soglia
+        dell'ultimo punto e un HDF5 a meta'.
+        """
+        with self.lock:
+            s = trova_scan()
+            if not s:
+                return False, "Non c'e' nessuno scan in corso."
+            try:
+                os.killpg(s["pgid"], signal.SIGTERM)
+            except OSError as e:
+                return False, "Segnale fallito: %s" % e
+            for i in range(80):
+                time.sleep(0.5)
+                if not trova_scan():
+                    return True, ("Scan interrotto in %.1f s. Il TOML e' stato "
+                                  "ripristinato dallo script." % ((i + 1) * 0.5))
+            return False, "Lo scan non risponde da 40 s."
+
     # -- azioni ------------------------------------------------------------
     def avvia(self):
         with self.lock:
+            if trova_scan():
+                return False, "C'e' uno scan in corso: e' lui che comanda la DAQ."
             if trova_daq():
                 return False, "C'e' gia' una DAQ in esecuzione."
             if not os.path.exists(BINARIO):
@@ -678,6 +840,9 @@ class Controllo:
 
     def ferma(self):
         with self.lock:
+            if trova_scan():
+                return False, ("C'e' uno scan in corso: fermare la singola run lo "
+                               "lascerebbe a meta'. Usa Ferma scan.")
             pid = trova_daq()
             if not pid:
                 return False, "Non c'e' nessuna DAQ in esecuzione."
@@ -774,6 +939,30 @@ PAGINA = r"""<!doctype html>
   <div class="box"><h2>Run in corso</h2><table id="run"></table></div>
 </div>
 
+<div class="box" style="margin-top:14px"><h2>Scan in soglia</h2>
+  <div id="scanstato" style="margin-bottom:10px"></div>
+  <div style="display:flex;gap:22px;flex-wrap:wrap">
+    <div>
+      <div style="font-size:12px;color:#6b6a65;margin-bottom:4px">self-trigger V1742 &mdash; offset</div>
+      <input id="s1val" value="3 4 5 6 8 10" style="width:170px">
+      <input id="s1sec" value="20" style="width:52px" title="secondi per punto">
+      <button id="s1go" style="background:#2a78d6;color:#fff">Avvia</button>
+      <div style="font-size:11px;color:#6b6a65;margin-top:3px">cambia le soglie a caldo: serve una run gia' in corso</div>
+    </div>
+    <div>
+      <div style="font-size:12px;color:#6b6a65;margin-bottom:4px">CFD V812 &mdash; soglie [mV]</div>
+      <input id="s2val" value="5 7 10 15 20 30" style="width:170px">
+      <input id="s2sec" value="60" style="width:52px" title="secondi per punto">
+      <button id="s2go" style="background:#eb6834;color:#fff">Avvia</button>
+      <div style="font-size:11px;color:#6b6a65;margin-top:3px">una run per ogni punto: la DAQ deve essere ferma</div>
+    </div>
+    <div style="margin-left:auto;align-self:flex-end">
+      <button id="sstop" style="background:#a8321f;color:#fff">Ferma scan</button>
+    </div>
+  </div>
+  <pre id="scanlog" style="margin-top:12px;display:none"></pre>
+</div>
+
 <div class="box" style="margin-top:14px"><h2>Log della DAQ</h2><pre id="log"></pre></div>
 <div class="box" style="margin-top:14px"><h2>Ultime azioni</h2><div id="azioni" class="az"></div></div>
 <p style="color:#6b6a65;font-size:12px">Grafici e DQM: <a id="mon" href="#">monitor</a></p>
@@ -836,6 +1025,19 @@ async function aggiorna(){
        ["rate (ultimi 30 s)", s.rate === null ? "in attesa" : s.rate + " Hz"],
        ["in corso da", s.da_secondi === null ? "—" : Math.round(s.da_secondi) + " s"]]
     : [["", "nessuna run in corso"]]);
+
+  const sc = s.scan;
+  $("scanstato").innerHTML = sc
+    ? `<span class="stato corso">SCAN IN CORSO</span>
+       <span style="margin-left:12px;color:#52514e">${sc.etichetta} &middot;
+       punti: ${sc.valori} &middot; ${sc.secondi} s ciascuno &middot;
+       da ${Math.round(sc.da_secondi)} s</span>`
+    : '<span style="color:#6b6a65">nessuno scan in corso</span>';
+  $("s1go").disabled = !!sc || !s.in_corso;
+  $("s2go").disabled = !!sc || s.in_corso;
+  $("sstop").disabled = !sc;
+  $("scanlog").style.display = sc ? "block" : "none";
+  if(sc) $("scanlog").textContent = (sc.log || []).join("\n");
 
   $("log").textContent = (s.log || []).join("\n");
   $("azioni").innerHTML = (s.azioni || []).slice().reverse().map(a =>
@@ -1014,6 +1216,37 @@ $("applica").onclick = async () => {
   }catch(e){ msg("Richiesta fallita: " + e, false); }
 };
 
+// --- scan -----------------------------------------------------------------
+async function avviaScan(tipo, idval, idsec, nome){
+  const v = $(idval).value.trim(), s = $(idsec).value.trim();
+  const n = v.split(/[\s,]+/).filter(x => x !== "").length;
+  if(!confirm("Avviare lo scan " + nome + "?\n\n" + n + " punti da " + s +
+              " s: circa " + Math.round(n * s / 60) + " minuti.\n\n" +
+              (tipo === "v812"
+                ? "Il TOML viene modificato a ogni punto e rimesso a posto alla fine."
+                : "Le soglie della run in corso cambiano a ogni punto."))) return;
+  try{
+    const q = new URLSearchParams({tipo: tipo, valori: v, secondi: s,
+                                   chi: $("chi").value, token: TOKEN});
+    const d = await (await fetch("/api/scan/avvia?" + q, {method: "POST"})).json();
+    msg(d.messaggio, d.esito);
+  }catch(e){ msg("Richiesta fallita: " + e, false); }
+  aggiorna();
+}
+
+$("s1go").onclick = () => avviaScan("v1742", "s1val", "s1sec", "del self-trigger");
+$("s2go").onclick = () => avviaScan("v812",  "s2val", "s2sec", "del CFD");
+$("sstop").onclick = async () => {
+  if(!confirm("Fermare lo scan?\n\nLo script rimette a posto il TOML e la run " +
+              "in corso viene chiusa regolarmente.")) return;
+  try{
+    const q = new URLSearchParams({chi: $("chi").value, token: TOKEN});
+    const d = await (await fetch("/api/scan/ferma?" + q, {method: "POST"})).json();
+    msg(d.messaggio, d.esito);
+  }catch(e){ msg("Richiesta fallita: " + e, false); }
+  aggiorna();
+};
+
 caricaConfig();
 aggiorna();
 setInterval(aggiorna, 2000);
@@ -1087,6 +1320,16 @@ def crea_handler(ctrl, token):
                              "; ".join("%s %s->%s" % (d["chiave"], d["da"], d["a"]) for d in diff))
                 elif not esito:
                     registra(chi, da, "config", "RIFIUTATA: " + messaggio)
+
+            elif parti.path == "/api/scan/avvia":
+                esito, messaggio = ctrl.avvia_scan(qs.get("tipo", [""])[0],
+                                                   qs.get("valori", [""])[0],
+                                                   qs.get("secondi", ["20"])[0])
+                registra(chi, da, "avvia scan", messaggio)
+
+            elif parti.path == "/api/scan/ferma":
+                esito, messaggio = ctrl.ferma_scan()
+                registra(chi, da, "ferma scan", messaggio)
 
             elif parti.path == "/api/soglie":
                 esito, messaggio = ctrl.soglie_a_caldo(qs.get("offsets", [""])[0])

@@ -25,6 +25,7 @@ Due principi, da non perdere strada facendo:
 
 import argparse
 import errno
+import re
 import json
 import os
 import signal
@@ -43,6 +44,9 @@ AZIONI = os.path.join(ROOT, "data", "azioni.jsonl")
 # risponde. Nelle prove esce in un secondo; trenta sono larghi apposta, perche'
 # la chiusura comprime il file e un file grosso ci mette.
 ATTESA_ARRESTO_S = 30
+
+# Sequenze di colore con cui la DAQ decora l'uscita.
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +172,12 @@ class Controllo:
         except OSError:
             return []
         # Il contatore di eventi usa \r per riscrivere la stessa riga: senza
-        # convertirlo si vedrebbe una riga sola lunga chilometri.
+        # convertirlo si vedrebbe una riga sola lunga chilometri. E la DAQ
+        # colora l'uscita, quindi vanno tolte le sequenze ANSI: altrimenti
+        # finiscono nel <pre> della pagina come caratteri strani, e peggio
+        # ancora si attaccano in coda ai valori estratti da qui, tipo il nome
+        # del file della run.
+        testo = ANSI.sub("", testo)
         righe = [r for r in testo.replace("\r", "\n").split("\n") if r.strip()]
         return righe[-n:]
 

@@ -1492,6 +1492,12 @@ void Digitizer::ConfigureTrigger() {
 // =======================================================================
 //  ACQUIRE EVENTS
 // =======================================================================
+// Girandola del contatore: avanza di un passo a ogni evento, sulla stessa
+// riga. E' il modo piu' economico di distinguere "la DAQ sta aspettando un
+// trigger" da "la DAQ e' piantata", che con un rate di pochi hertz a occhio
+// nudo si somigliano parecchio.
+static const char kGirandola[4] = { '|', '/', '-', '\\' };
+
 void Digitizer::AcquireEvents() {
     if (!fBuffer || !fVoidEvent) {
         Log::OutError("AcquireEvents called before InitAcquisition().");
@@ -1675,7 +1681,8 @@ void Digitizer::AcquireEvents() {
                 }
             }
 
-            std::cout << "\r→ Events decoded: "
+            std::cout << "\r" << kGirandola[(totalEvents + 1) & 3]
+                      << " Events decoded: "
                       << std::setw(6) << (totalEvents + 1)
                       << "/" << maxEvents << std::flush;
 
@@ -1895,7 +1902,8 @@ void Digitizer::AcquireTransparent()
             }
         }
 
-        std::cout << "\r→ Transparent events: " << std::setw(6) << written
+        std::cout << "\r" << kGirandola[written & 3]
+                  << " Transparent events: " << std::setw(6) << written
                   << "/" << fTransparentDumpEvents << std::flush;
 
         // Trigger software ravvicinati campionerebbero sempre la stessa fase

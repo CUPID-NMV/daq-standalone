@@ -134,6 +134,12 @@ Digitizer::Digitizer()
     fThresholdGen       = 0;
     fThresholdGenRow    = 0;
 
+    // Nel corpo e non nella lista di inizializzazione: la lista segue
+    // l'ordine di dichiarazione e aggiungerci membri in mezzo fa scattare
+    // -Wreorder, che qui sarebbe rumore inutile.
+    fHasCFD  = false;
+    fCFDBase = 0;
+
     // ===== Read ChannelList dal TOML =====
     std::vector<int64_t> tmpchlist =
         fConfig.GetEntryList<int64_t>("digitizer","ChannelList",-1,0);
@@ -364,6 +370,18 @@ void Digitizer::Close() {
 // =============================================================
 //  SELECT BOARD
 // =============================================================
+void Digitizer::SetCFDInfo( uint32_t base,
+                            const std::vector<int64_t>& channels,
+                            const std::vector<int64_t>& thresholdsMv )
+{
+    fHasCFD  = true;
+    fCFDBase = base;
+    fCFDChannels.clear();
+    fCFDThresholdMv.clear();
+    for( auto ch : channels )       fCFDChannels.push_back( static_cast<uint32_t>(ch) );
+    for( auto th : thresholdsMv )   fCFDThresholdMv.push_back( static_cast<uint32_t>(th) );
+}
+
 bool Digitizer::UsesVMEBridge() const
 {
     return fConnectionType == CAEN_DGTZ_ETH_V4718 ||
@@ -2181,6 +2199,22 @@ void Digitizer::PrepareOutput() {
             header.createAttribute("SelfTriggerThreshold",
                                    H5::PredType::NATIVE_UINT, dspace)
                   .write(H5::PredType::NATIVE_UINT, thr.data());
+        }
+
+        // Il CFD esterno, quando c'e': senza queste righe in analisi non si sa
+        // a che soglia e' stato preso il dato, e i registri del V812 sono
+        // write-only, quindi non e' recuperabile a posteriori dal modulo.
+        if (fHasCFD && !fCFDChannels.empty()) {
+            header.createAttribute("CFDBaseAddress", H5::PredType::NATIVE_UINT,
+                                   H5::DataSpace())
+                  .write(H5::PredType::NATIVE_UINT, &fCFDBase);
+
+            hsize_t dim = fCFDChannels.size();
+            H5::DataSpace dspace(1, &dim);
+            header.createAttribute("CFDChannels", H5::PredType::NATIVE_UINT, dspace)
+                  .write(H5::PredType::NATIVE_UINT, fCFDChannels.data());
+            header.createAttribute("CFDThresholdMv", H5::PredType::NATIVE_UINT, dspace)
+                  .write(H5::PredType::NATIVE_UINT, fCFDThresholdMv.data());
         }
 
         if (!fChannelList.empty()) {

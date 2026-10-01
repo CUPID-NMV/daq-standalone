@@ -12,6 +12,7 @@ find_package(HDF5 REQUIRED COMPONENTS C CXX)
 add_library(daqcomponents
     Digitizer.cpp
     Bridge.cpp
+    CFD.cpp
 )
 
 # ---------------------------------------------------------------

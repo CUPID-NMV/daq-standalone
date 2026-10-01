@@ -188,6 +188,66 @@ OutputFile      = "WC_proto"
 [bridge]
 # Usato solo quando il collegamento passa da un bridge VME (ETH_V4718).
 IPAddress = "192.168.99.105"
+
+# ===========================================================================
+#  [cfd]  Discriminatore a frazione costante CAEN V812 (16 canali, VME)
+#
+#  Modulo FACOLTATIVO. Commentare l'intera sezione, o mettere Enabled = false,
+#  e la DAQ non tocca il bus e non stampa niente: si torna esattamente al
+#  comportamento di prima.
+#
+#  A cosa serve: genera il trigger dall'OR dei canali sopra soglia, come
+#  alternativa al self-trigger del V1742. Il vantaggio e' che discrimina il
+#  segnale VERO del rivelatore, quindi la soglia si mette in millivolt con
+#  passo di 1 mV, senza l'attenuazione del Transparent Mode e senza la
+#  calibrazione che dipende dalla larghezza dell'impulso.
+#
+#  Cablaggio: uscita OR del V812 (LEMO, NIM, 50 ohm) nel TRG-IN del V1742,
+#  poi ExternalTrigger = true. Per usarlo AL POSTO del self-trigger mettere
+#  anche SelfTrigger = false; tenendoli entrambi accesi le due sorgenti vanno
+#  in OR, che e' utile per confrontarle ma non per misurare l'efficienza.
+#
+#  Gli ingressi del V812 sono terminati a 50 ohm e non bridgiati: il modulo si
+#  mangia il segnale. Serve uno splitter per mandare la stessa uscita del PMT
+#  sia qui sia al digitizer.
+#
+#  ATTENZIONE: il V812 e' uno slave VME e ha bisogno del V4718 per essere
+#  programmato. Con Connection = "USB_A4818" la fibra va dritta al digitizer e
+#  sul bus non c'e' nessun master: in quel caso la DAQ si ferma con un errore
+#  esplicito invece di partire con soglie non scritte.
+# ===========================================================================
+# [cfd]
+# Enabled     = true
+#
+# # Indirizzo impostato sui rotary switch del modulo. OBBLIGATORIO: non ha un
+# # default, e sbagliarlo si manifesterebbe come "il trigger non arriva".
+# # All'avvio la DAQ rilegge gli identificativi del modulo e si ferma se a
+# # quell'indirizzo non c'e' un V812.
+# BaseAddress = 0x33330000
+# AddressModifier = "A32"      # oppure "A24"
+#
+# # Ingressi del V812 collegati. Tutti gli altri vengono messi alla soglia piu'
+# # alta E disabilitati: all'accensione i registri del modulo sono indeterminati
+# # (manuale §4.2) e un ingresso scollegato ma attivo puo' sporcare l'OR.
+# Channels    = [0, 1]
+#
+# # Soglie in mV, una per canale (l'ultima si replica sui rimanenti). Il valore
+# # e' il modulo: il segnale e' negativo, 20 significa -20 mV. Ammesse da 5 a
+# # 255; sotto i -5 mV il manuale non garantisce niente.
+# Threshold   = [20, 20]
+#
+# # Larghezza dell'impulso di uscita e tempo morto, in CONTEGGI grezzi (0-255),
+# # non in nanosecondi: CAEN da' solo gli estremi (12-206 ns la larghezza,
+# # 118-1625 ns il tempo morto) e dichiara la relazione non lineare, quindi una
+# # conversione in ns sarebbe precisione inventata. Fra l'altro il manuale si
+# # contraddice da solo sulla larghezza (§3.4 contro §2.4.2): va misurata.
+# # Il tempo morto effettivo e' il maggiore fra i due.
+# Width       = 0
+# DeadTime    = 0
+#
+# # Livello di maggioranza: 1 = OR. Conta solo per l'uscita MAJ, non per l'OR,
+# # ma va scritto comunque perche' all'accensione il registro e' indeterminato.
+# Majority    = 1
 [settings]
 # Quanto la DAQ stampa A SCHERMO. Il file di log accanto ai dati riceve
 # sempre tutto, qualunque sia questo valore: si puo' tenere il terminale

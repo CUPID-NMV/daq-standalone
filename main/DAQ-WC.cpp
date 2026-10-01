@@ -3,6 +3,7 @@
 #include "Config.h"
 #include "Log.h"
 #include "Bridge.h"
+#include "CFD.h"
 #include "Digitizer.h"
 
 int main(int argc, char** argv)
@@ -39,6 +40,14 @@ int main(int argc, char** argv)
     const bool useBridge = digitizer.UsesVMEBridge();
     if (useBridge)
         bridge.Open();
+
+    // --- Discriminatore CFD V812, facoltativo ---
+    // Configurato subito dopo il bridge, prima della lunga messa a punto del
+    // digitizer: se l'indirizzo e' sbagliato conviene scoprirlo adesso.
+    // Senza la sezione [cfd] nel TOML non succede niente.
+    CFD cfd(theConfig, bridge);
+    cfd.Configure();
+
     digitizer.Configure();      // 2. Configurazione base (record length, gruppi, canali, offset, ecc.)
     digitizer.InitAcquisition();// 3. Allocazione buffer/evento
 
@@ -50,6 +59,11 @@ int main(int argc, char** argv)
     digitizer.ConfigureTrigger();
 
     // 6. Output HDF5 + acquisizione
+    // Le soglie del CFD finiscono nell'header solo se il modulo e' attivo:
+    // i file delle run senza CFD restano identici a prima.
+    if (cfd.Enabled())
+        digitizer.SetCFDInfo(cfd.BaseAddress(), cfd.Channels(), cfd.ThresholdsMv());
+
     digitizer.PrepareOutput();   // crea file HDF5, gruppo "/events" e "/config"
 
     if (digitizer.TransparentDumpRequested())

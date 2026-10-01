@@ -43,6 +43,13 @@ public:
     bool UsesVMEBridge() const;
     std::string LinkDescription() const;
 
+    // Soglie del CFD esterno, da scrivere nell'header HDF5. Chiamata da main
+    // solo quando il modulo e' attivo: senza CFD l'header resta quello di
+    // prima, cosi' i file vecchi e nuovi restano confrontabili.
+    void SetCFDInfo( uint32_t base,
+                     const std::vector<int64_t>& channels,
+                     const std::vector<int64_t>& thresholdsMv );
+
 private:
 
     // ===== === SAME ORDER AS CONSTRUCTOR === =====
@@ -171,6 +178,12 @@ private:
     bool        fTransparentDump;
     uint32_t    fTransparentDumpEvents;
     std::string fTransparentDumpTrigger;   // "software" oppure "self"
+
+    // ---- CFD ESTERNO (V812), solo per l'header ----
+    bool                  fHasCFD;
+    uint32_t              fCFDBase;
+    std::vector<uint32_t> fCFDChannels;
+    std::vector<uint32_t> fCFDThresholdMv;
 
     // ---- SOGLIE MODIFICABILI A RUN IN CORSO ----
     std::string fLiveThresholdPath;      // file di comando, riletto se cambia

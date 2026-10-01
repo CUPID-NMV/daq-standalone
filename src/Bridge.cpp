@@ -43,17 +43,19 @@ void Bridge::Close() {
     }
 }
 
-uint32_t Bridge::Read(uint32_t address) {
+uint32_t Bridge::Read(uint32_t address, CVAddressModifier am, CVDataWidth width) {
+    // Azzerato prima della lettura: con cvD16 la libreria scrive solo i due
+    // byte bassi, e i restanti resterebbero spazzatura.
     uint32_t data = 0;
-    CVErrorCodes ret = CAENVME_ReadCycle(fHandle, address, &data, cvA32_U_DATA, cvD32);
+    CVErrorCodes ret = CAENVME_ReadCycle(fHandle, address, &data, am, width);
     if (ret != cvSuccess) {
         throw std::runtime_error("Read error at address 0x" + ToHex(address) + ": " + CAENVME_DecodeError(ret));
     }
     return data;
 }
 
-void Bridge::Write(uint32_t address, uint32_t data) {
-    CVErrorCodes ret = CAENVME_WriteCycle(fHandle, address, &data, cvA32_U_DATA, cvD32);
+void Bridge::Write(uint32_t address, uint32_t data, CVAddressModifier am, CVDataWidth width) {
+    CVErrorCodes ret = CAENVME_WriteCycle(fHandle, address, &data, am, width);
     if (ret != cvSuccess) {
         throw std::runtime_error("Write error at address 0x" + ToHex(address) + ": " + CAENVME_DecodeError(ret));
     }

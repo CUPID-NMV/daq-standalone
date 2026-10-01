@@ -35,6 +35,7 @@ Due principi, da non perdere strada facendo:
 
 import argparse
 import errno
+import io
 import re
 import json
 import os
@@ -46,9 +47,109 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import tomledit
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BINARIO = os.path.join(ROOT, "build", "main", "DAQ-WC")
 AZIONI = os.path.join(ROOT, "data", "azioni.jsonl")
+
+# ---------------------------------------------------------------------------
+#  Quali chiavi si possono cambiare dalla pagina
+#
+#  Deliberatamente poche: quelle che si cambiano davvero fra una run e
+#  l'altra. Tutto il resto resta nel TOML, dove ha accanto il commento che
+#  spiega perche' vale quello che vale. Esporre ogni chiave vorrebbe dire
+#  trasformare la pagina in un editor peggiore di un editor.
+#
+#  (sezione, chiave, etichetta, tipo, dettagli)
+# ---------------------------------------------------------------------------
+CAMPI = [
+    ("digitizer", "SamplingRate",    "campionamento",      "scelta", ["5GHz", "2.5GHz", "1GHz"]),
+    ("digitizer", "RecordLength",    "campioni per evento", "intero", (1, 1024)),
+    ("digitizer", "PostTriggerSize", "post-trigger [%]",   "intero", (0, 100)),
+    ("digitizer", "NEvents",         "eventi da acquisire", "intero", (1, 10**9)),
+    ("digitizer", "TailCut",         "campioni finali scartati", "intero", (0, 200)),
+    ("digitizer", "ChannelList",     "canali registrati",  "lista",  (0, 31)),
+    ("digitizer", "Connection",      "collegamento",       "scelta", ["auto", "ETH_V4718", "USB_A4818"]),
+    ("digitizer", "DRS4Correction",  "correzioni DRS4",    "booleano", None),
+    ("digitizer", "OutputFile",      "prefisso dei file",  "testo",  None),
+
+    ("digitizer", "ExternalTrigger", "trigger esterno (TRG-IN)", "booleano", None),
+    ("digitizer", "SelfTrigger",     "self-trigger",       "booleano", None),
+    ("digitizer", "SelfTriggerMode", "modo del self-trigger", "scelta", ["paired", "global"]),
+    ("digitizer", "SelfTriggerChannels", "canali in self-trigger", "lista", (0, 31)),
+    ("digitizer", "SelfTriggerThresholdOffset", "offset di soglia", "lista", (0, 4095)),
+    ("digitizer", "TriggerOut",      "cosa esce da TRG-OUT", "scelta", ["self", "all", "off", "default"]),
+
+    ("cfd", "Enabled",   "CFD V812 attivo",     "booleano", None),
+    ("cfd", "Threshold", "soglie CFD [mV]",     "lista", (5, 255)),
+    ("cfd", "Channels",  "ingressi CFD usati",  "lista", (0, 15)),
+    ("cfd", "Width",     "larghezza uscita [conteggi]", "intero", (0, 255)),
+    ("cfd", "DeadTime",  "tempo morto [conteggi]",      "intero", (0, 255)),
+    ("cfd", "Majority",  "maggioranza (1 = OR)", "intero", (1, 20)),
+
+    ("settings", "verbosity", "verbosita' a schermo", "intero", (0, 4)),
+]
+
+# Chiavi che valgono SUBITO, senza riavviare la run. Sono le uniche: tutto il
+# resto la DAQ lo legge una volta sola all'avvio, e dirlo nella pagina evita
+# la domanda "ho cambiato il campionamento e non succede niente".
+A_CALDO = {("digitizer", "SelfTriggerThresholdOffset")}
+
+
+def _ui_da_toml(tipo, grezzo):
+    """Dal testo nel file a quello che si mostra nella casella."""
+    g = grezzo.strip()
+    if tipo in ("scelta", "testo"):
+        return g[1:-1] if len(g) >= 2 and g[0] in "\"'" and g[-1] == g[0] else g
+    if tipo == "lista":
+        return g[1:-1].strip() if g.startswith("[") else g
+    return g
+
+
+def _toml_da_ui(tipo, valore, dettagli, etichetta):
+    """Dalla casella al testo da scrivere nel file. Solleva ValueError."""
+    v = (valore or "").strip()
+    if tipo == "booleano":
+        if v not in ("true", "false"):
+            raise ValueError("%s: ammessi solo true e false" % etichetta)
+        return v
+    if tipo == "scelta":
+        if v not in dettagli:
+            raise ValueError("%s: ammessi %s" % (etichetta, ", ".join(dettagli)))
+        return '"%s"' % v
+    if tipo == "testo":
+        if '"' in v:
+            raise ValueError("%s: niente virgolette dentro il valore" % etichetta)
+        return '"%s"' % v
+    if tipo == "intero":
+        try:
+            n = int(v)
+        except ValueError:
+            raise ValueError("%s: ci vuole un numero intero" % etichetta)
+        lo, hi = dettagli
+        if not lo <= n <= hi:
+            raise ValueError("%s: fuori intervallo, ammessi da %d a %d" % (etichetta, lo, hi))
+        return str(n)
+    if tipo == "lista":
+        pezzi = [p for p in v.replace(",", " ").split() if p]
+        if not pezzi:
+            raise ValueError("%s: la lista e' vuota" % etichetta)
+        numeri = []
+        lo, hi = dettagli
+        for p in pezzi:
+            try:
+                n = float(p) if "." in p else int(p)
+            except ValueError:
+                raise ValueError("%s: '%s' non e' un numero" % (etichetta, p))
+            if not lo <= n <= hi:
+                raise ValueError("%s: %s fuori intervallo, ammessi da %d a %d"
+                                 % (etichetta, p, lo, hi))
+            numeri.append(p)
+        return "[" + ", ".join(numeri) + "]"
+    raise ValueError("tipo sconosciuto: %s" % tipo)
+
 
 # Quanto si aspetta che la DAQ chiuda dopo SIGTERM prima di dire che non
 # risponde. Nelle prove esce in un secondo; trenta sono larghi apposta, perche'
@@ -194,6 +295,122 @@ class Controllo:
                           "canali": c.get("Channels"),
                           "base": hex(c.get("BaseAddress", 0))}
         return out
+
+    # -- configurazione modificabile ---------------------------------------
+    def campi(self):
+        """Le chiavi modificabili, con il valore che hanno adesso nel file.
+
+        Il mtime torna insieme ai valori e va rimandato indietro quando si
+        salva: se nel frattempo il file e' cambiato -- un collega dalla stessa
+        pagina, o qualcuno con l'editor -- la scrittura viene rifiutata invece
+        di sovrascrivere in silenzio modifiche che non si sono viste.
+        """
+        try:
+            testo = io.open(self.toml, encoding="utf-8").read()
+            mtime = os.path.getmtime(self.toml)
+        except OSError as e:
+            return {"errore": str(e)}
+
+        presenti = tomledit.chiavi(testo)
+        fuori = []
+        for sezione, chiave, etichetta, tipo, dettagli in CAMPI:
+            grezzo = presenti.get((sezione, chiave))
+            fuori.append({
+                "sezione": sezione, "chiave": chiave, "etichetta": etichetta,
+                "tipo": tipo, "dettagli": dettagli,
+                "presente": grezzo is not None,
+                "valore": _ui_da_toml(tipo, grezzo) if grezzo is not None else "",
+                "a_caldo": (sezione, chiave) in A_CALDO,
+            })
+        return {"file": self.toml, "mtime": mtime, "campi": fuori}
+
+    def scrivi_config(self, modifiche, mtime_atteso):
+        """Applica le modifiche al TOML. Torna (esito, messaggio, diff).
+
+        Nessuna scrittura parziale: o si applica tutto o non si tocca niente.
+        """
+        with self.lock:
+            try:
+                testo = io.open(self.toml, encoding="utf-8").read()
+                mtime = os.path.getmtime(self.toml)
+            except OSError as e:
+                return False, "Non riesco a leggere %s: %s" % (self.toml, e), []
+
+            if mtime_atteso is not None and abs(mtime - float(mtime_atteso)) > 0.001:
+                return False, ("Il file e' cambiato da quando hai aperto la pagina. "
+                               "Ricarica e rifai le modifiche: non lo sovrascrivo."), []
+
+            spec = {(s, c): (e, t, d) for s, c, e, t, d in CAMPI}
+            richieste = []
+            for sezione, chiave, valore in modifiche:
+                if (sezione, chiave) not in spec:
+                    return False, "[%s] %s non e' modificabile da qui." % (sezione, chiave), []
+                etichetta, tipo, dettagli = spec[(sezione, chiave)]
+                try:
+                    richieste.append((sezione, chiave,
+                                      _toml_da_ui(tipo, valore, dettagli, etichetta)))
+                except ValueError as e:
+                    return False, str(e), []
+
+            try:
+                nuovo, diff = tomledit.sostituisci(testo, richieste)
+            except KeyError as e:
+                return False, str(e).strip("'"), []
+
+            if not diff:
+                return True, "Niente da cambiare.", []
+
+            # Il controllo che conta: il file che sto per scrivere e' ancora
+            # TOML valido? Se no non lo scrivo affatto, invece di scoprirlo al
+            # prossimo avvio della DAQ.
+            try:
+                import tomllib
+                tomllib.loads(nuovo)
+            except ImportError:
+                pass
+            except Exception as e:
+                return False, "La modifica produrrebbe un TOML non valido: %s" % e, []
+
+            backup = "%s.bak-pagina-%s" % (self.toml, time.strftime("%Y%m%d-%H%M%S"))
+            try:
+                io.open(backup, "w", encoding="utf-8").write(testo)
+                io.open(self.toml, "w", encoding="utf-8").write(nuovo)
+            except OSError as e:
+                return False, "Scrittura fallita: %s" % e, []
+
+            return True, "Salvato. Backup in %s" % os.path.basename(backup), diff
+
+    def soglie_a_caldo(self, offsets):
+        """Scrive il file di comando delle soglie del self-trigger.
+
+        E' l'unica cosa che ha effetto sulla run IN CORSO. Non tocca il TOML:
+        alla run successiva torna quello che c'e' scritto nel file, ed e'
+        voluto -- uno scan non deve lasciare residui.
+        """
+        if not trova_daq():
+            return False, "Non c'e' nessuna run in corso su cui applicarle."
+        canali = self.config().get("self_canali") or []
+        if not canali:
+            return False, "Il TOML non dichiara SelfTriggerChannels."
+        valori = [v for v in str(offsets).replace(",", " ").split() if v]
+        if len(valori) == 1:
+            valori = valori * len(canali)
+        if len(valori) != len(canali):
+            return False, ("Servono %d valori, uno per canale %s (oppure uno solo "
+                           "per tutti)." % (len(canali), canali))
+        try:
+            righe = "".join("%d %g\n" % (int(c), float(v)) for c, v in zip(canali, valori))
+        except ValueError:
+            return False, "Gli offset devono essere numeri."
+        percorso = os.path.join(os.path.dirname(self.log_path), "live-threshold.txt")
+        cfg = self.config().get("cartella_dati")
+        if cfg:
+            percorso = os.path.join(cfg, "live-threshold.txt")
+        try:
+            io.open(percorso, "w", encoding="utf-8").write(righe)
+        except OSError as e:
+            return False, "Non riesco a scrivere %s: %s" % (percorso, e)
+        return True, "Soglie applicate alla run in corso: %s" % righe.replace("\n", "  ").strip()
 
     # -- log ---------------------------------------------------------------
     def coda_log(self, n=25):
@@ -370,10 +587,21 @@ PAGINA = """<!doctype html>
 </div>
 
 <div class="riga">
-  <div class="box"><h2>Configurazione</h2><table id="cfg"></table>
-    <div style="margin-top:10px;font-size:12px;color:#6b6a65">
-      In sola lettura: per cambiarla si modifica il TOML. Le soglie del
-      self-trigger valgono subito, tutto il resto al prossimo avvio.
+  <div class="box" style="flex:2 1 520px"><h2>Configurazione</h2>
+    <div id="cfgfile" style="font-size:12px;color:#6b6a65;margin-bottom:8px"></div>
+    <div id="cfg"></div>
+    <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button id="salva" style="background:#2a78d6;color:#fff">Salva nel TOML</button>
+      <button id="ricarica" style="background:#ececea">Rileggi il file</button>
+      <span style="font-size:12px;color:#6b6a65">
+        vale dalla prossima run, tranne le voci segnate <b>a caldo</b>
+      </span>
+    </div>
+    <div style="margin-top:12px;padding-top:10px;border-top:1px solid #eee">
+      <label style="font-size:12px;color:#6b6a65">soglie self-trigger sulla run IN CORSO
+        <input id="caldo" placeholder="es. 5  oppure  4 6" style="width:110px">
+      </label>
+      <button id="applica" style="background:#ececea;margin-left:6px">Applica adesso</button>
     </div>
   </div>
   <div class="box"><h2>Run in corso</h2><table id="run"></table></div>
@@ -434,27 +662,6 @@ async function aggiorna(){
   $("avvia").disabled = s.in_corso;
   $("ferma").disabled = !s.in_corso;
 
-  const c = s.config || {};
-  if(c.errore){ tabella($("cfg"), [["errore", c.errore]]); }
-  else{
-    const f = [["file", (c.file||"").split("/").pop()],
-               ["campionamento", c.campionamento],
-               ["post-trigger", c.post_trigger + " %"],
-               ["canali", JSON.stringify(c.canali)],
-               ["eventi richiesti", c.eventi_richiesti],
-               ["trigger esterno", c.trigger_esterno ? "acceso" : "spento"],
-               ["self-trigger", c.self_trigger
-                   ? "acceso, offset " + JSON.stringify(c.self_offset) +
-                     " su ch " + JSON.stringify(c.self_canali)
-                   : "spento"]];
-    if(c.cfd) f.push(["CFD V812", c.cfd.attivo
-        ? "acceso, " + JSON.stringify(c.cfd.soglie_mv) + " mV su ch " +
-          JSON.stringify(c.cfd.canali)
-        : "spento"]);
-    f.push(["collegamento", c.collegamento]);
-    tabella($("cfg"), f);
-  }
-
   tabella($("run"), s.in_corso
     ? [["pid", s.pid],
        ["file", s.run],
@@ -469,6 +676,91 @@ async function aggiorna(){
   ).join("<br>") || "nessuna azione registrata";
 }
 
+// --- configurazione -------------------------------------------------------
+// Il form NON si ricarica col polling: riscriverebbe quello che stai
+// scrivendo mentre lo scrivi. Si rilegge all'apertura, dopo un salvataggio,
+// o a richiesta.
+let CFG = null;
+
+function campoHtml(c){
+  const id = "f_" + c.sezione + "_" + c.chiave;
+  const marchio = c.a_caldo ? ' <span style="color:#15603a;font-size:11px">a caldo</span>' : "";
+  if(!c.presente)
+    return `<tr><td class="k">${c.etichetta}</td><td style="color:#a8321f">non c'e' nel file: aggiungila a mano</td></tr>`;
+  let campo;
+  if(c.tipo === "booleano" || c.tipo === "scelta"){
+    const opz = c.tipo === "booleano" ? ["true","false"] : c.dettagli;
+    campo = `<select id="${id}">` + opz.map(o =>
+      `<option${o === c.valore ? " selected" : ""}>${o}</option>`).join("") + "</select>";
+  }else{
+    const largo = (c.tipo === "lista" || c.tipo === "testo") ? 180 : 110;
+    campo = `<input id="${id}" value="${c.valore}" style="width:${largo}px">`;
+  }
+  return `<tr><td class="k">${c.etichetta}${marchio}</td><td>${campo}</td></tr>`;
+}
+
+async function caricaConfig(){
+  try{ CFG = await (await fetch("/api/config?token=" + TOKEN)).json(); }
+  catch(e){ $("cfg").textContent = "non riesco a leggere la configurazione"; return; }
+  if(CFG.errore){ $("cfg").textContent = CFG.errore; return; }
+  $("cfgfile").textContent = CFG.file;
+  let html = "", sez = null;
+  for(const c of CFG.campi){
+    if(c.sezione !== sez){
+      if(sez !== null) html += "</table>";
+      html += `<div style="margin:10px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b6a65">[${c.sezione}]</div><table>`;
+      sez = c.sezione;
+    }
+    html += campoHtml(c);
+  }
+  $("cfg").innerHTML = html + "</table>";
+}
+
+function valoreCampo(c){
+  const el = $("f_" + c.sezione + "_" + c.chiave);
+  return el ? el.value.trim() : null;
+}
+
+$("ricarica").onclick = caricaConfig;
+
+$("salva").onclick = async () => {
+  if(!CFG) return;
+  const mod = [];
+  for(const c of CFG.campi){
+    if(!c.presente) continue;
+    const v = valoreCampo(c);
+    if(v !== null && v !== c.valore) mod.push([c.sezione, c.chiave, v]);
+  }
+  if(!mod.length){ msg("Nessuna modifica da salvare.", true); return; }
+  const elenco = mod.map(m => "  " + m[1] + "  ->  " + m[2]).join("\n");
+  if(!confirm("Scrivere nel TOML?\n\n" + elenco +
+              "\n\nVale dalla prossima run. Viene fatto un backup.")) return;
+  $("salva").disabled = true;
+  try{
+    const r = await fetch("/api/config?token=" + TOKEN, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({mtime: CFG.mtime, chi: $("chi").value, modifiche: mod})
+    });
+    const d = await r.json();
+    msg(d.messaggio, d.esito);
+  }catch(e){ msg("Salvataggio fallito: " + e, false); }
+  $("salva").disabled = false;
+  caricaConfig();
+};
+
+$("applica").onclick = async () => {
+  const v = $("caldo").value.trim();
+  if(!v){ msg("Scrivi gli offset da applicare.", false); return; }
+  if(!confirm("Applicare le soglie " + v + " alla run IN CORSO?\n\n" +
+              "Il TOML non viene toccato: alla prossima run tornano quelle del file.")) return;
+  try{
+    const q = new URLSearchParams({offsets: v, chi: $("chi").value, token: TOKEN});
+    const d = await (await fetch("/api/soglie?" + q, {method: "POST"})).json();
+    msg(d.messaggio, d.esito);
+  }catch(e){ msg("Richiesta fallita: " + e, false); }
+};
+
+caricaConfig();
 aggiorna();
 setInterval(aggiorna, 2000);
 </script></body></html>
@@ -501,10 +793,11 @@ def crea_handler(ctrl, token):
             qs = urllib.parse.parse_qs(parti.query)
             if parti.path == "/":
                 return self._manda(200, "text/html; charset=utf-8", PAGINA.encode())
-            if parti.path == "/api/stato":
+            if parti.path in ("/api/stato", "/api/config"):
                 if not self._autorizzato(qs):
                     return self._json({"errore": "token mancante o sbagliato"}, 403)
-                return self._json(ctrl.stato())
+                return self._json(ctrl.stato() if parti.path == "/api/stato"
+                                  else ctrl.campi())
             self._manda(404, "text/plain", b"not found")
 
         def do_POST(self):
@@ -515,15 +808,42 @@ def crea_handler(ctrl, token):
 
             chi = qs.get("chi", [""])[0].strip()[:40]
             da = self.client_address[0]
+            extra = {}
+
             if parti.path == "/api/avvia":
                 esito, messaggio = ctrl.avvia()
                 registra(chi, da, "avvia", messaggio)
+
             elif parti.path == "/api/ferma":
                 esito, messaggio = ctrl.ferma()
                 registra(chi, da, "ferma", messaggio)
+
+            elif parti.path == "/api/config":
+                try:
+                    n = int(self.headers.get("Content-Length", 0))
+                    corpo = json.loads(self.rfile.read(n) or b"{}")
+                except (ValueError, OSError) as e:
+                    return self._json({"esito": False, "messaggio": "richiesta illeggibile: %s" % e})
+                chi = (corpo.get("chi") or chi).strip()[:40]
+                modifiche = [(m[0], m[1], m[2]) for m in corpo.get("modifiche", [])]
+                esito, messaggio, diff = ctrl.scrivi_config(modifiche, corpo.get("mtime"))
+                extra["diff"] = diff
+                if diff:
+                    registra(chi, da, "config",
+                             "; ".join("%s %s->%s" % (d["chiave"], d["da"], d["a"]) for d in diff))
+                elif not esito:
+                    registra(chi, da, "config", "RIFIUTATA: " + messaggio)
+
+            elif parti.path == "/api/soglie":
+                esito, messaggio = ctrl.soglie_a_caldo(qs.get("offsets", [""])[0])
+                registra(chi, da, "soglie a caldo", messaggio)
+
             else:
                 return self._manda(404, "text/plain", b"not found")
-            self._json({"esito": esito, "messaggio": messaggio})
+
+            risposta = {"esito": esito, "messaggio": messaggio}
+            risposta.update(extra)
+            self._json(risposta)
 
     return Handler
 

@@ -50,12 +50,21 @@ INCHIOSTRO = "#52514e"
 
 
 def _canali(c):
-    """I canali come si leggono in una legenda, non come li stampa Python."""
+    """I canali come si leggono in una legenda, non come li stampa Python.
+
+    Con piu' di un canale si scrive OR, e non per pignoleria: il rate di uno
+    scan e' sempre UNO, quello dell'OR degli ingressi abilitati, perche' sia
+    l'uscita OR del V812 sia il trigger del V1742 sono un filo solo. Scritto
+    "ch 0, 1" si legge come due curve che si sovrappongono perfettamente, e il
+    sospetto che sia un baco e' legittimo: la colpa e' dell'etichetta.
+    """
     if not c:
         return "?"
     if not isinstance(c, (list, tuple)):
-        return str(c)
-    return ", ".join(str(x) for x in c)
+        return "ch %s" % c
+    if len(c) == 1:
+        return "ch %s" % c[0]
+    return "OR of ch %s" % ", ".join(str(x) for x in c)
 
 
 def frequenza(nome_file):
@@ -77,7 +86,7 @@ def leggi(path, mv_per_offset_forzato):
         x = np.array([p["soglia_mv"] for p in punti], dtype=float)
         y = np.array([p["rate"] for p in punti], dtype=float)
         lim = np.array([p["eventi"] == 0 for p in punti])
-        nota = "V812 CFD   ch %s" % _canali(d.get("canali"))
+        nota = "V812 CFD   %s" % _canali(d.get("canali"))
         return "v812", x, y, lim, nota, d
 
     # formato di noise_scan.py: soglia in conteggi di offset
@@ -91,7 +100,7 @@ def leggi(path, mv_per_offset_forzato):
     x = np.array([p["distanza"] for p in punti], dtype=float) * k
     y = np.array([max(p["rate"], 0.0) for p in punti], dtype=float)
     lim = np.array([p.get("conteggi", 1) == 0 for p in punti])
-    nota = "V1742 self-trigger   ch %s   (%.1f mV/offset at %s)" % (
+    nota = "V1742 self-trigger   %s   (%.1f mV/offset at %s)" % (
         _canali(d.get("canali")), k, (tag or "?").replace("Gs", " GS/s"))
     return "v1742", x, y, lim, nota, d
 

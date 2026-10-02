@@ -31,12 +31,30 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Vedi measurements/larghezza_pmt_20260930.json e CLAUDE.md.
 MV_PER_OFFSET = {"2.5Gs": 3.5, "1Gs": 2.7}
 
-# Slot categorici 1 e 2 della palette: la coppia che regge meglio sia la vista
-# normale sia il daltonismo. Vedi il commento in plot_diagnostica_1p6ns.py.
-COLORE = {"v1742": "#2a78d6", "v812": "#eb6834"}
+# Il colore distingue le SERIE, non lo strumento: due scan dello stesso
+# modulo -- per esempio un canale per volta -- devono avere colori diversi, se
+# no non si distinguono. A dire quale strumento sia ci pensano il marker e il
+# tratto, che restano fissi per tipo.
+#
+# Ordine categorico fisso, mai ciclato: passa i controlli di separazione sia a
+# vista normale sia col daltonismo. La separazione minima sta nella fascia che
+# richiede una codifica secondaria, e c'e': marker diverso per strumento, piu'
+# la legenda, che per questi grafici e' sempre presente.
+PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100",
+           "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+
 MARKER = {"v1742": "o", "v812": "s"}
 TRATTO = {"v1742": "-", "v812": "--"}
 INCHIOSTRO = "#52514e"
+
+
+def _canali(c):
+    """I canali come si leggono in una legenda, non come li stampa Python."""
+    if not c:
+        return "?"
+    if not isinstance(c, (list, tuple)):
+        return str(c)
+    return ", ".join(str(x) for x in c)
 
 
 def frequenza(nome_file):
@@ -58,7 +76,7 @@ def leggi(path, mv_per_offset_forzato):
         x = np.array([p["soglia_mv"] for p in punti], dtype=float)
         y = np.array([p["rate"] for p in punti], dtype=float)
         lim = np.array([p["eventi"] == 0 for p in punti])
-        nota = "V812 CFD   ch %s" % (d.get("canali") or "?")
+        nota = "V812 CFD   ch %s" % _canali(d.get("canali"))
         return "v812", x, y, lim, nota, d
 
     # formato di noise_scan.py: soglia in conteggi di offset
@@ -73,7 +91,7 @@ def leggi(path, mv_per_offset_forzato):
     y = np.array([max(p["rate"], 0.0) for p in punti], dtype=float)
     lim = np.array([p.get("conteggi", 1) == 0 for p in punti])
     nota = "V1742 self-trigger   ch %s   (%.1f mV/offset at %s)" % (
-        d.get("canali") or "?", k, (tag or "?").replace("Gs", " GS/s"))
+        _canali(d.get("canali")), k, (tag or "?").replace("Gs", " GS/s"))
     return "v1742", x, y, lim, nota, d
 
 
@@ -89,9 +107,15 @@ def main():
     fig, ax = plt.subplots(figsize=(7.4, 4.8))
     visti = []
 
-    for path in args.json:
+    if len(args.json) > len(PALETTE):
+        raise SystemExit(
+            "%d scan in un grafico solo: i colori distinguibili sono %d.\n"
+            "Oltre, le curve non si distinguono piu' e il grafico smette di dire "
+            "qualcosa. Falli in due figure." % (len(args.json), len(PALETTE)))
+
+    for n, path in enumerate(args.json):
         tipo, x, y, lim, nota, d = leggi(path, args.mv_per_offset)
-        col, mk, ls = COLORE[tipo], MARKER[tipo], TRATTO[tipo]
+        col, mk, ls = PALETTE[n], MARKER[tipo], TRATTO[tipo]
         visti.append(tipo)
 
         # I punti stanno nel JSON nell'ordine in cui sono stati misurati, che
@@ -111,8 +135,7 @@ def main():
             soffitto = 1.0 / d.get("secondi_per_punto", 1.0)
             ax.semilogy(x[lim], [soffitto] * lim.sum(), marker="v", ls="none",
                         ms=9, color=col, mec="white", mew=1.2, alpha=.8,
-                        label="%s: upper limit (no events)" %
-                              ("V812" if tipo == "v812" else "V1742"))
+                        label="upper limit, no events (%s)" % nota.split("  ")[0])
 
     ax.set_xlabel("threshold  [mV at the detector input]")
     ax.set_ylabel("trigger rate  [Hz]")

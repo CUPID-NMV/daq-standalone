@@ -415,7 +415,7 @@ def elenco_misure(n=20):
     return fuori[:n]
 
 
-def disegna_misure(nomi, logy):
+def disegna_misure(nomi, logy, per_canale=False, canali=""):
     """Lancia plot_scan.py sulle misure scelte. Torna (esito, messaggio, png)."""
     scelti = []
     for nome in nomi[:8]:
@@ -433,12 +433,18 @@ def disegna_misure(nomi, logy):
     # vicenda, e un PNG nuovo a ogni clic riempirebbe plots/ di viste
     # identiche. Cosi' lo stesso insieme con la stessa scala e' sempre lo
     # stesso file, e il browser lo rilegge grazie al parametro anti-cache.
-    firma = hashlib.sha1(("|".join(sorted(nomi)) + ("|log" if logy else "|lin"))
+    firma = hashlib.sha1(("|".join(sorted(nomi)) + ("|log" if logy else "|lin") +
+                          ("|ch:" + canali if per_canale else "|or"))
                          .encode()).hexdigest()[:8]
     uscita = os.path.join(GRAFICI, "view_%s.png" % firma)
     cmd = [sys.executable, os.path.join(ROOT, "tools", "plot_scan.py")]
     if logy:
         cmd.append("--logy")
+    if per_canale:
+        cmd.append("--per-channel")
+        pulita = " ".join(x for x in canali.replace(",", " ").split() if x.isdigit())
+        if pulita:
+            cmd += ["--channels", pulita]
     cmd += scelti + ["-o", uscita]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
@@ -1371,6 +1377,11 @@ PAGINA = r"""<!doctype html>
       <label style="font-size:12px;color:#52514e">
         <input type="checkbox" id="glog"> log scale
       </label>
+      <label style="font-size:12px;color:#52514e"
+             title="counts each channel over threshold, recomputed from the recorded waveforms">
+        <input type="checkbox" id="gperch"> per channel
+      </label>
+      <input id="gchan" placeholder="ch 8,9" style="width:88px;font-size:12px">
       <button id="gdraw" style="background:#2a78d6;color:#fff">Draw</button>
       <button id="ggo" style="background:#ececea">Refresh list</button>
       <a id="gapri" href="#" target="_blank" style="font-size:12px">open full size</a>
@@ -1732,7 +1743,9 @@ async function disegna(){
   const scelti = Array.from($("gsel").selectedOptions).map(o => o.value);
   if(!scelti.length){ msg("Select at least one measurement.", false); return; }
   const q = new URLSearchParams({token: TOKEN, chi: $("chi").value,
-                                 logy: $("glog").checked ? "1" : "0"});
+                                 logy: $("glog").checked ? "1" : "0",
+                                 perch: $("gperch").checked ? "1" : "0",
+                                 canali: $("gchan").value.trim()});
   for(const s of scelti) q.append("misura", s);
   $("gdraw").disabled = true;
   try{
@@ -1744,6 +1757,8 @@ async function disegna(){
 
 $("gdraw").onclick = disegna;
 $("glog").onchange = disegna;
+$("gperch").onchange = disegna;
+$("gchan").onchange = disegna;
 $("ggo").onclick = caricaGrafici;
 
 // --- coda -----------------------------------------------------------------
@@ -1920,7 +1935,8 @@ def crea_handler(ctrl, token):
 
             elif parti.path == "/api/disegna":
                 esito, messaggio, png = disegna_misure(
-                    qs.get("misura", []), qs.get("logy", ["0"])[0] == "1")
+                    qs.get("misura", []), qs.get("logy", ["0"])[0] == "1",
+                    qs.get("perch", ["0"])[0] == "1", qs.get("canali", [""])[0])
                 extra["png"] = png
 
             elif parti.path.startswith("/api/coda/"):

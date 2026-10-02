@@ -113,8 +113,17 @@ def main():
             "Oltre, le curve non si distinguono piu' e il grafico smette di dire "
             "qualcosa. Falli in due figure." % (len(args.json), len(PALETTE)))
 
-    for n, path in enumerate(args.json):
-        tipo, x, y, lim, nota, d = leggi(path, args.mv_per_offset)
+    # Si leggono tutti prima di disegnare: due scan della stessa cosa darebbero
+    # la stessa etichetta, e una legenda con due voci identiche non distingue
+    # niente. Quando succede si aggiunge l'ora dello scan.
+    serie = [leggi(path, args.mv_per_offset) for path in args.json]
+    note = [s[4] for s in serie]
+    for i, s in enumerate(serie):
+        if note.count(s[4]) > 1:
+            quando = (s[5].get("quando") or "")[5:16].replace("-", "/")
+            serie[i] = s[:4] + (s[4] + ("   [%s]" % quando if quando else "   [%d]" % (i + 1)),) + s[5:]
+
+    for n, (tipo, x, y, lim, nota, d) in enumerate(serie):
         col, mk, ls = PALETTE[n], MARKER[tipo], TRATTO[tipo]
         visti.append(tipo)
 
@@ -144,11 +153,13 @@ def main():
     ax.legend(fontsize=8.5)
 
     if "v1742" in visti and "v812" in visti:
+        # In basso a destra: a sinistra ci finiscono i limiti superiori, e un
+        # riquadro sopra i punti nasconde proprio i dati che spiega.
         ax.annotate("Both discriminators see the same signal.\n"
                     "A gap at equal threshold is efficiency,\n"
                     "not calibration.",
-                    xy=(.02, .04), xycoords="axes fraction", fontsize=8,
-                    color=INCHIOSTRO,
+                    xy=(.98, .04), xycoords="axes fraction", fontsize=8,
+                    ha="right", color=INCHIOSTRO,
                     bbox=dict(fc="white", ec="#ddd", alpha=.9))
 
     out = args.out or os.path.join(ROOT, "plots",

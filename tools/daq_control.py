@@ -1381,7 +1381,8 @@ PAGINA = r"""<!doctype html>
              title="counts each channel over threshold, recomputed from the recorded waveforms">
         <input type="checkbox" id="gperch"> per channel
       </label>
-      <input id="gchan" placeholder="ch 8,9" style="width:88px;font-size:12px">
+      <input id="gchan" placeholder="all channels" style="width:98px;font-size:12px"
+             title="which channels to draw, e.g. 8,9 - empty means every channel in the file, including the unconnected ones">
       <button id="gdraw" style="background:#2a78d6;color:#fff">Draw</button>
       <button id="ggo" style="background:#ececea">Refresh list</button>
       <a id="gapri" href="#" target="_blank" style="font-size:12px">open full size</a>
@@ -1389,7 +1390,9 @@ PAGINA = r"""<!doctype html>
   </div>
   <div style="font-size:12px;color:#6b6a65;margin-top:6px">
     Pick one or more measurements (ctrl-click) and draw them together. Up to 8:
-    beyond that the curves stop being distinguishable.
+    beyond that the curves stop being distinguishable. With <b>per channel</b>,
+    leaving the channel box empty draws every channel in the file &mdash; including
+    the ones with nothing plugged in, which sit flat near zero.
   </div>
   <div id="gvuoto" style="color:#6b6a65;font-size:12px;margin-top:8px"></div>
   <img id="gimg" style="margin-top:10px;max-width:100%;border:1px solid #e2e2de;border-radius:6px;display:none">

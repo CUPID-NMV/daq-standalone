@@ -21,6 +21,9 @@ import time
 
 import numpy as np
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import daqio
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -67,6 +70,76 @@ def _canali(c):
     return "OR of ch %s" % ", ".join(str(x) for x in c)
 
 
+MV_PER_CONTEGGIO = 1000.0 / 4096      # V1742, ingresso 1 Vpp a 12 bit
+
+
+def per_canale(d, tipo, k_mv_offset):
+    """Quante volte OGNI canale ha superato la soglia, punto per punto.
+
+    Il rate che lo scan misura e' uno solo, quello dell'OR: sia l'uscita OR
+    del V812 sia il trigger del V1742 sono un filo solo e non dicono quale
+    ingresso abbia sparato. Pero' negli eventi registrati ci sono tutte le
+    forme d'onda, quindi il conto per canale si rifa' a posteriori.
+
+    Attenzione a cosa si sta misurando: la soglia viene applicata qui
+    all'ampiezza RICOSTRUITA in Output Mode, mentre in hardware il
+    discriminatore guarda altro -- il segnale diretto per il V812, la copia
+    attenuata in Transparent Mode per il self-trigger. E' una ricostruzione di
+    cosa ha fatto il discriminatore, non il suo conteggio.
+
+    Vale inoltre solo per i canali che partecipano al trigger: se un canale
+    non e' nell'OR, lo si vede solo quando ha sparato qualcun altro, e il
+    conteggio sarebbe quello delle coincidenze, non delle sue soglie.
+
+    Ritorna {canale: (soglie_mV, rate_Hz)}.
+    """
+    dati = os.path.join(ROOT, "data")
+    fuori = {}
+
+    for p in d.get("punti", []):
+        if tipo == "v812":
+            nome, durata = p.get("file"), p.get("durata_s")
+            soglia_mv, prima, dopo = p.get("soglia_mv"), None, None
+        else:
+            nome, durata = d.get("file"), d.get("secondi_per_punto")
+            soglia_mv = p.get("distanza", 0) * k_mv_offset
+            prima, dopo = p.get("eventi_da"), p.get("eventi_a")
+        if not nome or not durata:
+            continue
+
+        percorso = os.path.join(dati, nome)
+        if not os.path.exists(percorso):
+            percorso += ".gz"
+        if not os.path.exists(percorso):
+            print("  (salto %s: file non trovato)" % nome, file=sys.stderr)
+            continue
+
+        try:
+            # Per il V1742 i punti stanno tutti nello stesso file: si legge
+            # fino alla fine del punto e si taglia. Leggere un intervallo
+            # qualunque richiederebbe di toccare daqio, che e' usato da tutto
+            # il resto: non vale il rischio per un conteggio.
+            hdr, dd = daqio.load(percorso,
+                                 max_events=(dopo if dopo else None),
+                                 live=not percorso.endswith(".gz"))
+        except Exception as e:
+            print("  (salto %s: %s)" % (nome, str(e)[:60]), file=sys.stderr)
+            continue
+        if prima:
+            dd = dd[prima:]
+        if dd.shape[0] == 0:
+            continue
+
+        _, _, amp, _ = daqio.baseline_amplitude(dd)
+        for i, ch in enumerate(hdr["ChannelList"]):
+            n = int((np.abs(amp[:, i]) * MV_PER_CONTEGGIO > soglia_mv).sum())
+            fuori.setdefault(int(ch), ([], []))
+            fuori[int(ch)][0].append(soglia_mv)
+            fuori[int(ch)][1].append(n / float(durata))
+
+    return {c: (np.array(x), np.array(y)) for c, (x, y) in fuori.items()}
+
+
 def frequenza(nome_file):
     """Frequenza di campionamento dedotta dal nome della run."""
     for tag in MV_PER_OFFSET:
@@ -111,6 +184,10 @@ def main():
     ap.add_argument("json", nargs="+", help="uno o piu' file di scan")
     ap.add_argument("--mv-per-offset", type=float, default=None,
                     help="forza la conversione offset -> mV del self-trigger")
+    ap.add_argument("--per-channel", action="store_true",
+                    help="una curva per CANALE invece del rate del trigger: "
+                         "quante volte ogni canale ha superato la soglia, "
+                         "ricontato sulle forme d'onda registrate")
     ap.add_argument("--logy", action="store_true",
                     help="asse dei rate logaritmico. Di default e' lineare: il "
                          "logaritmo fa vedere bene le code basse ma schiaccia la "
@@ -136,6 +213,34 @@ def main():
         if note.count(s[4]) > 1:
             quando = (s[5].get("quando") or "")[5:16].replace("-", "/")
             serie[i] = s[:4] + (s[4] + ("   [%s]" % quando if quando else "   [%d]" % (i + 1)),) + s[5:]
+
+    if args.per_channel:
+        # Una curva per canale, ricontata sui dati: il rate del trigger non
+        # sa dire quale ingresso abbia sparato, le forme d'onda si'.
+        n = 0
+        for tipo, _, _, _, nota, d in serie:
+            k = MV_PER_OFFSET.get(frequenza(d.get("file", "")) or "", 3.5)
+            if args.mv_per_offset:
+                k = args.mv_per_offset
+            canali = per_canale(d, tipo, k)
+            if not canali:
+                raise SystemExit("Non sono riuscito a rileggere nessun dato: "
+                                 "i file delle run ci sono ancora in data/?")
+            for ch in sorted(canali):
+                if n >= len(PALETTE):
+                    raise SystemExit("Troppe curve per i colori disponibili: "
+                                     "scegli meno canali o meno scan.")
+                x, y = canali[ch]
+                ordine = np.argsort(x)
+                etichetta = "ch %d" % ch
+                if len(serie) > 1:
+                    etichetta += "   (%s)" % nota.split("  ")[0]
+                ax.plot(x[ordine], y[ordine], marker=MARKER[tipo], ls=TRATTO[tipo],
+                        ms=8, lw=2.0, color=PALETTE[n], mec="white", mew=1.2,
+                        label=etichetta)
+                n += 1
+            visti.append(tipo)
+        serie = []
 
     for n, (tipo, x, y, lim, nota, d) in enumerate(serie):
         col, mk, ls = PALETTE[n], MARKER[tipo], TRATTO[tipo]
@@ -172,8 +277,12 @@ def main():
         ax.set_ylim(bottom=0)
 
     ax.set_xlabel("threshold  [mV at the detector input]")
-    ax.set_ylabel("trigger rate  [Hz]")
-    ax.set_title("Threshold scan", fontsize=11)
+    if args.per_channel:
+        ax.set_ylabel("rate above threshold  [Hz]")
+        ax.set_title("Threshold scan — per channel", fontsize=11)
+    else:
+        ax.set_ylabel("trigger rate  [Hz]")
+        ax.set_title("Threshold scan", fontsize=11)
     ax.grid(alpha=.3, which="both" if args.logy else "major")
     ax.legend(fontsize=8.5)
 
@@ -183,7 +292,7 @@ def main():
     # -- vero, ma in scala logaritmica la curva crolla proprio li' e il
     # riquadro le finiva sopra. Sotto il grafico non puo' collidere con niente,
     # qualunque siano i dati e la scala.
-    sotto = "v1742" in visti and "v812" in visti
+    sotto = ("v1742" in visti and "v812" in visti) and not args.per_channel
     if sotto:
         fig.text(0.5, 0.012,
                  "Both discriminators see the same signal. "

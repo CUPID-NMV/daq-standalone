@@ -130,6 +130,9 @@ riferimento a un elemento rimosso.
 dichiarata tale. È successo di proporre un meccanismo che, guardato meglio,
 prevedeva il segno opposto a quello misurato.
 
-**Commenti e messaggi in italiano**, come il resto del codice. I commenti
+**Commenti e messaggi di log in italiano**, come il resto del codice.
+**Le pagine web invece sono in inglese** — monitor e controllore — perche'
+vengono mostrate anche fuori dal gruppo. Il log della DAQ che compare nella
+pagina resta com'e': viene dal C++ e non fa parte dell'interfaccia. I commenti
 spiegano *perché*, non *cosa*: in particolare perché una scelta non ovvia è
 necessaria, così nessuno la "risistema" più tardi.

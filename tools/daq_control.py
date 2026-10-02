@@ -92,31 +92,31 @@ SCAN = {
 #  (sezione, chiave, etichetta, tipo, dettagli)
 # ---------------------------------------------------------------------------
 CAMPI = [
-    ("digitizer", "SamplingRate",    "campionamento",      "scelta", ["5GHz", "2.5GHz", "1GHz"]),
-    ("digitizer", "RecordLength",    "campioni per evento", "intero", (1, 1024)),
+    ("digitizer", "SamplingRate",    "sampling rate",      "scelta", ["5GHz", "2.5GHz", "1GHz"]),
+    ("digitizer", "RecordLength",    "samples per event",  "intero", (1, 1024)),
     ("digitizer", "PostTriggerSize", "post-trigger [%]",   "intero", (0, 100)),
-    ("digitizer", "NEvents",         "eventi da acquisire", "intero", (1, 10**9)),
-    ("digitizer", "TailCut",         "campioni finali scartati", "intero", (0, 200)),
-    ("digitizer", "ChannelList",     "canali registrati",  "lista",  (0, 31)),
-    ("digitizer", "Connection",      "collegamento",       "scelta", ["auto", "ETH_V4718", "USB_A4818"]),
-    ("digitizer", "DRS4Correction",  "correzioni DRS4",    "booleano", None),
-    ("digitizer", "OutputFile",      "prefisso dei file",  "testo",  None),
+    ("digitizer", "NEvents",         "events to acquire",  "intero", (1, 10**9)),
+    ("digitizer", "TailCut",         "trailing samples dropped", "intero", (0, 200)),
+    ("digitizer", "ChannelList",     "recorded channels",  "lista",  (0, 31)),
+    ("digitizer", "Connection",      "link",               "scelta", ["auto", "ETH_V4718", "USB_A4818"]),
+    ("digitizer", "DRS4Correction",  "DRS4 corrections",   "booleano", None),
+    ("digitizer", "OutputFile",      "file prefix",        "testo",  None),
 
-    ("digitizer", "ExternalTrigger", "trigger esterno (TRG-IN)", "booleano", None),
+    ("digitizer", "ExternalTrigger", "external trigger (TRG-IN)", "booleano", None),
     ("digitizer", "SelfTrigger",     "self-trigger",       "booleano", None),
-    ("digitizer", "SelfTriggerMode", "modo del self-trigger", "scelta", ["paired", "global"]),
-    ("digitizer", "SelfTriggerChannels", "canali in self-trigger", "lista", (0, 31)),
-    ("digitizer", "SelfTriggerThresholdOffset", "offset di soglia", "lista", (0, 4095)),
-    ("digitizer", "TriggerOut",      "cosa esce da TRG-OUT", "scelta", ["self", "all", "off", "default"]),
+    ("digitizer", "SelfTriggerMode", "self-trigger mode",  "scelta", ["paired", "global"]),
+    ("digitizer", "SelfTriggerChannels", "self-trigger channels", "lista", (0, 31)),
+    ("digitizer", "SelfTriggerThresholdOffset", "threshold offset", "lista", (0, 4095)),
+    ("digitizer", "TriggerOut",      "what comes out of TRG-OUT", "scelta", ["self", "all", "off", "default"]),
 
-    ("cfd", "Enabled",   "CFD V812 attivo",     "booleano", None),
-    ("cfd", "Threshold", "soglie CFD [mV]",     "lista", (5, 255)),
-    ("cfd", "Channels",  "ingressi CFD usati",  "lista", (0, 15)),
-    ("cfd", "Width",     "larghezza uscita [conteggi]", "intero", (0, 255)),
-    ("cfd", "DeadTime",  "tempo morto [conteggi]",      "intero", (0, 255)),
-    ("cfd", "Majority",  "maggioranza (1 = OR)", "intero", (1, 20)),
+    ("cfd", "Enabled",   "V812 CFD enabled",    "booleano", None),
+    ("cfd", "Threshold", "CFD thresholds [mV]", "lista", (5, 255)),
+    ("cfd", "Channels",  "CFD inputs used",     "lista", (0, 15)),
+    ("cfd", "Width",     "output width [counts]", "intero", (0, 255)),
+    ("cfd", "DeadTime",  "dead time [counts]",    "intero", (0, 255)),
+    ("cfd", "Majority",  "majority (1 = OR)", "intero", (1, 20)),
 
-    ("settings", "verbosity", "verbosita' a schermo", "intero", (0, 4)),
+    ("settings", "verbosity", "on-screen verbosity", "intero", (0, 4)),
 ]
 
 # Chiavi che valgono SUBITO, senza riavviare la run. Sono le uniche: tutto il
@@ -153,42 +153,42 @@ def _toml_da_ui(tipo, valore, dettagli, etichetta):
     v = (valore or "").strip()
     if tipo == "booleano":
         if v not in ("true", "false"):
-            raise ValueError("%s: ammessi solo true e false" % etichetta)
+            raise ValueError("%s: only true and false are allowed" % etichetta)
         return v
     if tipo == "scelta":
         if v not in dettagli:
-            raise ValueError("%s: ammessi %s" % (etichetta, ", ".join(dettagli)))
+            raise ValueError("%s: allowed values are %s" % (etichetta, ", ".join(dettagli)))
         return '"%s"' % v
     if tipo == "testo":
         if '"' in v:
-            raise ValueError("%s: niente virgolette dentro il valore" % etichetta)
+            raise ValueError("%s: no quotes inside the value" % etichetta)
         return '"%s"' % v
     if tipo == "intero":
         try:
             n = int(v)
         except ValueError:
-            raise ValueError("%s: ci vuole un numero intero" % etichetta)
+            raise ValueError("%s: an integer is required" % etichetta)
         lo, hi = dettagli
         if not lo <= n <= hi:
-            raise ValueError("%s: fuori intervallo, ammessi da %d a %d" % (etichetta, lo, hi))
+            raise ValueError("%s: out of range, allowed from %d to %d" % (etichetta, lo, hi))
         return str(n)
     if tipo == "lista":
         pezzi = [p for p in v.replace(",", " ").split() if p]
         if not pezzi:
-            raise ValueError("%s: la lista e' vuota" % etichetta)
+            raise ValueError("%s: the list is empty" % etichetta)
         numeri = []
         lo, hi = dettagli
         for p in pezzi:
             try:
                 n = float(p) if "." in p else int(p)
             except ValueError:
-                raise ValueError("%s: '%s' non e' un numero" % (etichetta, p))
+                raise ValueError("%s: '%s' is not a number" % (etichetta, p))
             if not lo <= n <= hi:
-                raise ValueError("%s: %s fuori intervallo, ammessi da %d a %d"
+                raise ValueError("%s: %s out of range, allowed from %d to %d"
                                  % (etichetta, p, lo, hi))
             numeri.append(p)
         return "[" + ", ".join(numeri) + "]"
-    raise ValueError("tipo sconosciuto: %s" % tipo)
+    raise ValueError("unknown type: %s" % tipo)
 
 
 # Latenza del self-trigger, in nanosecondi: e' il tempo fra il superamento
@@ -217,7 +217,7 @@ def coerenza(d):
 
     canali = lista(g.get("ChannelList"))
     if not canali:
-        errori.append("ChannelList e' vuota: non si registrerebbe niente.")
+        errori.append("ChannelList is empty: nothing would be recorded.")
 
     self_on = bool(g.get("SelfTrigger"))
     est_on = bool(g.get("ExternalTrigger"))
@@ -225,8 +225,8 @@ def coerenza(d):
     freq = str(g.get("SamplingRate", ""))
 
     if not self_on and not est_on and not c.get("Enabled"):
-        avvisi.append("Ne self-trigger ne trigger esterno: resterebbe solo il "
-                      "trigger software, e la run non acquisirebbe niente da sola.")
+        avvisi.append("Neither self-trigger nor external trigger: only the software "
+                      "trigger would be left, and the run would acquire nothing on its own.")
 
     # Due sorgenti accese insieme sono previste dalla board e vanno in OR: non
     # e' un errore. Ma negli eventi non resta scritto QUALE ha fatto scattare
@@ -234,47 +234,47 @@ def coerenza(d):
     # e non si puo' piu' attribuire. E' la stessa ragione per cui lo scan del
     # V812 si rifiuta di partire col self-trigger acceso.
     if self_on and est_on:
-        chi = "TRG-IN, dove arriva il CFD," if c.get("Enabled") else "TRG-IN"
-        avvisi.append("Self-trigger e %s sono accesi insieme: le due sorgenti vanno "
-                      "in OR. E' legittimo, ma nell'evento non resta traccia di quale "
-                      "abbia triggerato, quindi ogni rate misurato e' quello dell'OR. "
-                      "Per misurarne una sola, spegni l'altra." % chi)
+        chi = "TRG-IN, where the CFD arrives," if c.get("Enabled") else "TRG-IN"
+        avvisi.append("Self-trigger and %s are both on: the two sources go in OR. "
+                      "That is legitimate, but the event keeps no record of which one "
+                      "fired, so any measured rate is the rate of the OR. "
+                      "To measure one alone, switch the other off." % chi)
 
     # TRG-OUT in modo "self" prende la maschera dai soli gruppi del
     # self-trigger: col self-trigger spento il connettore resta muto, e uno
     # scaler attaccato li' legge zero mentre la DAQ sta acquisendo.
     tout = str(g.get("TriggerOut", "default"))
     if tout == "self" and not self_on:
-        avvisi.append("TriggerOut = \"self\" ma il self-trigger e' spento: su TRG-OUT "
-                      "non uscira' niente. Serve \"all\" per vedere anche i trigger "
-                      "esterni e software.")
+        avvisi.append("TriggerOut = \"self\" but the self-trigger is off: nothing will "
+                      "come out of TRG-OUT. Use \"all\" to also see external and "
+                      "software triggers.")
 
     # TailCut scarta i campioni finali: se arriva a mangiarsi tutto l'evento,
     # la run scrive forme d'onda di lunghezza zero.
     rl0, tc = g.get("RecordLength"), g.get("TailCut")
     if isinstance(rl0, int) and isinstance(tc, int) and tc >= rl0:
-        errori.append("TailCut (%d) scarterebbe tutti i %d campioni dell'evento: "
-                      "non resterebbe niente da salvare." % (tc, rl0))
+        errori.append("TailCut (%d) would drop all %d samples of the event: "
+                      "nothing would be left to save." % (tc, rl0))
 
     if self_on:
         sch = lista(g.get("SelfTriggerChannels")) or canali
         fuori = [x for x in sch if x not in canali]
         if fuori:
-            avvisi.append("Canali in self-trigger ma non registrati: %s. Legittimo "
-                          "se vuoi triggerare su uno e guardarne un altro, sbagliato "
-                          "se non era quello che volevi." % fuori)
+            avvisi.append("Channels in self-trigger but not recorded: %s. Legitimate if "
+                          "you want to trigger on one and look at another, wrong if "
+                          "that is not what you meant." % fuori)
         off = lista(g.get("SelfTriggerThresholdOffset"))
         if len(off) > 1 and len(off) != len(sch):
-            avvisi.append("%d soglie per %d canali in self-trigger: la DAQ replica "
-                          "l'ultima sui rimanenti." % (len(off), len(sch)))
+            avvisi.append("%d thresholds for %d self-trigger channels: the DAQ repeats "
+                          "the last one on the rest." % (len(off), len(sch)))
 
         if freq == "5GHz":
-            errori.append("A 5 GHz il self-trigger non puo' funzionare: la finestra "
-                          "dura meno della latenza, l'impulso cade sempre fuori.")
+            errori.append("At 5 GHz the self-trigger cannot work: the window is shorter "
+                          "than the latency, the pulse always falls outside.")
         elif freq == "2.5GHz" and modo == "global":
-            avvisi.append("A 2.5 GHz in modo global la latenza (~420 ns) supera la "
-                          "finestra (410 ns): l'impulso rischia di restare fuori. "
-                          "In paired funziona.")
+            avvisi.append("At 2.5 GHz in global mode the latency (~420 ns) exceeds the "
+                          "window (410 ns): the pulse risks falling outside. "
+                          "In paired mode it works.")
 
         # Dove cade l'impulso nella finestra. E' il conto che ci ha gia' fatto
         # registrare eventi vuoti senza capire perche'.
@@ -285,27 +285,27 @@ def coerenza(d):
             finestra = rl * passo
             pos = (1.0 - pt / 100.0) * finestra - LATENZA_NS.get(modo, 320.0)
             if pos < 0:
-                errori.append("Con questi valori l'impulso cadrebbe %.0f ns PRIMA "
-                              "dell'inizio della finestra: abbassa il post-trigger "
-                              "o rallenta il campionamento." % (-pos))
+                errori.append("With these values the pulse would fall %.0f ns BEFORE the "
+                              "start of the window: lower the post-trigger or slow "
+                              "down the sampling." % (-pos))
             elif pos > finestra * 0.9:
-                avvisi.append("L'impulso cadrebbe a %.0f ns su una finestra di %.0f: "
-                              "troppo vicino alla fine, rischi di tagliarne la coda."
+                avvisi.append("The pulse would fall at %.0f ns in a %.0f ns window: too "
+                              "close to the end, you risk clipping its tail."
                               % (pos, finestra))
 
     if c.get("Enabled"):
         if str(g.get("Connection", "")) == "USB_A4818":
-            errori.append("Col CFD acceso serve il bridge: su USB_A4818 la fibra va "
-                          "dritta al digitizer e sul bus VME non c'e' nessun master.")
+            errori.append("With the CFD on the bridge is needed: on USB_A4818 the fibre "
+                          "goes straight to the digitizer and the VME bus has no master.")
         if not est_on:
-            avvisi.append("CFD acceso ma trigger esterno spento: l'OR del V812 entra "
-                          "da TRG-IN, quindi cosi' non fa niente.")
+            avvisi.append("CFD on but external trigger off: the V812 OR comes in through "
+                          "TRG-IN, so as it is, it does nothing.")
         cch = lista(c.get("Channels"))
         cth = lista(c.get("Threshold"))
         if not cch:
-            errori.append("Il CFD e' acceso ma non ha nessun ingresso abilitato.")
+            errori.append("The CFD is on but has no input enabled.")
         if len(cth) > 1 and len(cth) != len(cch):
-            avvisi.append("%d soglie CFD per %d ingressi: viene replicata l'ultima."
+            avvisi.append("%d CFD thresholds for %d inputs: the last one is repeated."
                           % (len(cth), len(cch)))
 
     return errori, avvisi
@@ -452,7 +452,7 @@ def registra(chi, da, azione, esito):
     """Chi ha fatto cosa. Non e' autenticazione: e' per sapere chi ha fermato
     la tua run quando siete in piu' persone sulla stessa macchina."""
     voce = {"quando": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "chi": chi or "(anonimo)", "da": da, "azione": azione, "esito": esito}
+            "chi": chi or "(anonymous)", "da": da, "azione": azione, "esito": esito}
     try:
         os.makedirs(os.path.dirname(AZIONI), exist_ok=True)
         with open(AZIONI, "a") as f:
@@ -557,17 +557,17 @@ class Controllo:
                 testo = io.open(self.toml, encoding="utf-8").read()
                 mtime = os.path.getmtime(self.toml)
             except OSError as e:
-                return False, "Non riesco a leggere %s: %s" % (self.toml, e), []
+                return False, "Cannot read %s: %s" % (self.toml, e), []
 
             if mtime_atteso is not None and abs(mtime - float(mtime_atteso)) > 0.001:
-                return False, ("Il file e' cambiato da quando hai aperto la pagina. "
-                               "Ricarica e rifai le modifiche: non lo sovrascrivo."), []
+                return False, ("The file changed since you opened the page. "
+                               "Reload and redo your changes: I will not overwrite it."), []
 
             spec = {(s, c): (e, t, d) for s, c, e, t, d in CAMPI}
             richieste = []
             for sezione, chiave, valore in modifiche:
                 if (sezione, chiave) not in spec:
-                    return False, "[%s] %s non e' modificabile da qui." % (sezione, chiave), []
+                    return False, "[%s] %s cannot be changed from here." % (sezione, chiave), []
                 etichetta, tipo, dettagli = spec[(sezione, chiave)]
                 try:
                     richieste.append((sezione, chiave,
@@ -581,7 +581,7 @@ class Controllo:
                 return False, str(e).strip("'"), []
 
             if not diff:
-                return True, "Niente da cambiare.", []
+                return True, "Nothing to change.", []
 
             # Il controllo che conta: il file che sto per scrivere e' ancora
             # TOML valido? Se no non lo scrivo affatto, invece di scoprirlo al
@@ -593,7 +593,7 @@ class Controllo:
             except ImportError:
                 d = None
             except Exception as e:
-                return False, "La modifica produrrebbe un TOML non valido: %s" % e, []
+                return False, "The change would produce invalid TOML: %s" % e, []
 
             if d is not None:
                 # I singoli campi erano gia' validi: qui si guarda l'insieme,
@@ -601,7 +601,7 @@ class Controllo:
                 # serata senza che nessun valore sia sbagliato di per se'.
                 errori, avvisi = coerenza(d)
                 if errori:
-                    return False, "Configurazione incoerente:\n" + "\n".join(
+                    return False, "Inconsistent configuration:\n" + "\n".join(
                         "- " + e for e in errori), []
 
             # Il nome deve essere unico anche per due salvataggi nello stesso
@@ -617,11 +617,11 @@ class Controllo:
                 io.open(backup, "w", encoding="utf-8").write(testo)
                 io.open(self.toml, "w", encoding="utf-8").write(nuovo)
             except OSError as e:
-                return False, "Scrittura fallita: %s" % e, []
+                return False, "Write failed: %s" % e, []
 
-            messaggio = "Salvato. Backup in %s" % os.path.basename(backup)
+            messaggio = "Saved. Backup in %s" % os.path.basename(backup)
             if avvisi:
-                messaggio += "\n\nDa guardare:\n" + "\n".join("- " + a for a in avvisi)
+                messaggio += "\n\nWorth a look:\n" + "\n".join("- " + a for a in avvisi)
             return True, messaggio, diff
 
     def soglie_a_caldo(self, offsets):
@@ -632,20 +632,20 @@ class Controllo:
         voluto -- uno scan non deve lasciare residui.
         """
         if not trova_daq():
-            return False, "Non c'e' nessuna run in corso su cui applicarle."
+            return False, "There is no run in progress to apply them to."
         canali = self.config().get("self_canali") or []
         if not canali:
-            return False, "Il TOML non dichiara SelfTriggerChannels."
+            return False, "The TOML does not declare SelfTriggerChannels."
         valori = [v for v in str(offsets).replace(",", " ").split() if v]
         if len(valori) == 1:
             valori = valori * len(canali)
         if len(valori) != len(canali):
-            return False, ("Servono %d valori, uno per canale %s (oppure uno solo "
-                           "per tutti)." % (len(canali), canali))
+            return False, ("%d values are needed, one per channel %s (or a single "
+                           "one for all)." % (len(canali), canali))
         try:
             righe = "".join("%d %g\n" % (int(c), float(v)) for c, v in zip(canali, valori))
         except ValueError:
-            return False, "Gli offset devono essere numeri."
+            return False, "The offsets must be numbers."
         percorso = os.path.join(os.path.dirname(self.log_path), "live-threshold.txt")
         cfg = self.config().get("cartella_dati")
         if cfg:
@@ -653,8 +653,8 @@ class Controllo:
         try:
             io.open(percorso, "w", encoding="utf-8").write(righe)
         except OSError as e:
-            return False, "Non riesco a scrivere %s: %s" % (percorso, e)
-        return True, "Soglie applicate alla run in corso: %s" % righe.replace("\n", "  ").strip()
+            return False, "Cannot write %s: %s" % (percorso, e)
+        return True, "Thresholds applied to the running acquisition: %s" % righe.replace("\n", "  ").strip()
 
     # -- log ---------------------------------------------------------------
     def coda_log(self, n=25):
@@ -780,7 +780,7 @@ class Controllo:
         with self.lock:
             d = self.leggi_coda()
             if d["attiva"]:
-                return False, "La coda e' in esecuzione: fermala per modificarla."
+                return False, "The queue is running: stop it to change it."
 
             # Si validano adesso, non quando la run tocchera' a questa voce:
             # scoprire alle tre di notte che la quinta run della coda aveva un
@@ -789,7 +789,7 @@ class Controllo:
             pulite = []
             for sezione, chiave, valore in modifiche:
                 if (sezione, chiave) not in spec:
-                    return False, "[%s] %s non e' modificabile." % (sezione, chiave)
+                    return False, "[%s] %s cannot be changed." % (sezione, chiave)
                 etichetta, tipo, dettagli = spec[(sezione, chiave)]
                 try:
                     pulite.append([sezione, chiave,
@@ -804,27 +804,27 @@ class Controllo:
                     if not 1 <= sec <= 86400:
                         raise ValueError
                 except (TypeError, ValueError):
-                    return False, "La durata deve stare fra 1 e 86400 secondi."
+                    return False, "The duration must be between 1 and 86400 seconds."
 
             d["voci"].append({
                 "id": max([v["id"] for v in d["voci"]] + [0]) + 1,
                 "nome": (nome or "").strip()[:60] or "run %d" % (len(d["voci"]) + 1),
                 "modifiche": pulite, "secondi": sec,
-                "stato": "in attesa", "run": None, "eventi": None, "messaggio": "",
+                "stato": "pending", "run": None, "eventi": None, "messaggio": "",
             })
             self._scrivi_coda(d)
-            return True, "Aggiunta alla coda: %s" % d["voci"][-1]["nome"]
+            return True, "Added to the queue: %s" % d["voci"][-1]["nome"]
 
     def coda_rimuovi(self, voce_id):
         with self.lock:
             d = self.leggi_coda()
             if d["attiva"]:
-                return False, "La coda e' in esecuzione: fermala per modificarla."
+                return False, "The queue is running: stop it to change it."
             prima = len(d["voci"])
             d["voci"] = [v for v in d["voci"] if str(v["id"]) != str(voce_id)]
             self._scrivi_coda(d)
             return (len(d["voci"]) < prima,
-                    "Voce rimossa." if len(d["voci"]) < prima else "Voce non trovata.")
+                    "Entry removed." if len(d["voci"]) < prima else "Entry not found.")
 
     def coda_riprova(self):
         """Rimette in attesa tutto quello che non e' andato a buon fine.
@@ -838,21 +838,21 @@ class Controllo:
                 return False, "La coda e' in esecuzione."
             n = 0
             for v in d["voci"]:
-                if v["stato"] in ("interrotta", "fallita"):
-                    v.update(stato="in attesa", run=None, eventi=None, messaggio="")
+                if v["stato"] in ("interrupted", "failed"):
+                    v.update(stato="pending", run=None, eventi=None, messaggio="")
                     n += 1
             self._scrivi_coda(d)
-            return (n > 0, "%d voci rimesse in attesa." % n if n
-                    else "Non c'e' niente da riprovare.")
+            return (n > 0, "%d entries put back in the queue." % n if n
+                    else "There is nothing to retry.")
 
     def coda_svuota(self):
         with self.lock:
             d = self.leggi_coda()
             if d["attiva"]:
-                return False, "La coda e' in esecuzione: fermala prima."
+                return False, "The queue is running: stop it first."
             d["voci"] = []
             self._scrivi_coda(d)
-            return True, "Coda svuotata."
+            return True, "Queue cleared."
 
     def _applica(self, modifiche):
         """Scrive le modifiche di una voce. Senza backup: la coda ne ha gia'
@@ -873,7 +873,7 @@ class Controllo:
         except ImportError:
             pass
         except Exception as e:
-            return False, "TOML non valido: %s" % e
+            return False, "Invalid TOML: %s" % e
         try:
             io.open(self.toml, "w", encoding="utf-8").write(nuovo)
         except OSError as e:
@@ -884,30 +884,30 @@ class Controllo:
         with self.lock:
             d = self.leggi_coda()
             if d["attiva"]:
-                return False, "La coda e' gia' in esecuzione."
+                return False, "The queue is already running."
             if trova_scan():
-                return False, "C'e' uno scan in corso."
+                return False, "A scan is running."
             if trova_daq():
-                return False, "C'e' una run in corso: fermala prima."
-            da_fare = [v for v in d["voci"] if v["stato"] == "in attesa"]
+                return False, "A run is in progress: stop it first."
+            da_fare = [v for v in d["voci"] if v["stato"] == "pending"]
             if not da_fare:
-                return False, ("Nessuna voce in attesa. Aggiungine, oppure usa "
-                               "Riprova per rimettere in coda quelle interrotte.")
+                return False, ("No pending entries. Add some, or use Retry to put "
+                               "the interrupted ones back in the queue.")
 
             backup = "%s.bak-coda-%s" % (self.toml, time.strftime("%Y%m%d-%H%M%S"))
             try:
                 io.open(backup, "w", encoding="utf-8").write(
                     io.open(self.toml, encoding="utf-8").read())
             except OSError as e:
-                return False, "Non riesco a fare il backup del TOML: %s" % e
+                return False, "Cannot back up the TOML: %s" % e
 
             d["attiva"] = True
             d["backup_toml"] = backup
-            d["messaggio"] = "in esecuzione"
+            d["messaggio"] = "running"
             self._scrivi_coda(d)
 
         threading.Thread(target=self._lavoratore, daemon=True).start()
-        return True, "Coda avviata: %d run da eseguire." % len(da_fare)
+        return True, "Queue started: %d runs to go." % len(da_fare)
 
     def _chiudi_coda(self, messaggio):
         """Disattiva la coda e rimette il TOML com'era. Da chiamare SEMPRE,
@@ -919,22 +919,22 @@ class Controllo:
             # Una voce lasciata "in corso" direbbe il falso: quella run non e'
             # andata a termine, e lo stato deve dirlo.
             for v in d["voci"]:
-                if v["stato"] == "in corso":
-                    v["stato"] = "interrotta"
+                if v["stato"] == "running":
+                    v["stato"] = "interrupted"
             b = d.get("backup_toml")
             if b and os.path.exists(b):
                 try:
                     io.open(self.toml, "w", encoding="utf-8").write(
                         io.open(b, encoding="utf-8").read())
                 except OSError:
-                    d["messaggio"] += "  (ATTENZIONE: non sono riuscito a rimettere il TOML)"
+                    d["messaggio"] += "  (WARNING: could not restore the TOML)"
             d["backup_toml"] = None
             self._scrivi_coda(d)
 
     def coda_ferma(self):
         d = self.leggi_coda()
         if not d["attiva"]:
-            return False, "La coda non e' in esecuzione."
+            return False, "The queue is not running."
         # Prima si spegne la coda, poi si ferma la run: all'inverso
         # l'esecutore partirebbe con la voce successiva.
         with self.lock:
@@ -944,8 +944,8 @@ class Controllo:
         if trova_daq():
             with self.lock:
                 self._ferma(da_coda=True)
-        self._chiudi_coda("Interrotta a mano.")
-        return True, "Coda fermata e TOML ripristinato."
+        self._chiudi_coda("Stopped by hand.")
+        return True, "Queue stopped and TOML restored."
 
     def _lavoratore(self):
         """Esegue la coda, una voce per volta."""
@@ -953,9 +953,9 @@ class Controllo:
             d = self.leggi_coda()
             if not d.get("attiva"):
                 return
-            voce = next((v for v in d["voci"] if v["stato"] == "in attesa"), None)
+            voce = next((v for v in d["voci"] if v["stato"] == "pending"), None)
             if voce is None:
-                self._chiudi_coda("Coda completata.")
+                self._chiudi_coda("Queue completed.")
                 return
 
             def segna(**campi):
@@ -965,16 +965,16 @@ class Controllo:
                         v.update(campi)
                 self._scrivi_coda(dd)
 
-            segna(stato="in corso", messaggio="")
+            segna(stato="running", messaggio="")
             ok, errore = self._applica(voce["modifiche"])
             if not ok:
-                segna(stato="fallita", messaggio=errore)
+                segna(stato="failed", messaggio=errore)
                 continue
 
             with self.lock:
                 avviata, messaggio = self._avvia(da_coda=True)
             if not avviata:
-                segna(stato="fallita", messaggio=messaggio)
+                segna(stato="failed", messaggio=messaggio)
                 continue
 
             inizio = time.time()
@@ -990,7 +990,7 @@ class Controllo:
                     break
 
             ev, _, runfile = self.eventi_correnti()
-            segna(stato="fatta", run=os.path.basename(runfile) if runfile else None,
+            segna(stato="done", run=os.path.basename(runfile) if runfile else None,
                   eventi=ev, messaggio="%.0f s" % (time.time() - inizio))
 
     # -- scan --------------------------------------------------------------
@@ -1010,20 +1010,20 @@ class Controllo:
         run per punto e vuole la DAQ ferma."""
         with self.lock:
             if tipo not in SCAN:
-                return False, "Scan sconosciuto: %s" % tipo
+                return False, "Unknown scan: %s" % tipo
             if trova_scan():
-                return False, "C'e' gia' uno scan in corso."
+                return False, "A scan is already running."
             if self.coda_attiva():
-                return False, "C'e' una coda in corso: e' lei che comanda la DAQ."
+                return False, "A queue is running: it is the one driving the DAQ."
             spec = SCAN[tipo]
 
             in_corso = trova_daq() is not None
             if spec["serve_run"] and not in_corso:
-                return False, ("Lo scan del self-trigger cambia le soglie a run in "
-                               "corso: la run va avviata prima.")
+                return False, ("The self-trigger scan changes thresholds on a running "
+                               "acquisition: start the run first.")
             if not spec["serve_run"] and in_corso:
-                return False, ("Lo scan del CFD fa una run per ogni punto: ferma "
-                               "prima quella in corso.")
+                return False, ("The CFD scan makes one run per point: stop the current "
+                               "one first.")
 
             # I valori finiscono in argv, mai in una shell, ma si controllano
             # lo stesso: un carattere strano qui sarebbe un refuso, non un
@@ -1031,23 +1031,23 @@ class Controllo:
             # allo script.
             pezzi = [x for x in str(valori).replace(",", " ").split() if x]
             if not pezzi:
-                return False, "Non hai indicato nessun valore da provare."
+                return False, "You did not give any value to try."
             for x in pezzi:
                 try:
                     float(x)
                 except ValueError:
-                    return False, "'%s' non e' un numero." % x
+                    return False, "'%s' is not a number." % x
             try:
                 sec = float(secondi)
                 if not 1 <= sec <= 3600:
                     raise ValueError
             except (TypeError, ValueError):
-                return False, "I secondi per punto devono stare fra 1 e 3600."
+                return False, "Seconds per point must be between 1 and 3600."
 
             try:
                 log = open(SCAN_LOG, "wb")
             except OSError as e:
-                return False, "Non riesco a scrivere %s: %s" % (SCAN_LOG, e)
+                return False, "Cannot write %s: %s" % (SCAN_LOG, e)
             try:
                 proc = subprocess.Popen(
                     ["bash", spec["script"], spec["opzione"], " ".join(pezzi),
@@ -1055,7 +1055,7 @@ class Controllo:
                     cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL, start_new_session=True)
             except OSError as e:
-                return False, "Avvio fallito: %s" % e
+                return False, "Start failed: %s" % e
             finally:
                 log.close()
 
@@ -1067,7 +1067,7 @@ class Controllo:
                     json.dump(stato, f)
             except OSError:
                 pass
-            return True, "Scan %s avviato su %d punti." % (spec["etichetta"], len(pezzi))
+            return True, "%s scan started on %d points." % (spec["etichetta"], len(pezzi))
 
     def ferma_scan(self):
         """SIGTERM al GRUPPO, mai KILL.
@@ -1081,11 +1081,11 @@ class Controllo:
         with self.lock:
             s = trova_scan()
             if not s:
-                return False, "Non c'e' nessuno scan in corso."
+                return False, "No scan is running."
             try:
                 os.killpg(s["pgid"], signal.SIGTERM)
             except OSError as e:
-                return False, "Segnale fallito: %s" % e
+                return False, "Signal failed: %s" % e
             fermo = None
             for i in range(80):
                 time.sleep(0.5)
@@ -1093,7 +1093,7 @@ class Controllo:
                     fermo = (i + 1) * 0.5
                     break
             if fermo is None:
-                return False, "Lo scan non risponde da 40 s."
+                return False, "The scan has not responded for 40 s."
 
             # Lo script muore prima della DAQ che aveva lanciato: quella sta
             # chiudendo il file e comprimendolo, e ci mette il suo. Tornare
@@ -1101,13 +1101,13 @@ class Controllo:
             # DAQ ancora viva, con un messaggio incomprensibile.
             for j in range(60):
                 if not trova_daq():
-                    return True, ("Scan interrotto in %.1f s. Il TOML e' stato "
-                                  "ripristinato e la run dell'ultimo punto e' "
-                                  "stata chiusa regolarmente." % fermo)
+                    return True, ("Scan stopped in %.1f s. The TOML was restored and the "
+                                  "run of the last point was closed "
+                                  "properly." % fermo)
                 time.sleep(0.5)
-            return True, ("Scan interrotto in %.1f s e TOML ripristinato, ma la run "
-                          "dell'ultimo punto sta ancora chiudendo: aspetta qualche "
-                          "secondo prima di avviarne un'altra." % fermo)
+            return True, ("Scan stopped in %.1f s and TOML restored, but the run of the "
+                          "last point is still closing: wait a few seconds before "
+                          "starting another." % fermo)
 
     # -- azioni ------------------------------------------------------------
     def avvia(self, da_coda=False):
@@ -1116,19 +1116,19 @@ class Controllo:
 
     def _avvia(self, da_coda=False):
         if not da_coda and self.coda_attiva():
-            return False, "C'e' una coda in corso: e' lei che comanda la DAQ."
+            return False, "A queue is running: it is the one driving the DAQ."
         if trova_scan():
-            return False, "C'e' uno scan in corso: e' lui che comanda la DAQ."
+            return False, "A scan is running: it is the one driving the DAQ."
         if trova_daq():
-            return False, "C'e' gia' una DAQ in esecuzione."
+            return False, "A DAQ is already running."
         if not os.path.exists(BINARIO):
-            return False, "Binario non trovato: %s" % BINARIO
+            return False, "Binary not found: %s" % BINARIO
         if not os.path.exists(self.toml):
-            return False, "Configurazione non trovata: %s" % self.toml
+            return False, "Configuration not found: %s" % self.toml
         try:
             log = open(self.log_path, "wb")
         except OSError as e:
-            return False, "Non riesco a scrivere %s: %s" % (self.log_path, e)
+            return False, "Cannot write %s: %s" % (self.log_path, e)
         try:
             # start_new_session stacca il processo dalla sessione di questo
             # servizio: la run sopravvive al riavvio del controllore e alla
@@ -1140,14 +1140,14 @@ class Controllo:
                              stdin=subprocess.DEVNULL,
                              start_new_session=True)
         except OSError as e:
-            return False, "Avvio fallito: %s" % e
+            return False, "Start failed: %s" % e
         finally:
             log.close()
         for _ in range(50):
             time.sleep(0.1)
             if trova_daq():
-                return True, "DAQ avviata."
-        return False, "Avviata ma non la ritrovo fra i processi: guarda il log."
+                return True, "DAQ started."
+        return False, "Started but I cannot find it among the processes: check the log."
 
     def ferma(self, da_coda=False):
         with self.lock:
@@ -1155,24 +1155,24 @@ class Controllo:
 
     def _ferma(self, da_coda=False):
         if not da_coda and self.coda_attiva():
-            return False, ("C'e' una coda in corso: fermare la singola run la "
-                           "lascerebbe a meta'. Usa Ferma coda.")
+            return False, ("A queue is running: stopping the single run would leave "
+                           "it half done. Use Stop queue.")
         if trova_scan():
-            return False, ("C'e' uno scan in corso: fermare la singola run lo "
-                           "lascerebbe a meta'. Usa Ferma scan.")
+            return False, ("A scan is running: stopping the single run would leave "
+                           "it half done. Use Stop scan.")
         pid = trova_daq()
         if not pid:
-            return False, "Non c'e' nessuna DAQ in esecuzione."
+            return False, "No DAQ is running."
         try:
             os.kill(pid, signal.SIGTERM)
         except OSError as e:
-            return False, "Segnale fallito: %s" % e
+            return False, "Signal failed: %s" % e
         for i in range(ATTESA_ARRESTO_S * 2):
             time.sleep(0.5)
             if not trova_daq():
-                return True, "Run chiusa in %.1f s." % ((i + 1) * 0.5)
-        return False, ("Ancora viva dopo %d s. Probabilmente il link e' "
-                       "appeso: un secondo arresto la termina subito."
+                return True, "Run closed in %.1f s." % ((i + 1) * 0.5)
+        return False, ("Still alive after %d s. The link is probably hung: "
+                       "a second stop terminates it at once."
                        % ATTESA_ARRESTO_S)
 
 
@@ -1187,7 +1187,7 @@ class Controllo:
 PAGINA = r"""<!doctype html>
 <html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Controllo DAQ</title>
+<title>DAQ Control</title>
 <style>
  body{font:14px/1.45 system-ui,sans-serif;margin:0;padding:18px;background:#f6f6f4;color:#1a1a19}
  h1{font-size:18px;margin:0 0 14px}
@@ -1218,102 +1218,102 @@ PAGINA = r"""<!doctype html>
  input{font:inherit;padding:6px 9px;border:1px solid #d5d5d0;border-radius:6px}
  a{color:#2a78d6}
 </style></head><body>
-<h1>Controllo DAQ</h1>
+<h1>DAQ Control</h1>
 
 <div class="box" style="margin-bottom:14px">
   <span id="badge" class="stato ferma">...</span>
   <span id="sommario" style="margin-left:14px;color:#52514e"></span>
   <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-    <button id="avvia">Avvia run</button>
-    <button id="ferma">Ferma run</button>
-    <label style="margin-left:auto;color:#6b6a65">chi sei
-      <input id="chi" placeholder="il tuo nome" style="width:140px">
+    <button id="avvia">Start run</button>
+    <button id="ferma">Stop run</button>
+    <label style="margin-left:auto;color:#6b6a65">who are you
+      <input id="chi" placeholder="your name" style="width:140px">
     </label>
   </div>
   <div id="msg" class="msg"></div>
 </div>
 
 <div class="riga">
-  <div class="box" style="flex:2 1 520px"><h2>Configurazione</h2>
+  <div class="box" style="flex:2 1 520px"><h2>Configuration</h2>
     <div id="cfgfile" style="font-size:12px;color:#6b6a65;margin-bottom:8px"></div>
     <div id="cfg"></div>
     <div id="tabdig" style="margin-top:14px"></div>
     <div id="tabcfd" style="margin-top:14px"></div>
     <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <button id="salva" style="background:#2a78d6;color:#fff">Salva nel TOML</button>
-      <button id="ricarica" style="background:#ececea">Rileggi il file</button>
+      <button id="salva" style="background:#2a78d6;color:#fff">Save to TOML</button>
+      <button id="ricarica" style="background:#ececea">Reload file</button>
       <span style="font-size:12px;color:#6b6a65">
-        vale dalla prossima run, tranne le voci segnate <b>a caldo</b>
+        applies from the next run, except entries marked <b>live</b>
       </span>
     </div>
     <div style="margin-top:12px;padding-top:10px;border-top:1px solid #eee">
-      <label style="font-size:12px;color:#6b6a65">soglie self-trigger sulla run IN CORSO
-        <input id="caldo" placeholder="es. 5  oppure  4 6" style="width:110px">
+      <label style="font-size:12px;color:#6b6a65">self-trigger thresholds on the RUNNING acquisition
+        <input id="caldo" placeholder="e.g. 5  or  4 6" style="width:110px">
       </label>
-      <button id="applica" style="background:#ececea;margin-left:6px">Applica adesso</button>
+      <button id="applica" style="background:#ececea;margin-left:6px">Apply now</button>
     </div>
   </div>
-  <div class="box"><h2>Run in corso</h2><table id="run"></table></div>
+  <div class="box"><h2>Current run</h2><table id="run"></table></div>
 </div>
 
-<div class="box" style="margin-top:14px"><h2>Coda di run</h2>
+<div class="box" style="margin-top:14px"><h2>Run queue</h2>
   <div id="codastato" style="margin-bottom:10px"></div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-    <input id="cnome" placeholder="nome della run" style="width:190px">
-    <input id="csec" placeholder="durata [s]" style="width:95px" title="vuoto = finisce a NEvents">
-    <button id="cadd" style="background:#ececea">Aggiungi la configurazione attuale</button>
+    <input id="cnome" placeholder="run name" style="width:190px">
+    <input id="csec" placeholder="duration [s]" style="width:95px" title="empty = stops at NEvents">
+    <button id="cadd" style="background:#ececea">Add current configuration</button>
     <span style="margin-left:auto;display:flex;gap:8px">
-      <button id="cgo" style="background:#15603a;color:#fff">Avvia coda</button>
-      <button id="cstop" style="background:#a8321f;color:#fff">Ferma coda</button>
-      <button id="cretry" style="background:#ececea">Riprova le non fatte</button>
-      <button id="cclr" style="background:#ececea">Svuota</button>
+      <button id="cgo" style="background:#15603a;color:#fff">Start queue</button>
+      <button id="cstop" style="background:#a8321f;color:#fff">Stop queue</button>
+      <button id="cretry" style="background:#ececea">Retry unfinished</button>
+      <button id="cclr" style="background:#ececea">Clear</button>
     </span>
   </div>
   <div style="font-size:12px;color:#6b6a65;margin-top:6px">
-    Una voce e' la differenza fra quello che hai nel form adesso e quello che c'e'
-    nel file: imposta i parametri, dai un nome, aggiungi. Poi cambiali e aggiungine
-    un'altra. Il TOML viene salvato all'avvio della coda e rimesso a posto alla fine.
+    An entry is the difference between what you have in the form now and what is in
+    the file: set the parameters, give it a name, add it. Then change them and add
+    another. The TOML is saved when the queue starts and restored when it ends.
   </div>
   <div id="codatab" style="margin-top:10px"></div>
 </div>
 
-<div class="box" style="margin-top:14px"><h2>Scan in soglia</h2>
+<div class="box" style="margin-top:14px"><h2>Threshold scan</h2>
   <div id="scanstato" style="margin-bottom:10px"></div>
   <div style="display:flex;gap:22px;flex-wrap:wrap">
     <div>
-      <div style="font-size:12px;color:#6b6a65;margin-bottom:4px">self-trigger V1742 &mdash; offset</div>
+      <div style="font-size:12px;color:#6b6a65;margin-bottom:4px">V1742 self-trigger &mdash; offsets</div>
       <input id="s1val" value="3 4 5 6 8 10" style="width:170px">
-      <input id="s1sec" value="20" style="width:52px" title="secondi per punto">
-      <button id="s1go" style="background:#2a78d6;color:#fff">Avvia</button>
-      <div style="font-size:11px;color:#6b6a65;margin-top:3px">cambia le soglie a caldo: serve una run gia' in corso</div>
+      <input id="s1sec" value="20" style="width:52px" title="seconds per point">
+      <button id="s1go" style="background:#2a78d6;color:#fff">Start</button>
+      <div style="font-size:11px;color:#6b6a65;margin-top:3px">changes thresholds live: needs a run already in progress</div>
     </div>
     <div>
-      <div style="font-size:12px;color:#6b6a65;margin-bottom:4px">CFD V812 &mdash; soglie [mV]</div>
+      <div style="font-size:12px;color:#6b6a65;margin-bottom:4px">V812 CFD &mdash; thresholds [mV]</div>
       <input id="s2val" value="5 7 10 15 20 30" style="width:170px">
-      <input id="s2sec" value="60" style="width:52px" title="secondi per punto">
-      <button id="s2go" style="background:#eb6834;color:#fff">Avvia</button>
-      <div style="font-size:11px;color:#6b6a65;margin-top:3px">una run per ogni punto: la DAQ deve essere ferma</div>
+      <input id="s2sec" value="60" style="width:52px" title="seconds per point">
+      <button id="s2go" style="background:#eb6834;color:#fff">Start</button>
+      <div style="font-size:11px;color:#6b6a65;margin-top:3px">one run per point: the DAQ must be stopped</div>
     </div>
     <div style="margin-left:auto;align-self:flex-end">
-      <button id="sstop" style="background:#a8321f;color:#fff">Ferma scan</button>
+      <button id="sstop" style="background:#a8321f;color:#fff">Stop scan</button>
     </div>
   </div>
   <pre id="scanlog" style="margin-top:12px;display:none"></pre>
 </div>
 
-<div class="box" style="margin-top:14px"><h2>Grafici degli scan</h2>
+<div class="box" style="margin-top:14px"><h2>Scan plots</h2>
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     <select id="gsel" style="font:inherit;padding:6px 8px;border:1px solid #d5d5d0;border-radius:6px;min-width:280px"></select>
-    <button id="ggo" style="background:#ececea">Aggiorna elenco</button>
-    <a id="gapri" href="#" target="_blank" style="font-size:12px">apri a tutta pagina</a>
+    <button id="ggo" style="background:#ececea">Refresh list</button>
+    <a id="gapri" href="#" target="_blank" style="font-size:12px">open full size</a>
   </div>
   <div id="gvuoto" style="color:#6b6a65;font-size:12px;margin-top:8px"></div>
   <img id="gimg" style="margin-top:10px;max-width:100%;border:1px solid #e2e2de;border-radius:6px;display:none">
 </div>
 
-<div class="box" style="margin-top:14px"><h2>Log della DAQ</h2><pre id="log"></pre></div>
-<div class="box" style="margin-top:14px"><h2>Ultime azioni</h2><div id="azioni" class="az"></div></div>
-<p style="color:#6b6a65;font-size:12px">Grafici e DQM: <a id="mon" href="#">monitor</a></p>
+<div class="box" style="margin-top:14px"><h2>DAQ log</h2><pre id="log"></pre></div>
+<div class="box" style="margin-top:14px"><h2>Recent actions</h2><div id="azioni" class="az"></div></div>
+<p style="color:#6b6a65;font-size:12px">Plots and DQM: <a id="mon" href="#">monitor</a></p>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -1344,21 +1344,21 @@ async function azione(nome, conferma){
     const r = await fetch("/api/" + nome + "?" + q, {method: "POST"});
     const d = await r.json();
     msg(d.messaggio, d.esito);
-  }catch(e){ msg("Richiesta fallita: " + e, false); }
+  }catch(e){ msg("Request failed: " + e, false); }
   aggiorna();
 }
 
-$("avvia").onclick = () => azione("avvia", "Avviare una nuova run?");
+$("avvia").onclick = () => azione("avvia", "Start a new run?");
 $("ferma").onclick = () => azione("ferma",
-  "Fermare la run in corso?\n\nLa DAQ chiude il file e resetta la board: " +
-  "non si perde niente di quello che e' gia' stato acquisito.");
+  "Stop the running acquisition?\n\nThe DAQ closes the file and resets the board: " +
+  "nothing already acquired is lost.");
 
 async function aggiorna(){
   let s;
   try{ s = await (await fetch("/api/stato?token=" + TOKEN)).json(); }
-  catch(e){ $("badge").textContent = "servizio non raggiungibile"; return; }
+  catch(e){ $("badge").textContent = "service unreachable"; return; }
 
-  $("badge").textContent = s.in_corso ? "RUN IN CORSO" : "ferma";
+  $("badge").textContent = s.in_corso ? "RUNNING" : "stopped";
   $("badge").className = "stato " + (s.in_corso ? "corso" : "ferma");
   $("sommario").textContent = s.in_corso
       ? (s.run || "") + (s.rate !== null && s.rate !== undefined ? "   " + s.rate + " Hz" : "")
@@ -1369,23 +1369,23 @@ async function aggiorna(){
   tabella($("run"), s.in_corso
     ? [["pid", s.pid],
        ["file", s.run],
-       ["eventi", s.eventi === null ? "—" : s.eventi + " / " + s.eventi_richiesti],
-       ["rate (ultimi 30 s)", s.rate === null ? "in attesa" : s.rate + " Hz"],
-       ["in corso da", s.da_secondi === null ? "—" : Math.round(s.da_secondi) + " s"]]
-    : [["", "nessuna run in corso"]]);
+       ["events", s.eventi === null ? "—" : s.eventi + " / " + s.eventi_richiesti],
+       ["rate (last 30 s)", s.rate === null ? "waiting" : s.rate + " Hz"],
+       ["running for", s.da_secondi === null ? "—" : Math.round(s.da_secondi) + " s"]]
+    : [["", "no run in progress"]]);
 
   const cd = s.coda || {};
-  const attesa = (cd.voci || []).filter(x => x.stato === "in attesa").length;
+  const attesa = (cd.voci || []).filter(x => x.stato === "pending").length;
   $("codastato").innerHTML = cd.attiva
-    ? `<span class="stato corso">CODA IN ESECUZIONE</span>
-       <span style="margin-left:12px;color:#52514e">${attesa} run ancora da fare</span>`
-    : `<span style="color:#6b6a65">coda ferma${cd.messaggio ? " &mdash; " + cd.messaggio : ""}</span>`;
+    ? `<span class="stato corso">QUEUE RUNNING</span>
+       <span style="margin-left:12px;color:#52514e">${attesa} runs still to do</span>`
+    : `<span style="color:#6b6a65">queue stopped${cd.messaggio ? " &mdash; " + cd.messaggio : ""}</span>`;
   $("cgo").disabled = cd.attiva || !attesa;
   $("cstop").disabled = !cd.attiva;
   $("cadd").disabled = cd.attiva;
   $("cclr").disabled = cd.attiva;
   $("cretry").disabled = cd.attiva ||
-    !(cd.voci || []).some(x => x.stato === "interrotta" || x.stato === "fallita");
+    !(cd.voci || []).some(x => x.stato === "interrupted" || x.stato === "failed");
   disegnaCoda(cd);
 
   const sc = s.scan;
@@ -1394,11 +1394,11 @@ async function aggiorna(){
   if(window._scanPrima && !sc) caricaGrafici();
   window._scanPrima = !!sc;
   $("scanstato").innerHTML = sc
-    ? `<span class="stato corso">SCAN IN CORSO</span>
+    ? `<span class="stato corso">SCAN RUNNING</span>
        <span style="margin-left:12px;color:#52514e">${sc.etichetta} &middot;
-       punti: ${sc.valori} &middot; ${sc.secondi} s ciascuno &middot;
-       da ${Math.round(sc.da_secondi)} s</span>`
-    : '<span style="color:#6b6a65">nessuno scan in corso</span>';
+       points: ${sc.valori} &middot; ${sc.secondi} s each &middot;
+       for ${Math.round(sc.da_secondi)} s</span>`
+    : '<span style="color:#6b6a65">no scan running</span>';
   $("s1go").disabled = !!sc || !s.in_corso;
   $("s2go").disabled = !!sc || s.in_corso;
   $("sstop").disabled = !sc;
@@ -1407,8 +1407,8 @@ async function aggiorna(){
 
   $("log").textContent = (s.log || []).join("\n");
   $("azioni").innerHTML = (s.azioni || []).slice().reverse().map(a =>
-    `${a.quando} &middot; <b>${a.chi}</b> da ${a.da}: ${a.azione} &rarr; ${a.esito}`
-  ).join("<br>") || "nessuna azione registrata";
+    `${a.quando} &middot; <b>${a.chi}</b> from ${a.da}: ${a.azione} &rarr; ${a.esito}`
+  ).join("<br>") || "no actions recorded";
 }
 
 // --- configurazione -------------------------------------------------------
@@ -1465,18 +1465,18 @@ function disegnaTabelle(){
   const reg  = numeri(valoreDi("ChannelList"));
   const self = numeri(valoreDi("SelfTriggerChannels"));
   const off  = numeri(valoreDi("SelfTriggerThresholdOffset"));
-  tabellaCanali("tabdig", "canali del digitizer V1742", 32, [
-    {chiave: "reg",  titolo: "registra",     tipo: "flag"},
+  tabellaCanali("tabdig", "V1742 digitizer channels", 32, [
+    {chiave: "reg",  titolo: "record",       tipo: "flag"},
     {chiave: "self", titolo: "self-trigger", tipo: "flag"},
     {chiave: "off",  titolo: "offset",       tipo: "testo"},
   ], {reg: reg, self: self, off: srotola(self, off)});
 
   const cch = numeri(valoreDi("Channels"));
   const cth = numeri(valoreDi("Threshold"));
-  tabellaCanali("tabcfd", "ingressi del CFD V812  (numerazione del modulo, non del digitizer)",
+  tabellaCanali("tabcfd", "V812 CFD inputs  (module numbering, not the digitizer's)",
     16, [
-      {chiave: "cfd",  titolo: "abilitato",   tipo: "flag"},
-      {chiave: "cthr", titolo: "soglia [mV]", tipo: "testo"},
+      {chiave: "cfd",  titolo: "enabled",     tipo: "flag"},
+      {chiave: "cthr", titolo: "threshold [mV]", tipo: "testo"},
     ], {cfd: cch, cthr: srotola(cch, cth)});
 }
 
@@ -1505,7 +1505,7 @@ function campoHtml(c){
   const id = "f_" + c.sezione + "_" + c.chiave;
   const marchio = c.a_caldo ? ' <span style="color:#15603a;font-size:11px">a caldo</span>' : "";
   if(!c.presente)
-    return `<tr><td class="k">${c.etichetta}</td><td style="color:#a8321f">non c'e' nel file: aggiungila a mano</td></tr>`;
+    return `<tr><td class="k">${c.etichetta}</td><td style="color:#a8321f">not in the file: add it by hand</td></tr>`;
   let campo;
   if(c.tipo === "booleano" || c.tipo === "scelta"){
     const opz = c.tipo === "booleano" ? ["true","false"] : c.dettagli;
@@ -1520,7 +1520,7 @@ function campoHtml(c){
 
 async function caricaConfig(){
   try{ CFG = await (await fetch("/api/config?token=" + TOKEN)).json(); }
-  catch(e){ $("cfg").textContent = "non riesco a leggere la configurazione"; return; }
+  catch(e){ $("cfg").textContent = "cannot read the configuration"; return; }
   if(CFG.errore){ $("cfg").textContent = CFG.errore; return; }
   $("cfgfile").textContent = CFG.file;
   let html = "", sez = null;
@@ -1560,10 +1560,10 @@ $("ricarica").onclick = caricaConfig;
 $("salva").onclick = async () => {
   if(!CFG) return;
   const mod = modificheCorrenti();
-  if(!mod.length){ msg("Nessuna modifica da salvare.", true); return; }
+  if(!mod.length){ msg("No changes to save.", true); return; }
   const elenco = mod.map(m => "  " + m[1] + "  ->  " + m[2]).join("\n");
-  if(!confirm("Scrivere nel TOML?\n\n" + elenco +
-              "\n\nVale dalla prossima run. Viene fatto un backup.")) return;
+  if(!confirm("Write to the TOML?\n\n" + elenco +
+              "\n\nApplies from the next run. A backup is made.")) return;
   $("salva").disabled = true;
   try{
     const r = await fetch("/api/config?token=" + TOKEN, {
@@ -1572,51 +1572,51 @@ $("salva").onclick = async () => {
     });
     const d = await r.json();
     msg(d.messaggio, d.esito);
-  }catch(e){ msg("Salvataggio fallito: " + e, false); }
+  }catch(e){ msg("Save failed: " + e, false); }
   $("salva").disabled = false;
   caricaConfig();
 };
 
 $("applica").onclick = async () => {
   const v = $("caldo").value.trim();
-  if(!v){ msg("Scrivi gli offset da applicare.", false); return; }
-  if(!confirm("Applicare le soglie " + v + " alla run IN CORSO?\n\n" +
-              "Il TOML non viene toccato: alla prossima run tornano quelle del file.")) return;
+  if(!v){ msg("Enter the offsets to apply.", false); return; }
+  if(!confirm("Apply thresholds " + v + " to the RUNNING acquisition?\n\n" +
+              "The TOML is untouched: the next run goes back to the file values.")) return;
   try{
     const q = new URLSearchParams({offsets: v, chi: $("chi").value, token: TOKEN});
     const d = await (await fetch("/api/soglie?" + q, {method: "POST"})).json();
     msg(d.messaggio, d.esito);
-  }catch(e){ msg("Richiesta fallita: " + e, false); }
+  }catch(e){ msg("Request failed: " + e, false); }
 };
 
 // --- scan -----------------------------------------------------------------
 async function avviaScan(tipo, idval, idsec, nome){
   const v = $(idval).value.trim(), s = $(idsec).value.trim();
   const n = v.split(/[\s,]+/).filter(x => x !== "").length;
-  if(!confirm("Avviare lo scan " + nome + "?\n\n" + n + " punti da " + s +
-              " s: circa " + Math.round(n * s / 60) + " minuti.\n\n" +
+  if(!confirm("Start the " + nome + " scan?\n\n" + n + " points of " + s +
+              " s: about " + Math.round(n * s / 60) + " minutes.\n\n" +
               (tipo === "v812"
-                ? "Il TOML viene modificato a ogni punto e rimesso a posto alla fine."
-                : "Le soglie della run in corso cambiano a ogni punto."))) return;
+                ? "The TOML is changed at every point and restored at the end."
+                : "The thresholds of the running acquisition change at every point."))) return;
   try{
     const q = new URLSearchParams({tipo: tipo, valori: v, secondi: s,
                                    chi: $("chi").value, token: TOKEN});
     const d = await (await fetch("/api/scan/avvia?" + q, {method: "POST"})).json();
     msg(d.messaggio, d.esito);
-  }catch(e){ msg("Richiesta fallita: " + e, false); }
+  }catch(e){ msg("Request failed: " + e, false); }
   aggiorna();
 }
 
-$("s1go").onclick = () => avviaScan("v1742", "s1val", "s1sec", "del self-trigger");
-$("s2go").onclick = () => avviaScan("v812",  "s2val", "s2sec", "del CFD");
+$("s1go").onclick = () => avviaScan("v1742", "s1val", "s1sec", "self-trigger");
+$("s2go").onclick = () => avviaScan("v812",  "s2val", "s2sec", "CFD");
 $("sstop").onclick = async () => {
-  if(!confirm("Fermare lo scan?\n\nLo script rimette a posto il TOML e la run " +
-              "in corso viene chiusa regolarmente.")) return;
+  if(!confirm("Stop the scan?\n\nThe script restores the TOML and the running acquisition " +
+              "is closed properly.")) return;
   try{
     const q = new URLSearchParams({chi: $("chi").value, token: TOKEN});
     const d = await (await fetch("/api/scan/ferma?" + q, {method: "POST"})).json();
     msg(d.messaggio, d.esito);
-  }catch(e){ msg("Richiesta fallita: " + e, false); }
+  }catch(e){ msg("Request failed: " + e, false); }
   aggiorna();
 };
 
@@ -1644,7 +1644,7 @@ async function caricaGrafici(){
     return `<option value="${x.nome}">${x.nome}  —  ${q}</option>`;
   }).join("");
   $("gvuoto").textContent = g.length ? "" :
-    "Nessun grafico in plots/. Ne compare uno appena finisce uno scan.";
+    "No plots in plots/. One appears as soon as a scan finishes.";
   if(g.length){
     $("gsel").value = g.some(x => x.nome === scelto) ? scelto : g[0].nome;
     mostraGrafico();
@@ -1657,17 +1657,17 @@ $("gsel").onchange = mostraGrafico;
 $("ggo").onclick = caricaGrafici;
 
 // --- coda -----------------------------------------------------------------
-const COLORE_STATO = {"in attesa":"#6b6a65", "in corso":"#15603a",
-                      "fatta":"#2a78d6", "fallita":"#a8321f", "interrotta":"#eb6834"};
+const COLORE_STATO = {"pending":"#6b6a65", "running":"#15603a",
+                      "done":"#2a78d6", "failed":"#a8321f", "interrupted":"#eb6834"};
 
 function disegnaCoda(c){
   const v = (c && c.voci) || [];
   if(!v.length){
-    $("codatab").innerHTML = '<span style="color:#6b6a65;font-size:12px">coda vuota</span>';
+    $("codatab").innerHTML = '<span style="color:#6b6a65;font-size:12px">queue empty</span>';
     return;
   }
   const righe = v.map(x => {
-    const m = (x.modifiche || []).map(y => y[1] + "=" + y[2]).join(", ") || "configurazione del file";
+    const m = (x.modifiche || []).map(y => y[1] + "=" + y[2]).join(", ") || "configuration as in the file";
     const col = COLORE_STATO[x.stato] || "#6b6a65";
     const esito = [x.run || "", x.eventi != null ? x.eventi + " ev" : "", x.messaggio || ""]
                   .filter(s => s).join(" · ");
@@ -1675,14 +1675,14 @@ function disegnaCoda(c){
       <td style="color:#6b6a65">${x.id}</td>
       <td><b>${x.nome}</b></td>
       <td style="font-size:11px;color:#52514e">${m}</td>
-      <td>${x.secondi ? x.secondi + " s" : "a NEvents"}</td>
+      <td>${x.secondi ? x.secondi + " s" : "until NEvents"}</td>
       <td style="color:${col};font-weight:600">${x.stato}</td>
       <td style="font-size:11px;color:#52514e">${esito}</td>
-      <td><button data-id="${x.id}" class="crm" style="background:#ececea;padding:2px 8px">togli</button></td>
+      <td><button data-id="${x.id}" class="crm" style="background:#ececea;padding:2px 8px">remove</button></td>
     </tr>`;
   }).join("");
   $("codatab").innerHTML = `<table style="font-size:12px"><thead><tr style="color:#6b6a65">
-    <td>#</td><td>nome</td><td>modifiche</td><td>durata</td><td>stato</td><td>esito</td><td></td>
+    <td>#</td><td>name</td><td>changes</td><td>duration</td><td>status</td><td>outcome</td><td></td>
     </tr></thead><tbody>${righe}</tbody></table>`;
   for(const b of document.querySelectorAll(".crm"))
     b.onclick = async () => {
@@ -1698,7 +1698,7 @@ async function codaAzione(azione, conferma){
     const q = new URLSearchParams({chi: $("chi").value, token: TOKEN});
     const d = await (await fetch("/api/coda/" + azione + "?" + q, {method:"POST"})).json();
     msg(d.messaggio, d.esito);
-  }catch(e){ msg("Richiesta fallita: " + e, false); }
+  }catch(e){ msg("Request failed: " + e, false); }
   aggiorna();
 }
 
@@ -1706,9 +1706,9 @@ $("cadd").onclick = async () => {
   const mod = modificheCorrenti();
   const nome = $("cnome").value.trim(), sec = $("csec").value.trim();
   const descr = mod.length ? mod.map(m => m[1] + "=" + m[2]).join(", ")
-                           : "nessuna modifica: la configurazione come sta nel file";
-  if(!confirm("Aggiungere alla coda?\n\n" + (nome || "(senza nome)") + "\n" + descr +
-              "\n" + (sec ? sec + " s" : "fino a NEvents"))) return;
+                           : "no changes: the configuration as it is in the file";
+  if(!confirm("Add to the queue?\n\n" + (nome || "(unnamed)") + "\n" + descr +
+              "\n" + (sec ? sec + " s" : "until NEvents"))) return;
   try{
     const r = await fetch("/api/coda/aggiungi?token=" + TOKEN, {
       method:"POST", headers:{"Content-Type":"application/json"},
@@ -1717,17 +1717,17 @@ $("cadd").onclick = async () => {
     const d = await r.json();
     msg(d.messaggio, d.esito);
     if(d.esito){ $("cnome").value = ""; }
-  }catch(e){ msg("Richiesta fallita: " + e, false); }
+  }catch(e){ msg("Request failed: " + e, false); }
   aggiorna();
 };
 
 $("cgo").onclick   = () => codaAzione("avvia",
-  "Avviare la coda?\n\nIl TOML viene salvato adesso e rimesso a posto alla fine.");
+  "Start the queue?\n\nThe TOML is saved now and restored at the end.");
 $("cstop").onclick = () => codaAzione("ferma",
-  "Fermare la coda?\n\nLa run in corso viene chiusa regolarmente e il TOML ripristinato.");
+  "Stop the queue?\n\nThe running acquisition is closed properly and the TOML restored.");
 $("cretry").onclick = () => codaAzione("riprova",
-  "Rimettere in attesa le voci interrotte o fallite?");
-$("cclr").onclick  = () => codaAzione("svuota", "Svuotare la coda?");
+  "Put interrupted or failed entries back in the queue?");
+$("cclr").onclick  = () => codaAzione("svuota", "Clear the queue?");
 
 caricaGrafici();
 caricaConfig();
@@ -1911,7 +1911,7 @@ def main():
     # chiude e si rimette il TOML, invece di lasciare uno stato che dice il
     # falso. Ripartira' chi vuole, sapendo da dove.
     if ctrl.coda_attiva():
-        ctrl._chiudi_coda("Interrotta dal riavvio del controllore: riprendila a mano.")
+        ctrl._chiudi_coda("Interrupted by a controller restart: resume it by hand.")
         stampa("Coda           : era rimasta attiva, chiusa e TOML ripristinato")
 
     try:

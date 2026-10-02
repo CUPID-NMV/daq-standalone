@@ -405,19 +405,19 @@ class Monitor:
         nz  = max(rms, 0.5)
         sel = np.abs(values) > 5 * nz
         if sel.sum() < self.MIN_EVENTS_FOR_THRESHOLD:
-            return None, (f"statistica insufficiente: {sel.sum()} eventi con impulso, "
-                          f"ne servono {self.MIN_EVENTS_FOR_THRESHOLD}")
+            return None, (f"not enough statistics: {sel.sum()} events with a pulse, "
+                          f"{self.MIN_EVENTS_FOR_THRESHOLD} are needed")
 
         # In modo "paired" il trigger di un canale fa acquisire anche l'altro,
         # quindi molti eventi senza impulso sono del tutto normali e non
         # indicano affatto che si stia triggerando sul rumore.
         neg = float(np.mean(values[sel] < 0))
         if 0.25 < neg < 0.75:
-            return None, "trigger sul rumore: segno delle ampiezze incoerente"
+            return None, "triggering on noise: inconsistent amplitude sign"
 
         edge = float(np.percentile(np.abs(values[sel]), 1))
         if edge < 6 * nz:
-            return None, "soglia dentro il rumore: le due popolazioni si confondono"
+            return None, "threshold inside the noise: the two populations overlap"
 
         sign = -1.0 if neg > 0.5 else 1.0
         return sign * edge, None
@@ -536,15 +536,15 @@ class Monitor:
         else:
             axes[0].bar(x, [100 * r["occupazione"] for r in righe],
                         width=wbar, color="#1f77b4")
-            axes[0].set_ylabel("occupazione [%]")
+            axes[0].set_ylabel("occupancy [%]")
             axes[0].set_ylim(0, 105)
 
         axes[1].bar(x, [abs(r["ampiezza"]) * mv for r in righe], width=wbar, color="#2ca02c")
-        axes[1].set_ylabel("ampiezza [mV]")
+        axes[1].set_ylabel("amplitude [mV]")
 
         axes[2].bar(x, [r["rms"] * mv for r in righe], width=wbar, color="#d62728")
-        axes[2].set_ylabel("rumore [mV]")
-        axes[2].set_xlabel("canale")
+        axes[2].set_ylabel("noise [mV]")
+        axes[2].set_xlabel("channel")
 
         for ax in axes:
             ax.grid(alpha=.25, axis="y")
@@ -555,7 +555,7 @@ class Monitor:
         axes[2].set_xticks(x[::passo])
         axes[2].set_xticklabels(etich[::passo], fontsize=6.5,
                                 rotation=90 if len(righe) > 24 else 0)
-        fig.suptitle("Panoramica su %d canali  (ultimi %d eventi)"
+        fig.suptitle("Overview of %d channels  (last %d events)"
                      % (len(righe), ov["eventi"]), fontsize=10)
 
         fig.tight_layout()
@@ -595,13 +595,13 @@ class Monitor:
             """
             parti = []
             if self.tail_cut:
-                parti.append(f"ultimi {self.tail_cut} campioni scartati")
+                parti.append(f"last {self.tail_cut} samples dropped")
             if xlim[0] is not None or xlim[1] is not None:
                 a = xlim[0] if xlim[0] is not None else float(t_ns[0])
                 b = xlim[1] if xlim[1] is not None else float(t_ns[-1])
-                parti.append(f"ZOOM {a:.0f}-{b:.0f} ns dei "
-                             f"{t_ns[0]:.0f}-{t_ns[-1]:.0f} acquisiti")
-            return "tempo [ns]" + (f"      ({' · '.join(parti)})" if parti else "")
+                parti.append(f"ZOOM {a:.0f}-{b:.0f} ns of the "
+                             f"{t_ns[0]:.0f}-{t_ns[-1]:.0f} acquired")
+            return "time [ns]" + (f"      ({' · '.join(parti)})" if parti else "")
 
         if kind == "waveforms":
             fig, axes = plt.subplots(len(channels), 1, figsize=(9, 2.9 * len(channels)),
@@ -620,15 +620,15 @@ class Monitor:
                     filtrato = self.banda_limitata(grezzo, dt, bw)
                     ts, vs = self.campiona(t_ns, filtrato, 30.0)
                     ax.plot(t_ns, filtrato, lw=1.6, color="#d62728",
-                            label=f"dopo una banda a {bw:g} MHz")
+                            label=f"after a {bw:g} MHz bandwidth")
                     ax.plot(ts, vs, "o", ms=4, color="#8e44ad", zorder=5,
-                            label="letture di un ADC a 30 MHz")
+                            label="samples of a 30 MHz ADC")
                     pg, pf = float(grezzo.min()), float(filtrato.min())
                     rg = 1.4826 * np.median(np.abs(grezzo - np.median(grezzo)))
                     rf = 1.4826 * np.median(np.abs(filtrato - np.median(filtrato)))
                     ax.text(0.01, 0.04,
-                            f"picco  {pg:.0f} -> {pf:.1f} ADC   (x{pg/pf:.1f})\n"
-                            f"rumore {rg:.2f} -> {rf:.2f} ADC   (x{rg/rf:.1f})",
+                            f"peak  {pg:.0f} -> {pf:.1f} ADC   (x{pg/pf:.1f})\n"
+                            f"noise {rg:.2f} -> {rf:.2f} ADC   (x{rg/rf:.1f})",
                             transform=ax.transAxes, ha="left", va="bottom",
                             fontsize=8.5, color="#333",
                             bbox=dict(fc="white", ec="#ccc", alpha=.85))
@@ -638,7 +638,7 @@ class Monitor:
                 off = self.offsets.get(int(ch))
                 if eff is not None:
                     ax.axhline(eff, color="#d62728", lw=1.1, ls="--",
-                               label=f"ampiezza minima osservata {eff:.0f} ADC"
+                               label=f"smallest amplitude seen {eff:.0f} ADC"
                                      f"  ({eff * self.mv_per_count():.1f} mV)"
                                      + (f"  offset {off}" if off is not None else ""))
                     ax.legend(fontsize=8, loc="lower right")
@@ -649,10 +649,10 @@ class Monitor:
                             transform=ax.transAxes, ha="right", va="bottom",
                             fontsize=8, color="#d62728")
 
-                label = ("ultimo evento" if n == 1 else f"ultimi {n} eventi")
+                label = ("last event" if n == 1 else f"last {n} events")
                 med = float(np.median(amp[:, i]))
                 ax.set_title(f"ch{ch} — {label}   "
-                             f"(ampiezza mediana {med:.0f} ADC = "
+                             f"(median amplitude {med:.0f} ADC = "
                              f"{med * self.mv_per_count():.1f} mV)", fontsize=10)
                 ax.set_ylabel("ADC − baseline")
                 ax.grid(alpha=0.25)
@@ -668,11 +668,11 @@ class Monitor:
                 eff, _ = self.effective_threshold(amp[:, i], rms)
                 if eff is not None:
                     ax.axhline(eff, color=line.get_color(), lw=1.0, ls="--", alpha=.7,
-                               label=f"amp. minima ch{ch}: {eff:.0f} ADC")
+                               label=f"min amp. ch{ch}: {eff:.0f} ADC")
             ax.axhline(0, color="k", lw=0.8, ls=":")
             ax.set_xlabel(etichetta_tempo())
             ax.set_ylabel("ADC − baseline")
-            ax.set_title(f"Media su {corr.shape[0]} eventi", fontsize=10)
+            ax.set_title(f"Average over {corr.shape[0]} events", fontsize=10)
             ax.legend()
             ax.grid(alpha=0.25)
             apply_limits(ax)
@@ -717,10 +717,10 @@ class Monitor:
                 if old is not None and old.size:
                     lo = self.frozen_offsets.get(int(ch))
                     ax.hist(old, bins=bins, color="#888888", alpha=.55,
-                            label=f"prima (offset {lo})" if lo is not None else "prima")
+                            label=f"before (offset {lo})" if lo is not None else "prima")
                 cn = self.offsets.get(int(ch))
                 ax.hist(cur, bins=bins, color="#1f77b4", alpha=.85,
-                        label=f"ora (offset {cn})" if cn is not None else "ora")
+                        label=f"now (offset {cn})" if cn is not None else "ora")
                 if old is not None and old.size:
                     ax.legend(fontsize=8)
 
@@ -766,9 +766,9 @@ class Monitor:
                         and kw["range"][0] <= off <= kw["range"][1]):
                     ax.axvline(off, color="#2ca02c", lw=1.4)
 
-                etichetta = ("soglia self-trigger %g" % off) if e_soglia else \
-                            ("taglio %.1f" % taglio)
-                ax.text(0.5, 1.02, "%.1f%% sopra %s  (%.0f mV)"
+                etichetta = ("self-trigger threshold %g" % off) if e_soglia else \
+                            ("cut %.1f" % taglio)
+                ax.text(0.5, 1.02, "%.1f%% above %s  (%.0f mV)"
                         % (sopra, etichetta, taglio * mv_off),
                         transform=ax.transAxes, ha="center", va="bottom",
                         fontsize=9, color="#1a6b1a" if e_soglia else "#d62728")
@@ -783,9 +783,9 @@ class Monitor:
                 # Quanto vale un'unita' di offset in millivolt all'ingresso:
                 # e' l'attenuazione per il passo dell'ADC, cioe' la
                 # calibrazione della soglia misurata su impulsi da 1.6 ns.
-                ax.set_xlabel("ampiezza [unita' di offset]   "
+                ax.set_xlabel("amplitude [offset units]   "
                               "1 offset = %.2f mV   (impulsi da ~1.6 ns)" % mv_off)
-                ax.set_ylabel("eventi" + (" (log)" if logy else ""))
+                ax.set_ylabel("events" + (" (log)" if logy else ""))
                 ax.set_title(f"ch{ch}", fontsize=10, pad=18)
                 ax.grid(alpha=0.25)
 
@@ -862,13 +862,13 @@ PAGE = """<!DOCTYPE html>
   .ctl .grp { font-weight:600; font-size:13px; padding-bottom:5px; min-width:46px; }
 </style></head><body>
 <div id="alert"></div>
-<h1>DAQ V1742 — monitor online</h1>
-<div class="sub"><span id="file">…</span> · <span id="upd">in attesa del primo aggiornamento</span></div>
+<h1>V1742 DAQ — online monitor</h1>
+<div class="sub"><span id="file">…</span> · <span id="upd">waiting for the first update</span></div>
 <div class="bar">
-  <div><b id="rate100">–</b> <span>Hz · ultimi 100 ev</span></div>
-  <div><b id="ratemed">–</b> <span id="ratemednota">Hz · media run</span></div>
-  <div><b id="events">–</b> <span>eventi</span></div>
-  <div><b id="shown">–</b> <span>nei grafici</span></div>
+  <div><b id="rate100">–</b> <span>Hz · last 100 ev</span></div>
+  <div><b id="ratemed">–</b> <span id="ratemednota">Hz · run average</span></div>
+  <div><b id="events">–</b> <span>events</span></div>
+  <div><b id="shown">–</b> <span>in the plots</span></div>
   <div><span id="err" class="err"></span></div>
 </div>
 <div class="ctl">
@@ -876,22 +876,22 @@ PAGE = """<!DOCTYPE html>
   <label>x max [ns]<input id="xmax" value="__XMAX__" placeholder="auto"></label>
   <label>y min [ADC]<input id="ymin" value="__YMIN__" placeholder="auto"></label>
   <label>y max [ADC]<input id="ymax" value="__YMAX__" placeholder="auto"></label>
-  <label>eventi<input id="nev" value="__NEVENTS__" style="width:60px"></label>
-  <label>banda [MHz]<input id="bw" value="__BW__" placeholder="off" style="width:70px"></label>
-  <label>canali<input id="canali" value="" placeholder="tutti  es. 8,9,12-15" style="width:150px"></label>
-  <label>soglia [offset]<input id="qcut" value="" placeholder="tutto lo spettro" style="width:110px"></label>
+  <label>events<input id="nev" value="__NEVENTS__" style="width:60px"></label>
+  <label>bandwidth [MHz]<input id="bw" value="__BW__" placeholder="off" style="width:70px"></label>
+  <label>channels<input id="canali" value="" placeholder="all  e.g. 8,9,12-15" style="width:150px"></label>
+  <label>threshold [offset]<input id="qcut" value="" placeholder="whole spectrum" style="width:110px"></label>
   <button id="reset">Autoscale</button>
-  <button id="azzera" title="scarta gli eventi gia' acquisiti e riparte da adesso">Azzera dati</button>
-  <span class="hint">forme d'onda · campi vuoti = autoscale</span>
+  <button id="azzera" title="discards the events already acquired and starts from now">Reset data</button>
+  <span class="hint">waveforms · empty fields = autoscale</span>
 </div>
 <div id="hctl"></div>
-<table id="tab"><thead><tr><th>canale</th><th>baseline</th><th>rms</th>
-<th>ampiezza media</th><th>mediana</th><th>mediana [mV]</th><th>max</th><th>offset</th><th>soglia</th>
-<th>amp. minima [mV]</th><th>amp. minima [ADC]</th></tr></thead><tbody></tbody></table>
-<div id="boot" class="err">JavaScript non eseguito: la pagina non puo' aggiornarsi.
-Apri la console del browser per vedere l'errore.</div>
-<img id="pano" alt="panoramica per canale">
-<img id="w" alt="forme d'onda"><img id="a" alt="media"><img id="h" alt="ampiezze">
+<table id="tab"><thead><tr><th>channel</th><th>baseline</th><th>rms</th>
+<th>mean amplitude</th><th>median</th><th>median [mV]</th><th>max</th><th>offset</th><th>threshold</th>
+<th>min amp. [mV]</th><th>min amp. [ADC]</th></tr></thead><tbody></tbody></table>
+<div id="boot" class="err">JavaScript did not run: the page cannot update.
+Open the browser console to see the error.</div>
+<img id="pano" alt="per-channel overview">
+<img id="w" alt="waveforms"><img id="a" alt="average"><img id="h" alt="amplitudes">
 <script>
 document.getElementById('boot').style.display = 'none';
 const REFRESH = __REFRESH__ * 1000;
@@ -1002,14 +1002,14 @@ async function tick() {
     lastOk = new Date();
     setAlert(null);
     document.getElementById('upd').textContent =
-      'aggiornato alle ' + lastOk.toLocaleTimeString();
+      'updated at ' + lastOk.toLocaleTimeString();
     show('rate100', s.rate100); show('ratemed', s.ratemed);
     document.getElementById('ratemednota').textContent =
-        'Hz · media run' + (s.ratemednota || '');
+        'Hz · run average' + (s.ratemednota || '');
     show('events', s.events); show('shown', s.shown);
     document.getElementById('err').textContent    = s.error || '';
     document.getElementById('file').textContent   =
-      (s.file || 'nessun file') + (s.sampling ? ' · ' + s.sampling : '');
+      (s.file || 'no file') + (s.sampling ? ' · ' + s.sampling : '');
     buildHistControls((s.channels || []).map(c => c.ch));
     const tb = document.querySelector('#tab tbody');
     const na = v => (v === null || v === undefined) ? '-' : v;
@@ -1036,12 +1036,12 @@ async function tick() {
     // sembrerebbe viva mentre mostra dati fermi.
     const why = (e && e.message) ? e.message : String(e);
     const msg = lastOk
-      ? `Server non raggiungibile (${why}). Dati fermi all'ultimo aggiornamento `
-        + `riuscito: ${lastOk.toLocaleTimeString()}, `
-        + `${Math.round((Date.now() - lastOk.getTime()) / 1000)} s fa. `
-        + `Il monitor sulla macchina DAQ e' probabilmente stato chiuso.`
-      : `Server non raggiungibile (${why}). Nessun dato ricevuto da quando la `
-        + `pagina e' stata aperta: controlla che il monitor sia in esecuzione.`;
+      ? `Server unreachable (${why}). Data frozen at the last successful `
+        + `update: ${lastOk.toLocaleTimeString()}, `
+        + `${Math.round((Date.now() - lastOk.getTime()) / 1000)} s ago. `
+        + `The monitor on the DAQ machine has probably been shut down.`
+      : `Server unreachable (${why}). No data received since the page was `
+        + `opened: check that the monitor is running.`;
     setAlert(msg);
     document.getElementById('err').textContent = '';
   }

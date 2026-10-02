@@ -168,22 +168,23 @@ def main():
     ax.grid(alpha=.3, which="both" if args.logy else "major")
     ax.legend(fontsize=8.5)
 
-    if "v1742" in visti and "v812" in visti:
-        # A meta' altezza, a destra. Non e' una scelta a occhio: il rate cala
-        # con la soglia, quindi la parte destra sotto le curve e' vuota per
-        # costruzione. In basso invece ci finiscono i limiti superiori, che
-        # occupano tutta la riga.
-        ax.annotate("Both discriminators see the same signal.\n"
-                    "A gap at equal threshold is efficiency,\n"
-                    "not calibration.",
-                    xy=(.98, .42), xycoords="axes fraction", fontsize=8,
-                    ha="right", va="center", color=INCHIOSTRO,
-                    bbox=dict(fc="white", ec="#ddd", alpha=.9))
+    # La nota va FUORI dagli assi. Dentro non esiste un posto sicuro: avevo
+    # provato in basso a sinistra (ci finiscono i limiti superiori) e poi a
+    # meta' altezza a destra, ragionando che il rate cala sempre con la soglia
+    # -- vero, ma in scala logaritmica la curva crolla proprio li' e il
+    # riquadro le finiva sopra. Sotto il grafico non puo' collidere con niente,
+    # qualunque siano i dati e la scala.
+    sotto = "v1742" in visti and "v812" in visti
+    if sotto:
+        fig.text(0.5, 0.012,
+                 "Both discriminators see the same signal. "
+                 "A gap at equal threshold is efficiency, not calibration.",
+                 ha="center", fontsize=8, color=INCHIOSTRO)
 
     out = args.out or os.path.join(ROOT, "plots",
                                    "scan_%s.png" % time.strftime("%Y%m%d_%H%M%S"))
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0.04, 1, 1) if sotto else None)
     fig.savefig(out, dpi=130)
     plt.close(fig)
     print("grafico: %s" % out)

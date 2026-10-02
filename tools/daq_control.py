@@ -35,6 +35,7 @@ Due principi, da non perdere strada facendo:
 
 import argparse
 import errno
+import hashlib
 import io
 import re
 import json
@@ -427,7 +428,14 @@ def disegna_misure(nomi, logy):
     if not scelti:
         return False, "No measurement selected.", None
 
-    uscita = os.path.join(GRAFICI, "scan_%s.png" % time.strftime("%Y%m%d_%H%M%S"))
+    # Nome ricavato dalla selezione, non dall'ora: due disegni nello stesso
+    # secondo avrebbero avuto lo stesso nome e si sarebbero sovrascritti a
+    # vicenda, e un PNG nuovo a ogni clic riempirebbe plots/ di viste
+    # identiche. Cosi' lo stesso insieme con la stessa scala e' sempre lo
+    # stesso file, e il browser lo rilegge grazie al parametro anti-cache.
+    firma = hashlib.sha1(("|".join(sorted(nomi)) + ("|log" if logy else "|lin"))
+                         .encode()).hexdigest()[:8]
+    uscita = os.path.join(GRAFICI, "view_%s.png" % firma)
     cmd = [sys.executable, os.path.join(ROOT, "tools", "plot_scan.py")]
     if logy:
         cmd.append("--logy")

@@ -153,13 +153,15 @@ def main():
     ax.legend(fontsize=8.5)
 
     if "v1742" in visti and "v812" in visti:
-        # In basso a destra: a sinistra ci finiscono i limiti superiori, e un
-        # riquadro sopra i punti nasconde proprio i dati che spiega.
+        # A meta' altezza, a destra. Non e' una scelta a occhio: il rate cala
+        # con la soglia, quindi la parte destra sotto le curve e' vuota per
+        # costruzione. In basso invece ci finiscono i limiti superiori, che
+        # occupano tutta la riga.
         ax.annotate("Both discriminators see the same signal.\n"
                     "A gap at equal threshold is efficiency,\n"
                     "not calibration.",
-                    xy=(.98, .04), xycoords="axes fraction", fontsize=8,
-                    ha="right", color=INCHIOSTRO,
+                    xy=(.98, .42), xycoords="axes fraction", fontsize=8,
+                    ha="right", va="center", color=INCHIOSTRO,
                     bbox=dict(fc="white", ec="#ddd", alpha=.9))
 
     out = args.out or os.path.join(ROOT, "plots",

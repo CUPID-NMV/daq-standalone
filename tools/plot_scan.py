@@ -2,6 +2,7 @@
 """Grafico di uno scan in soglia, del self-trigger o del CFD, o dei due insieme.
 
     python3 tools/plot_scan.py plots/noise_scan_20261001_120000.json
+    python3 tools/plot_scan.py --logy plots/scan_v812_*.json
     python3 tools/plot_scan.py plots/noise_scan_*.json plots/scan_v812_*.json
 
 Sovrapporre i due e' il motivo per cui questo script esiste: il self-trigger e
@@ -101,6 +102,10 @@ def main():
     ap.add_argument("json", nargs="+", help="uno o piu' file di scan")
     ap.add_argument("--mv-per-offset", type=float, default=None,
                     help="forza la conversione offset -> mV del self-trigger")
+    ap.add_argument("--logy", action="store_true",
+                    help="asse dei rate logaritmico. Di default e' lineare: il "
+                         "logaritmo fa vedere bene le code basse ma schiaccia la "
+                         "parte alta, dove di solito sta la soglia che interessa")
     ap.add_argument("-o", "--out", default=None, help="file PNG di uscita")
     args = ap.parse_args()
 
@@ -136,20 +141,31 @@ def main():
 
         vis = ~lim
         if vis.any():
-            ax.semilogy(x[vis], np.maximum(y[vis], 1e-3), marker=mk, ls=ls, ms=8,
-                        lw=2.0, color=col, mec="white", mew=1.2, label=nota)
+            # Il valore si schiaccia a un minimo positivo solo in scala
+            # logaritmica, dove uno zero non sarebbe rappresentabile; in
+            # lineare si disegna il numero misurato.
+            yv = np.maximum(y[vis], 1e-3) if args.logy else y[vis]
+            ax.plot(x[vis], yv, marker=mk, ls=ls, ms=8,
+                    lw=2.0, color=col, mec="white", mew=1.2, label=nota)
         if lim.any():
             # Zero eventi non e' rate zero: su scala logaritmica sarebbe
             # invisibile, e spacciarlo per una misura sarebbe peggio.
             soffitto = 1.0 / d.get("secondi_per_punto", 1.0)
-            ax.semilogy(x[lim], [soffitto] * lim.sum(), marker="v", ls="none",
-                        ms=9, color=col, mec="white", mew=1.2, alpha=.8,
-                        label="upper limit, no events (%s)" % nota.split("  ")[0])
+            ax.plot(x[lim], [soffitto] * lim.sum(), marker="v", ls="none",
+                    ms=9, color=col, mec="white", mew=1.2, alpha=.8,
+                    label="upper limit, no events (%s)" % nota.split("  ")[0])
+
+    if args.logy:
+        ax.set_yscale("log")
+    else:
+        # In lineare il rate parte da zero: un asse che non lo include
+        # falserebbe la lettura di quanto una curva e' scesa.
+        ax.set_ylim(bottom=0)
 
     ax.set_xlabel("threshold  [mV at the detector input]")
     ax.set_ylabel("trigger rate  [Hz]")
     ax.set_title("Threshold scan", fontsize=11)
-    ax.grid(alpha=.3, which="both")
+    ax.grid(alpha=.3, which="both" if args.logy else "major")
     ax.legend(fontsize=8.5)
 
     if "v1742" in visti and "v812" in visti:

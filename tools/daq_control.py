@@ -387,6 +387,60 @@ def elenco_grafici(n=12):
     return fuori[:n]
 
 
+def elenco_misure(n=20):
+    """Le misure di scan disponibili: i JSON, non i PNG gia' disegnati.
+
+    Si elencano quelle perche' il grafico lo si rifa' al momento, con la scala
+    che si vuole: un PNG e' una decisione gia' presa, un JSON no.
+    """
+    try:
+        nomi = [f for f in os.listdir(GRAFICI)
+                if f.endswith(".json") and ("scan" in f)]
+    except OSError:
+        return []
+    fuori = []
+    for nome in nomi:
+        try:
+            st = os.stat(os.path.join(GRAFICI, nome))
+            with open(os.path.join(GRAFICI, nome)) as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            continue
+        fuori.append({"nome": nome, "quando": st.st_mtime,
+                      "punti": len(d.get("punti", [])),
+                      "tipo": "V812 CFD" if d.get("tipo") == "v812" else "V1742 self-trigger",
+                      "canali": d.get("canali")})
+    fuori.sort(key=lambda x: -x["quando"])
+    return fuori[:n]
+
+
+def disegna_misure(nomi, logy):
+    """Lancia plot_scan.py sulle misure scelte. Torna (esito, messaggio, png)."""
+    scelti = []
+    for nome in nomi[:8]:
+        if not nome or "/" in nome or not nome.endswith(".json"):
+            return False, "Nome non valido: %s" % nome, None
+        percorso = os.path.realpath(os.path.join(GRAFICI, nome))
+        if os.path.dirname(percorso) != os.path.realpath(GRAFICI) or not os.path.isfile(percorso):
+            return False, "Misura non trovata: %s" % nome, None
+        scelti.append(percorso)
+    if not scelti:
+        return False, "No measurement selected.", None
+
+    uscita = os.path.join(GRAFICI, "scan_%s.png" % time.strftime("%Y%m%d_%H%M%S"))
+    cmd = [sys.executable, os.path.join(ROOT, "tools", "plot_scan.py")]
+    if logy:
+        cmd.append("--logy")
+    cmd += scelti + ["-o", uscita]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return False, "Plot failed: %s" % e, None
+    if r.returncode != 0:
+        return False, (r.stderr.strip() or r.stdout.strip() or "plot_scan failed")[-400:], None
+    return True, "Plot drawn.", os.path.basename(uscita)
+
+
 def percorso_grafico(nome):
     """Percorso del grafico, oppure None se il nome non e' accettabile.
 
@@ -1302,10 +1356,21 @@ PAGINA = r"""<!doctype html>
 </div>
 
 <div class="box" style="margin-top:14px"><h2>Scan plots</h2>
-  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-    <select id="gsel" style="font:inherit;padding:6px 8px;border:1px solid #d5d5d0;border-radius:6px;min-width:280px"></select>
-    <button id="ggo" style="background:#ececea">Refresh list</button>
-    <a id="gapri" href="#" target="_blank" style="font-size:12px">open full size</a>
+  <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+    <select id="gsel" multiple size="5"
+            style="font:inherit;padding:4px 8px;border:1px solid #d5d5d0;border-radius:6px;min-width:400px"></select>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <label style="font-size:12px;color:#52514e">
+        <input type="checkbox" id="glog"> log scale
+      </label>
+      <button id="gdraw" style="background:#2a78d6;color:#fff">Draw</button>
+      <button id="ggo" style="background:#ececea">Refresh list</button>
+      <a id="gapri" href="#" target="_blank" style="font-size:12px">open full size</a>
+    </div>
+  </div>
+  <div style="font-size:12px;color:#6b6a65;margin-top:6px">
+    Pick one or more measurements (ctrl-click) and draw them together. Up to 8:
+    beyond that the curves stop being distinguishable.
   </div>
   <div id="gvuoto" style="color:#6b6a65;font-size:12px;margin-top:8px"></div>
   <img id="gimg" style="margin-top:10px;max-width:100%;border:1px solid #e2e2de;border-radius:6px;display:none">
@@ -1391,7 +1456,7 @@ async function aggiorna(){
   const sc = s.scan;
   // Appena uno scan finisce compare il suo grafico, senza doverlo chiedere:
   // e' il momento in cui lo si vuole guardare.
-  if(window._scanPrima && !sc) caricaGrafici();
+  if(window._scanPrima && !sc) caricaGrafici().then(disegna);
   window._scanPrima = !!sc;
   $("scanstato").innerHTML = sc
     ? `<span class="stato corso">SCAN RUNNING</span>
@@ -1621,11 +1686,10 @@ $("sstop").onclick = async () => {
 };
 
 // --- grafici --------------------------------------------------------------
-function mostraGrafico(){
-  const nome = $("gsel").value;
+function mostraGrafico(nome){
   if(!nome){ $("gimg").style.display = "none"; return; }
-  // Il parametro t serve solo a non far ripescare al browser la versione
-  // precedente: uno scan rifatto produce un file nuovo con lo stesso nome.
+  // Il parametro t serve solo a non far ripescare al browser una versione
+  // precedente con lo stesso nome.
   const url = "/grafico?nome=" + encodeURIComponent(nome) +
               "&token=" + TOKEN + "&t=" + Date.now();
   $("gimg").src = url;
@@ -1633,27 +1697,45 @@ function mostraGrafico(){
   $("gapri").href = url;
 }
 
+// Si elencano le MISURE, non i grafici gia' disegnati: un PNG e' una
+// decisione gia' presa sulla scala, un JSON no.
 async function caricaGrafici(){
   let d;
   try{ d = await (await fetch("/api/grafici?token=" + TOKEN)).json(); }
   catch(e){ return; }
-  const g = d.grafici || [];
-  const scelto = $("gsel").value;
-  $("gsel").innerHTML = g.map(x => {
+  const m = d.misure || [];
+  const scelti = new Set(Array.from($("gsel").selectedOptions).map(o => o.value));
+  $("gsel").innerHTML = m.map(x => {
     const q = new Date(x.quando * 1000).toLocaleString();
-    return `<option value="${x.nome}">${x.nome}  —  ${q}</option>`;
+    const ch = x.canali ? "  ch " + x.canali.join(",") : "";
+    return `<option value="${x.nome}">${x.tipo}${ch}  —  ${x.punti} pts  —  ${q}</option>`;
   }).join("");
-  $("gvuoto").textContent = g.length ? "" :
-    "No plots in plots/. One appears as soon as a scan finishes.";
-  if(g.length){
-    $("gsel").value = g.some(x => x.nome === scelto) ? scelto : g[0].nome;
-    mostraGrafico();
-  }else{
-    $("gimg").style.display = "none";
+  $("gvuoto").textContent = m.length ? "" :
+    "No measurements in plots/. One appears as soon as a scan finishes.";
+  if(m.length){
+    let qualcuno = false;
+    for(const o of $("gsel").options)
+      if(scelti.has(o.value)){ o.selected = true; qualcuno = true; }
+    if(!qualcuno) $("gsel").options[0].selected = true;
   }
 }
 
-$("gsel").onchange = mostraGrafico;
+async function disegna(){
+  const scelti = Array.from($("gsel").selectedOptions).map(o => o.value);
+  if(!scelti.length){ msg("Select at least one measurement.", false); return; }
+  const q = new URLSearchParams({token: TOKEN, chi: $("chi").value,
+                                 logy: $("glog").checked ? "1" : "0"});
+  for(const s of scelti) q.append("misura", s);
+  $("gdraw").disabled = true;
+  try{
+    const d = await (await fetch("/api/disegna?" + q, {method: "POST"})).json();
+    if(d.esito && d.png) mostraGrafico(d.png); else msg(d.messaggio, false);
+  }catch(e){ msg("Request failed: " + e, false); }
+  $("gdraw").disabled = false;
+}
+
+$("gdraw").onclick = disegna;
+$("glog").onchange = disegna;
 $("ggo").onclick = caricaGrafici;
 
 // --- coda -----------------------------------------------------------------
@@ -1766,7 +1848,8 @@ def crea_handler(ctrl, token):
             if parti.path == "/api/grafici":
                 if not self._autorizzato(qs):
                     return self._json({"errore": "token mancante o sbagliato"}, 403)
-                return self._json({"grafici": elenco_grafici()})
+                return self._json({"grafici": elenco_grafici(),
+                                   "misure": elenco_misure()})
 
             if parti.path == "/grafico":
                 if not self._autorizzato(qs):
@@ -1826,6 +1909,11 @@ def crea_handler(ctrl, token):
                              "; ".join("%s %s->%s" % (d["chiave"], d["da"], d["a"]) for d in diff))
                 elif not esito:
                     registra(chi, da, "config", "RIFIUTATA: " + messaggio)
+
+            elif parti.path == "/api/disegna":
+                esito, messaggio, png = disegna_misure(
+                    qs.get("misura", []), qs.get("logy", ["0"])[0] == "1")
+                extra["png"] = png
 
             elif parti.path.startswith("/api/coda/"):
                 azione = parti.path.rsplit("/", 1)[1]

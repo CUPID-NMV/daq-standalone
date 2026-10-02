@@ -188,6 +188,10 @@ def main():
                     help="una curva per CANALE invece del rate del trigger: "
                          "quante volte ogni canale ha superato la soglia, "
                          "ricontato sulle forme d'onda registrate")
+    ap.add_argument("--channels", default=None,
+                    help="con --per-channel, quali canali disegnare (es. 8,9). "
+                         "Di default tutti quelli presenti nel file, compresi "
+                         "quelli scollegati, che restano piatti a zero")
     ap.add_argument("--logy", action="store_true",
                     help="asse dei rate logaritmico. Di default e' lineare: il "
                          "logaritmo fa vedere bene le code basse ma schiaccia la "
@@ -226,7 +230,10 @@ def main():
             if not canali:
                 raise SystemExit("Non sono riuscito a rileggere nessun dato: "
                                  "i file delle run ci sono ancora in data/?")
-            for ch in sorted(canali):
+            voluti = None
+            if args.channels:
+                voluti = {int(x) for x in args.channels.replace(",", " ").split()}
+            for ch in sorted(c for c in canali if voluti is None or c in voluti):
                 if n >= len(PALETTE):
                     raise SystemExit("Troppe curve per i colori disponibili: "
                                      "scegli meno canali o meno scan.")

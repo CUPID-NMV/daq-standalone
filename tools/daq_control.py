@@ -61,6 +61,11 @@ SCAN_STATO = os.path.join(ROOT, "data", "scan-in-corso.json")
 SCAN_LOG = os.path.join(ROOT, "data", "scan-console.log")
 GRAFICI = os.path.join(ROOT, "plots")
 
+# La coda delle run. Come lo stato dello scan, sta su file: il controllore si
+# puo' riavviare, la coda no -- e una coda che sparisce a meta' e' peggio di
+# una coda che non c'e'.
+CODA = os.path.join(ROOT, "data", "coda.json")
+
 SCAN = {
     "v1742": {
         "script": os.path.join(ROOT, "tools", "scan_v1742.sh"),
@@ -702,7 +707,7 @@ class Controllo:
         s = {"in_corso": pid is not None, "pid": pid,
              "config": self.config(), "log": self.coda_log(25),
              "azioni": ultime_azioni(), "adesso": time.time(),
-             "scan": None}
+             "scan": None, "coda": self.leggi_coda()}
         if scan:
             s["scan"] = {
                 "tipo": scan["tipo"],
@@ -738,6 +743,231 @@ class Controllo:
         de = self.storia[-1][1] - self.storia[0][1]
         return round(de / dt, 2) if dt > 0.5 else None
 
+    # -- coda di run -------------------------------------------------------
+    #
+    #  Una coda e' una lista di run, ognuna con le sue modifiche al TOML e una
+    #  durata facoltativa. L'esecutore e' un thread di questo processo, ma lo
+    #  STATO sta su file: cosi' la pagina mostra sempre la realta' e un
+    #  riavvio del controllore non lascia in giro una coda fantasma.
+    #
+    #  Il TOML viene salvato una volta sola all'avvio della coda e rimesso a
+    #  posto alla fine, comunque vada. La stessa disciplina dello scan del
+    #  V812, che e' in fondo una coda specializzata.
+
+    def leggi_coda(self):
+        try:
+            with open(CODA) as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            d = {}
+        d.setdefault("attiva", False)
+        d.setdefault("voci", [])
+        d.setdefault("backup_toml", None)
+        d.setdefault("messaggio", "")
+        return d
+
+    def _scrivi_coda(self, d):
+        try:
+            with open(CODA, "w") as f:
+                json.dump(d, f, indent=1)
+        except OSError:
+            pass
+
+    def coda_attiva(self):
+        return bool(self.leggi_coda().get("attiva"))
+
+    def coda_aggiungi(self, nome, secondi, modifiche):
+        with self.lock:
+            d = self.leggi_coda()
+            if d["attiva"]:
+                return False, "La coda e' in esecuzione: fermala per modificarla."
+
+            # Si validano adesso, non quando la run tocchera' a questa voce:
+            # scoprire alle tre di notte che la quinta run della coda aveva un
+            # valore illegale non e' una bella scoperta.
+            spec = {(s, c): (e, ti, de) for s, c, e, ti, de in CAMPI}
+            pulite = []
+            for sezione, chiave, valore in modifiche:
+                if (sezione, chiave) not in spec:
+                    return False, "[%s] %s non e' modificabile." % (sezione, chiave)
+                etichetta, tipo, dettagli = spec[(sezione, chiave)]
+                try:
+                    pulite.append([sezione, chiave,
+                                   _toml_da_ui(tipo, valore, dettagli, etichetta)])
+                except ValueError as e:
+                    return False, str(e)
+
+            sec = None
+            if str(secondi or "").strip():
+                try:
+                    sec = float(secondi)
+                    if not 1 <= sec <= 86400:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    return False, "La durata deve stare fra 1 e 86400 secondi."
+
+            d["voci"].append({
+                "id": max([v["id"] for v in d["voci"]] + [0]) + 1,
+                "nome": (nome or "").strip()[:60] or "run %d" % (len(d["voci"]) + 1),
+                "modifiche": pulite, "secondi": sec,
+                "stato": "in attesa", "run": None, "eventi": None, "messaggio": "",
+            })
+            self._scrivi_coda(d)
+            return True, "Aggiunta alla coda: %s" % d["voci"][-1]["nome"]
+
+    def coda_rimuovi(self, voce_id):
+        with self.lock:
+            d = self.leggi_coda()
+            if d["attiva"]:
+                return False, "La coda e' in esecuzione: fermala per modificarla."
+            prima = len(d["voci"])
+            d["voci"] = [v for v in d["voci"] if str(v["id"]) != str(voce_id)]
+            self._scrivi_coda(d)
+            return (len(d["voci"]) < prima,
+                    "Voce rimossa." if len(d["voci"]) < prima else "Voce non trovata.")
+
+    def coda_svuota(self):
+        with self.lock:
+            d = self.leggi_coda()
+            if d["attiva"]:
+                return False, "La coda e' in esecuzione: fermala prima."
+            d["voci"] = []
+            self._scrivi_coda(d)
+            return True, "Coda svuotata."
+
+    def _applica(self, modifiche):
+        """Scrive le modifiche di una voce. Senza backup: la coda ne ha gia'
+        uno suo, preso all'avvio, e uno per voce riempirebbe la cartella."""
+        try:
+            testo = io.open(self.toml, encoding="utf-8").read()
+        except OSError as e:
+            return False, str(e)
+        try:
+            nuovo, _ = tomledit.sostituisci(testo, [tuple(m) for m in modifiche])
+        except KeyError as e:
+            return False, str(e).strip("\'")
+        try:
+            import tomllib
+            errori, _ = coerenza(tomllib.loads(nuovo))
+            if errori:
+                return False, "; ".join(errori)
+        except ImportError:
+            pass
+        except Exception as e:
+            return False, "TOML non valido: %s" % e
+        try:
+            io.open(self.toml, "w", encoding="utf-8").write(nuovo)
+        except OSError as e:
+            return False, str(e)
+        return True, ""
+
+    def coda_avvia(self):
+        with self.lock:
+            d = self.leggi_coda()
+            if d["attiva"]:
+                return False, "La coda e' gia' in esecuzione."
+            if trova_scan():
+                return False, "C'e' uno scan in corso."
+            if trova_daq():
+                return False, "C'e' una run in corso: fermala prima."
+            da_fare = [v for v in d["voci"] if v["stato"] == "in attesa"]
+            if not da_fare:
+                return False, "Nessuna voce da eseguire. Aggiungine, o azzera gli stati."
+
+            backup = "%s.bak-coda-%s" % (self.toml, time.strftime("%Y%m%d-%H%M%S"))
+            try:
+                io.open(backup, "w", encoding="utf-8").write(
+                    io.open(self.toml, encoding="utf-8").read())
+            except OSError as e:
+                return False, "Non riesco a fare il backup del TOML: %s" % e
+
+            d["attiva"] = True
+            d["backup_toml"] = backup
+            d["messaggio"] = "in esecuzione"
+            self._scrivi_coda(d)
+
+        threading.Thread(target=self._lavoratore, daemon=True).start()
+        return True, "Coda avviata: %d run da eseguire." % len(da_fare)
+
+    def _chiudi_coda(self, messaggio):
+        """Disattiva la coda e rimette il TOML com'era. Da chiamare SEMPRE,
+        qualunque sia il motivo per cui la coda finisce."""
+        with self.lock:
+            d = self.leggi_coda()
+            d["attiva"] = False
+            d["messaggio"] = messaggio
+            b = d.get("backup_toml")
+            if b and os.path.exists(b):
+                try:
+                    io.open(self.toml, "w", encoding="utf-8").write(
+                        io.open(b, encoding="utf-8").read())
+                except OSError:
+                    d["messaggio"] += "  (ATTENZIONE: non sono riuscito a rimettere il TOML)"
+            d["backup_toml"] = None
+            self._scrivi_coda(d)
+
+    def coda_ferma(self):
+        d = self.leggi_coda()
+        if not d["attiva"]:
+            return False, "La coda non e' in esecuzione."
+        # Prima si spegne la coda, poi si ferma la run: all'inverso
+        # l'esecutore partirebbe con la voce successiva.
+        with self.lock:
+            d = self.leggi_coda()
+            d["attiva"] = False
+            self._scrivi_coda(d)
+        if trova_daq():
+            with self.lock:
+                self._ferma(da_coda=True)
+        self._chiudi_coda("Interrotta a mano.")
+        return True, "Coda fermata e TOML ripristinato."
+
+    def _lavoratore(self):
+        """Esegue la coda, una voce per volta."""
+        while True:
+            d = self.leggi_coda()
+            if not d.get("attiva"):
+                return
+            voce = next((v for v in d["voci"] if v["stato"] == "in attesa"), None)
+            if voce is None:
+                self._chiudi_coda("Coda completata.")
+                return
+
+            def segna(**campi):
+                dd = self.leggi_coda()
+                for v in dd["voci"]:
+                    if v["id"] == voce["id"]:
+                        v.update(campi)
+                self._scrivi_coda(dd)
+
+            segna(stato="in corso", messaggio="")
+            ok, errore = self._applica(voce["modifiche"])
+            if not ok:
+                segna(stato="fallita", messaggio=errore)
+                continue
+
+            with self.lock:
+                avviata, messaggio = self._avvia(da_coda=True)
+            if not avviata:
+                segna(stato="fallita", messaggio=messaggio)
+                continue
+
+            inizio = time.time()
+            while True:
+                time.sleep(0.5)
+                if not trova_daq():
+                    break
+                if not self.leggi_coda().get("attiva"):
+                    return                      # ferma_coda ha gia' fatto tutto
+                if voce["secondi"] and time.time() - inizio >= voce["secondi"]:
+                    with self.lock:
+                        self._ferma(da_coda=True)
+                    break
+
+            ev, _, runfile = self.eventi_correnti()
+            segna(stato="fatta", run=os.path.basename(runfile) if runfile else None,
+                  eventi=ev, messaggio="%.0f s" % (time.time() - inizio))
+
     # -- scan --------------------------------------------------------------
     def coda_scan(self, n=30):
         try:
@@ -758,6 +988,8 @@ class Controllo:
                 return False, "Scan sconosciuto: %s" % tipo
             if trova_scan():
                 return False, "C'e' gia' uno scan in corso."
+            if self.coda_attiva():
+                return False, "C'e' una coda in corso: e' lei che comanda la DAQ."
             spec = SCAN[tipo]
 
             in_corso = trova_daq() is not None
@@ -853,59 +1085,70 @@ class Controllo:
                           "secondo prima di avviarne un'altra." % fermo)
 
     # -- azioni ------------------------------------------------------------
-    def avvia(self):
+    def avvia(self, da_coda=False):
         with self.lock:
-            if trova_scan():
-                return False, "C'e' uno scan in corso: e' lui che comanda la DAQ."
-            if trova_daq():
-                return False, "C'e' gia' una DAQ in esecuzione."
-            if not os.path.exists(BINARIO):
-                return False, "Binario non trovato: %s" % BINARIO
-            if not os.path.exists(self.toml):
-                return False, "Configurazione non trovata: %s" % self.toml
-            try:
-                log = open(self.log_path, "wb")
-            except OSError as e:
-                return False, "Non riesco a scrivere %s: %s" % (self.log_path, e)
-            try:
-                # start_new_session stacca il processo dalla sessione di questo
-                # servizio: la run sopravvive al riavvio del controllore e alla
-                # caduta della rete, che e' esattamente il guaio che questa
-                # pagina deve togliere di mezzo.
-                subprocess.Popen([BINARIO, self.toml],
-                                 cwd=os.path.dirname(BINARIO),
-                                 stdout=log, stderr=subprocess.STDOUT,
-                                 stdin=subprocess.DEVNULL,
-                                 start_new_session=True)
-            except OSError as e:
-                return False, "Avvio fallito: %s" % e
-            finally:
-                log.close()
-            for _ in range(50):
-                time.sleep(0.1)
-                if trova_daq():
-                    return True, "DAQ avviata."
-            return False, "Avviata ma non la ritrovo fra i processi: guarda il log."
+            return self._avvia(da_coda)
 
-    def ferma(self):
+    def _avvia(self, da_coda=False):
+        if not da_coda and self.coda_attiva():
+            return False, "C'e' una coda in corso: e' lei che comanda la DAQ."
+        if trova_scan():
+            return False, "C'e' uno scan in corso: e' lui che comanda la DAQ."
+        if trova_daq():
+            return False, "C'e' gia' una DAQ in esecuzione."
+        if not os.path.exists(BINARIO):
+            return False, "Binario non trovato: %s" % BINARIO
+        if not os.path.exists(self.toml):
+            return False, "Configurazione non trovata: %s" % self.toml
+        try:
+            log = open(self.log_path, "wb")
+        except OSError as e:
+            return False, "Non riesco a scrivere %s: %s" % (self.log_path, e)
+        try:
+            # start_new_session stacca il processo dalla sessione di questo
+            # servizio: la run sopravvive al riavvio del controllore e alla
+            # caduta della rete, che e' esattamente il guaio che questa
+            # pagina deve togliere di mezzo.
+            subprocess.Popen([BINARIO, self.toml],
+                             cwd=os.path.dirname(BINARIO),
+                             stdout=log, stderr=subprocess.STDOUT,
+                             stdin=subprocess.DEVNULL,
+                             start_new_session=True)
+        except OSError as e:
+            return False, "Avvio fallito: %s" % e
+        finally:
+            log.close()
+        for _ in range(50):
+            time.sleep(0.1)
+            if trova_daq():
+                return True, "DAQ avviata."
+        return False, "Avviata ma non la ritrovo fra i processi: guarda il log."
+
+    def ferma(self, da_coda=False):
         with self.lock:
-            if trova_scan():
-                return False, ("C'e' uno scan in corso: fermare la singola run lo "
-                               "lascerebbe a meta'. Usa Ferma scan.")
-            pid = trova_daq()
-            if not pid:
-                return False, "Non c'e' nessuna DAQ in esecuzione."
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except OSError as e:
-                return False, "Segnale fallito: %s" % e
-            for i in range(ATTESA_ARRESTO_S * 2):
-                time.sleep(0.5)
-                if not trova_daq():
-                    return True, "Run chiusa in %.1f s." % ((i + 1) * 0.5)
-            return False, ("Ancora viva dopo %d s. Probabilmente il link e' "
-                           "appeso: un secondo arresto la termina subito."
-                           % ATTESA_ARRESTO_S)
+            return self._ferma(da_coda)
+
+    def _ferma(self, da_coda=False):
+        if not da_coda and self.coda_attiva():
+            return False, ("C'e' una coda in corso: fermare la singola run la "
+                           "lascerebbe a meta'. Usa Ferma coda.")
+        if trova_scan():
+            return False, ("C'e' uno scan in corso: fermare la singola run lo "
+                           "lascerebbe a meta'. Usa Ferma scan.")
+        pid = trova_daq()
+        if not pid:
+            return False, "Non c'e' nessuna DAQ in esecuzione."
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError as e:
+            return False, "Segnale fallito: %s" % e
+        for i in range(ATTESA_ARRESTO_S * 2):
+            time.sleep(0.5)
+            if not trova_daq():
+                return True, "Run chiusa in %.1f s." % ((i + 1) * 0.5)
+        return False, ("Ancora viva dopo %d s. Probabilmente il link e' "
+                       "appeso: un secondo arresto la termina subito."
+                       % ATTESA_ARRESTO_S)
 
 
 # ---------------------------------------------------------------------------
@@ -986,6 +1229,26 @@ PAGINA = r"""<!doctype html>
     </div>
   </div>
   <div class="box"><h2>Run in corso</h2><table id="run"></table></div>
+</div>
+
+<div class="box" style="margin-top:14px"><h2>Coda di run</h2>
+  <div id="codastato" style="margin-bottom:10px"></div>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <input id="cnome" placeholder="nome della run" style="width:190px">
+    <input id="csec" placeholder="durata [s]" style="width:95px" title="vuoto = finisce a NEvents">
+    <button id="cadd" style="background:#ececea">Aggiungi la configurazione attuale</button>
+    <span style="margin-left:auto;display:flex;gap:8px">
+      <button id="cgo" style="background:#15603a;color:#fff">Avvia coda</button>
+      <button id="cstop" style="background:#a8321f;color:#fff">Ferma coda</button>
+      <button id="cclr" style="background:#ececea">Svuota</button>
+    </span>
+  </div>
+  <div style="font-size:12px;color:#6b6a65;margin-top:6px">
+    Una voce e' la differenza fra quello che hai nel form adesso e quello che c'e'
+    nel file: imposta i parametri, dai un nome, aggiungi. Poi cambiali e aggiungine
+    un'altra. Il TOML viene salvato all'avvio della coda e rimesso a posto alla fine.
+  </div>
+  <div id="codatab" style="margin-top:10px"></div>
 </div>
 
 <div class="box" style="margin-top:14px"><h2>Scan in soglia</h2>
@@ -1074,8 +1337,8 @@ async function aggiorna(){
   $("sommario").textContent = s.in_corso
       ? (s.run || "") + (s.rate !== null && s.rate !== undefined ? "   " + s.rate + " Hz" : "")
       : "";
-  $("avvia").disabled = s.in_corso;
-  $("ferma").disabled = !s.in_corso;
+  $("avvia").disabled = s.in_corso || !!s.scan || (s.coda && s.coda.attiva);
+  $("ferma").disabled = !s.in_corso || !!s.scan || (s.coda && s.coda.attiva);
 
   tabella($("run"), s.in_corso
     ? [["pid", s.pid],
@@ -1084,6 +1347,18 @@ async function aggiorna(){
        ["rate (ultimi 30 s)", s.rate === null ? "in attesa" : s.rate + " Hz"],
        ["in corso da", s.da_secondi === null ? "—" : Math.round(s.da_secondi) + " s"]]
     : [["", "nessuna run in corso"]]);
+
+  const cd = s.coda || {};
+  const attesa = (cd.voci || []).filter(x => x.stato === "in attesa").length;
+  $("codastato").innerHTML = cd.attiva
+    ? `<span class="stato corso">CODA IN ESECUZIONE</span>
+       <span style="margin-left:12px;color:#52514e">${attesa} run ancora da fare</span>`
+    : `<span style="color:#6b6a65">coda ferma${cd.messaggio ? " &mdash; " + cd.messaggio : ""}</span>`;
+  $("cgo").disabled = cd.attiva || !attesa;
+  $("cstop").disabled = !cd.attiva;
+  $("cadd").disabled = cd.attiva;
+  $("cclr").disabled = cd.attiva;
+  disegnaCoda(cd);
 
   const sc = s.scan;
   // Appena uno scan finisce compare il suo grafico, senza doverlo chiedere:
@@ -1238,18 +1513,25 @@ function valoreCampo(c){
   return el ? el.value.trim() : null;
 }
 
-$("ricarica").onclick = caricaConfig;
-
-$("salva").onclick = async () => {
-  if(!CFG) return;
-  const mod = [];
-  const tab = dalleTabelle();
+// Le differenze fra il form e il file: le usa sia il salvataggio sia la coda,
+// cosi' una voce di coda e' "questa configurazione" senza doverla ridescrivere.
+function modificheCorrenti(){
+  if(!CFG) return [];
+  const mod = [], tab = dalleTabelle();
   for(const c of CFG.campi){
     if(!c.presente) continue;
     const v = c.tabella ? tab[c.chiave] : valoreCampo(c);
     if(v !== null && v !== undefined && v !== c.valore)
       mod.push([c.sezione, c.chiave, v]);
   }
+  return mod;
+}
+
+$("ricarica").onclick = caricaConfig;
+
+$("salva").onclick = async () => {
+  if(!CFG) return;
+  const mod = modificheCorrenti();
   if(!mod.length){ msg("Nessuna modifica da salvare.", true); return; }
   const elenco = mod.map(m => "  " + m[1] + "  ->  " + m[2]).join("\n");
   if(!confirm("Scrivere nel TOML?\n\n" + elenco +
@@ -1345,6 +1627,77 @@ async function caricaGrafici(){
 
 $("gsel").onchange = mostraGrafico;
 $("ggo").onclick = caricaGrafici;
+
+// --- coda -----------------------------------------------------------------
+const COLORE_STATO = {"in attesa":"#6b6a65", "in corso":"#15603a",
+                      "fatta":"#2a78d6", "fallita":"#a8321f"};
+
+function disegnaCoda(c){
+  const v = (c && c.voci) || [];
+  if(!v.length){
+    $("codatab").innerHTML = '<span style="color:#6b6a65;font-size:12px">coda vuota</span>';
+    return;
+  }
+  const righe = v.map(x => {
+    const m = (x.modifiche || []).map(y => y[1] + "=" + y[2]).join(", ") || "configurazione del file";
+    const col = COLORE_STATO[x.stato] || "#6b6a65";
+    const esito = [x.run || "", x.eventi != null ? x.eventi + " ev" : "", x.messaggio || ""]
+                  .filter(s => s).join(" · ");
+    return `<tr>
+      <td style="color:#6b6a65">${x.id}</td>
+      <td><b>${x.nome}</b></td>
+      <td style="font-size:11px;color:#52514e">${m}</td>
+      <td>${x.secondi ? x.secondi + " s" : "a NEvents"}</td>
+      <td style="color:${col};font-weight:600">${x.stato}</td>
+      <td style="font-size:11px;color:#52514e">${esito}</td>
+      <td><button data-id="${x.id}" class="crm" style="background:#ececea;padding:2px 8px">togli</button></td>
+    </tr>`;
+  }).join("");
+  $("codatab").innerHTML = `<table style="font-size:12px"><thead><tr style="color:#6b6a65">
+    <td>#</td><td>nome</td><td>modifiche</td><td>durata</td><td>stato</td><td>esito</td><td></td>
+    </tr></thead><tbody>${righe}</tbody></table>`;
+  for(const b of document.querySelectorAll(".crm"))
+    b.onclick = async () => {
+      const q = new URLSearchParams({id: b.dataset.id, chi: $("chi").value, token: TOKEN});
+      const d = await (await fetch("/api/coda/rimuovi?" + q, {method:"POST"})).json();
+      msg(d.messaggio, d.esito); aggiorna();
+    };
+}
+
+async function codaAzione(azione, conferma){
+  if(conferma && !confirm(conferma)) return;
+  try{
+    const q = new URLSearchParams({chi: $("chi").value, token: TOKEN});
+    const d = await (await fetch("/api/coda/" + azione + "?" + q, {method:"POST"})).json();
+    msg(d.messaggio, d.esito);
+  }catch(e){ msg("Richiesta fallita: " + e, false); }
+  aggiorna();
+}
+
+$("cadd").onclick = async () => {
+  const mod = modificheCorrenti();
+  const nome = $("cnome").value.trim(), sec = $("csec").value.trim();
+  const descr = mod.length ? mod.map(m => m[1] + "=" + m[2]).join(", ")
+                           : "nessuna modifica: la configurazione come sta nel file";
+  if(!confirm("Aggiungere alla coda?\n\n" + (nome || "(senza nome)") + "\n" + descr +
+              "\n" + (sec ? sec + " s" : "fino a NEvents"))) return;
+  try{
+    const r = await fetch("/api/coda/aggiungi?token=" + TOKEN, {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({nome: nome, secondi: sec, modifiche: mod, chi: $("chi").value})
+    });
+    const d = await r.json();
+    msg(d.messaggio, d.esito);
+    if(d.esito){ $("cnome").value = ""; }
+  }catch(e){ msg("Richiesta fallita: " + e, false); }
+  aggiorna();
+};
+
+$("cgo").onclick   = () => codaAzione("avvia",
+  "Avviare la coda?\n\nIl TOML viene salvato adesso e rimesso a posto alla fine.");
+$("cstop").onclick = () => codaAzione("ferma",
+  "Fermare la coda?\n\nLa run in corso viene chiusa regolarmente e il TOML ripristinato.");
+$("cclr").onclick  = () => codaAzione("svuota", "Svuotare la coda?");
 
 caricaGrafici();
 caricaConfig();
@@ -1444,6 +1797,31 @@ def crea_handler(ctrl, token):
                 elif not esito:
                     registra(chi, da, "config", "RIFIUTATA: " + messaggio)
 
+            elif parti.path.startswith("/api/coda/"):
+                azione = parti.path.rsplit("/", 1)[1]
+                if azione == "aggiungi":
+                    try:
+                        n = int(self.headers.get("Content-Length", 0))
+                        corpo = json.loads(self.rfile.read(n) or b"{}")
+                    except (ValueError, OSError) as e:
+                        return self._json({"esito": False,
+                                           "messaggio": "richiesta illeggibile: %s" % e})
+                    chi = (corpo.get("chi") or chi).strip()[:40]
+                    esito, messaggio = ctrl.coda_aggiungi(corpo.get("nome"),
+                                                          corpo.get("secondi"),
+                                                          corpo.get("modifiche", []))
+                elif azione == "rimuovi":
+                    esito, messaggio = ctrl.coda_rimuovi(qs.get("id", [""])[0])
+                elif azione == "svuota":
+                    esito, messaggio = ctrl.coda_svuota()
+                elif azione == "avvia":
+                    esito, messaggio = ctrl.coda_avvia()
+                elif azione == "ferma":
+                    esito, messaggio = ctrl.coda_ferma()
+                else:
+                    return self._manda(404, "text/plain", b"not found")
+                registra(chi, da, "coda/" + azione, messaggio)
+
             elif parti.path == "/api/scan/avvia":
                 esito, messaggio = ctrl.avvia_scan(qs.get("tipo", [""])[0],
                                                    qs.get("valori", [""])[0],
@@ -1495,6 +1873,14 @@ def main():
         stampa("Token          : attivo")
     pid = trova_daq()
     stampa("DAQ            : %s" % ("in esecuzione, pid %d" % pid if pid else "ferma"))
+
+    # Una coda rimasta "attiva" da prima vuol dire che il controllore e' morto
+    # mentre la eseguiva: il thread che la portava avanti non c'e' piu'. La si
+    # chiude e si rimette il TOML, invece di lasciare uno stato che dice il
+    # falso. Ripartira' chi vuole, sapendo da dove.
+    if ctrl.coda_attiva():
+        ctrl._chiudi_coda("Interrotta dal riavvio del controllore: riprendila a mano.")
+        stampa("Coda           : era rimasta attiva, chiusa e TOML ripristinato")
 
     try:
         server = ThreadingHTTPServer((args.bind, args.port), crea_handler(ctrl, args.token))

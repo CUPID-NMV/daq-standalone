@@ -826,6 +826,25 @@ class Controllo:
             return (len(d["voci"]) < prima,
                     "Voce rimossa." if len(d["voci"]) < prima else "Voce non trovata.")
 
+    def coda_riprova(self):
+        """Rimette in attesa tutto quello che non e' andato a buon fine.
+
+        Serve dopo un'interruzione: le voci interrotte o fallite restano li' a
+        documentare cosa e' successo, ma senza questo non si potrebbero piu'
+        eseguire se non cancellandole e riscrivendole."""
+        with self.lock:
+            d = self.leggi_coda()
+            if d["attiva"]:
+                return False, "La coda e' in esecuzione."
+            n = 0
+            for v in d["voci"]:
+                if v["stato"] in ("interrotta", "fallita"):
+                    v.update(stato="in attesa", run=None, eventi=None, messaggio="")
+                    n += 1
+            self._scrivi_coda(d)
+            return (n > 0, "%d voci rimesse in attesa." % n if n
+                    else "Non c'e' niente da riprovare.")
+
     def coda_svuota(self):
         with self.lock:
             d = self.leggi_coda()
@@ -872,7 +891,8 @@ class Controllo:
                 return False, "C'e' una run in corso: fermala prima."
             da_fare = [v for v in d["voci"] if v["stato"] == "in attesa"]
             if not da_fare:
-                return False, "Nessuna voce da eseguire. Aggiungine, o azzera gli stati."
+                return False, ("Nessuna voce in attesa. Aggiungine, oppure usa "
+                               "Riprova per rimettere in coda quelle interrotte.")
 
             backup = "%s.bak-coda-%s" % (self.toml, time.strftime("%Y%m%d-%H%M%S"))
             try:
@@ -896,6 +916,11 @@ class Controllo:
             d = self.leggi_coda()
             d["attiva"] = False
             d["messaggio"] = messaggio
+            # Una voce lasciata "in corso" direbbe il falso: quella run non e'
+            # andata a termine, e lo stato deve dirlo.
+            for v in d["voci"]:
+                if v["stato"] == "in corso":
+                    v["stato"] = "interrotta"
             b = d.get("backup_toml")
             if b and os.path.exists(b):
                 try:
@@ -1240,6 +1265,7 @@ PAGINA = r"""<!doctype html>
     <span style="margin-left:auto;display:flex;gap:8px">
       <button id="cgo" style="background:#15603a;color:#fff">Avvia coda</button>
       <button id="cstop" style="background:#a8321f;color:#fff">Ferma coda</button>
+      <button id="cretry" style="background:#ececea">Riprova le non fatte</button>
       <button id="cclr" style="background:#ececea">Svuota</button>
     </span>
   </div>
@@ -1358,6 +1384,8 @@ async function aggiorna(){
   $("cstop").disabled = !cd.attiva;
   $("cadd").disabled = cd.attiva;
   $("cclr").disabled = cd.attiva;
+  $("cretry").disabled = cd.attiva ||
+    !(cd.voci || []).some(x => x.stato === "interrotta" || x.stato === "fallita");
   disegnaCoda(cd);
 
   const sc = s.scan;
@@ -1630,7 +1658,7 @@ $("ggo").onclick = caricaGrafici;
 
 // --- coda -----------------------------------------------------------------
 const COLORE_STATO = {"in attesa":"#6b6a65", "in corso":"#15603a",
-                      "fatta":"#2a78d6", "fallita":"#a8321f"};
+                      "fatta":"#2a78d6", "fallita":"#a8321f", "interrotta":"#eb6834"};
 
 function disegnaCoda(c){
   const v = (c && c.voci) || [];
@@ -1697,6 +1725,8 @@ $("cgo").onclick   = () => codaAzione("avvia",
   "Avviare la coda?\n\nIl TOML viene salvato adesso e rimesso a posto alla fine.");
 $("cstop").onclick = () => codaAzione("ferma",
   "Fermare la coda?\n\nLa run in corso viene chiusa regolarmente e il TOML ripristinato.");
+$("cretry").onclick = () => codaAzione("riprova",
+  "Rimettere in attesa le voci interrotte o fallite?");
 $("cclr").onclick  = () => codaAzione("svuota", "Svuotare la coda?");
 
 caricaGrafici();
@@ -1812,6 +1842,8 @@ def crea_handler(ctrl, token):
                                                           corpo.get("modifiche", []))
                 elif azione == "rimuovi":
                     esito, messaggio = ctrl.coda_rimuovi(qs.get("id", [""])[0])
+                elif azione == "riprova":
+                    esito, messaggio = ctrl.coda_riprova()
                 elif azione == "svuota":
                     esito, messaggio = ctrl.coda_svuota()
                 elif azione == "avvia":

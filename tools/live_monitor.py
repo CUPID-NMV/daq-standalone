@@ -337,6 +337,7 @@ class Monitor:
         return (n_now - n0) / (t_now - t0), " (dal monitor)"
 
     ATTENUAZIONE = {"2.5GHz": 16.1, "1GHz": 12.8}   # misurate su impulsi da 1.6 ns
+    # (gli impulsi dei PMT sono poi risultati 1.80 ns: vedi larghezza_pmt_20260930)
 
     def attenuazione(self):
         """Quanto il Transparent Mode riduce un impulso stretto.
@@ -782,9 +783,10 @@ class Monitor:
                 # vivono in Transparent Mode e differiscono per l'attenuazione.
                 # Quanto vale un'unita' di offset in millivolt all'ingresso:
                 # e' l'attenuazione per il passo dell'ADC, cioe' la
-                # calibrazione della soglia misurata su impulsi da 1.6 ns.
+                # calibrazione della soglia misurata su impulsi da 1.6 ns; i PMT
+                # sono risultati 1.80 ns, il 12% piu' larghi.
                 ax.set_xlabel("amplitude [offset units]   "
-                              "1 offset = %.2f mV   (impulsi da ~1.6 ns)" % mv_off)
+                              "1 offset = %.2f mV   (pulses ~1.8 ns wide)" % mv_off)
                 ax.set_ylabel("events" + (" (log)" if logy else ""))
                 ax.set_title(f"ch{ch}", fontsize=10, pad=18)
                 ax.grid(alpha=0.25)
@@ -1202,7 +1204,7 @@ def main():
     ap.add_argument("--attenuazione", type=float, default=None,
                     help="attenuazione del Transparent Mode usata per convertire "
                          "l'ampiezza in unita' di offset. Vuoto = quella misurata "
-                         "per la frequenza in uso, valida per impulsi da ~1.6 ns")
+                         "per la frequenza in uso, valida per impulsi da ~1.8 ns")
     ap.add_argument("-b", "--bind", default="127.0.0.1",
                     help="indirizzo su cui ascoltare. Il default accetta solo "
                          "connessioni locali, quindi da fuori serve un inoltro "

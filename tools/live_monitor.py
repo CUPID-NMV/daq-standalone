@@ -929,11 +929,17 @@ class Monitor:
             for i, ch in enumerate(channels):
                 line, = ax.plot(t_ns, corr[:, i].mean(axis=0), lw=1.4, label=f"ch{ch}")
 
-                rms = float(np.median(noise[:, i]))
-                eff, _ = self.effective_threshold(amp[:, i], rms)
-                if eff is not None:
-                    ax.axhline(eff, color=line.get_color(), lw=1.0, ls="--", alpha=.7,
-                               label=f"min amp. ch{ch}: {eff:.0f} ADC")
+                # Anche qui la riga vale solo col self-trigger: e' l'ampiezza
+                # del piu' piccolo impulso che lo ha fatto scattare. Era
+                # rimasta accesa quando ho tolto le sovrapposizioni dalle forme
+                # d'onda, e compariva su una run a trigger esterno.
+                if self.self_trigger_attivo():
+                    rms = float(np.median(noise[:, i]))
+                    eff, _ = self.effective_threshold(amp[:, i], rms)
+                    if eff is not None:
+                        ax.axhline(eff, color=line.get_color(), lw=1.0, ls="--",
+                                   alpha=.7,
+                                   label=f"min amp. ch{ch}: {eff:.0f} ADC")
             ax.axhline(0, color="k", lw=0.8, ls=":")
             ax.set_xlabel(etichetta_tempo())
             ax.set_ylabel("ADC − baseline")

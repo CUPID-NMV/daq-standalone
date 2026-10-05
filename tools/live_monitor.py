@@ -225,6 +225,12 @@ class Monitor:
                 return None
             n = min(disponibili, self.OVERVIEW_EVENTS)
             a = tot - n
+            # Verso dell'impulso, come in _verso(): prima quello dichiarato
+            # dalla DAQ, poi -- se non c'e' self-trigger non esiste
+            # live-status.json -- quello che dicono i dati, canale per canale.
+            pol = (self.status or {}).get("polarity")
+            verso_dich = 1.0 if pol == "rising" else (-1.0 if pol == "falling" else None)
+
             righe = []
             for i, ch in enumerate(chans):
                 blocco = np.asarray(ds[a:tot, i * ns:(i + 1) * ns], dtype=np.float32)
@@ -233,9 +239,21 @@ class Monitor:
                 base = np.median(blocco, axis=1)
                 sig = blocco - base[:, None]
                 rms = float(1.4826 * np.median(np.abs(sig)))
-                amp = sig.min(axis=1)
-                taglio = min(-10.0, -8.0 * rms)
-                ok = amp < taglio
+
+                # Si guarda l'escursione dalla parte DELL'IMPULSO. Qui era
+                # cablato sul minimo, cioe' sui segnali negativi dei PMT: con
+                # un SiPM positivo nessun evento superava la soglia, e la
+                # panoramica mostrava rate e ampiezza a zero su un canale che
+                # stava acquisendo a centinaia di hertz. Sembrava un grafico
+                # rotto, ed era una convenzione sbagliata.
+                verso = verso_dich
+                if verso is None:
+                    su = float(np.median(sig.max(axis=1)))
+                    giu = float(np.median(-sig.min(axis=1)))
+                    verso = 1.0 if su > giu else -1.0
+                amp = verso * (sig.max(axis=1) if verso > 0 else sig.min(axis=1))
+                taglio = max(10.0, 8.0 * rms)
+                ok = amp > taglio
                 righe.append({
                     "ch": ch,
                     "gruppo": ch // 8,
@@ -741,7 +759,13 @@ class Monitor:
                             label=f"after a {bw:g} MHz bandwidth")
                     ax.plot(ts, vs, "o", ms=4, color="#8e44ad", zorder=5,
                             label="samples of a 30 MHz ADC")
-                    pg, pf = float(grezzo.min()), float(filtrato.min())
+                    # Il picco sta dalla parte dell'impulso. Prendendo sempre
+                    # il minimo, com'era, su un segnale positivo si misurava
+                    # l'escursione negativa del rumore e il rapporto fra i due
+                    # "picchi" non voleva dire piu' niente.
+                    picco = (lambda v: float(v.max()) if self.segno > 0
+                             else float(v.min()))
+                    pg, pf = picco(grezzo), picco(filtrato)
                     rg = 1.4826 * np.median(np.abs(grezzo - np.median(grezzo)))
                     rf = 1.4826 * np.median(np.abs(filtrato - np.median(filtrato)))
                     ax.text(0.01, 0.04,

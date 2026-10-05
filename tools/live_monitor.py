@@ -787,7 +787,7 @@ class Monitor:
         return buf.getvalue()
 
     def figure(self, kind, n_show=1, xlim=(None, None), ylim=(None, None),
-               hset=None, bw=None, qcut=None, qset=None):
+               hset=None, bw=None, qcut=None, qset=None, gate=None):
         if kind == "panoramica":
             # Non passa dall'analisi di dettaglio: quella riguarda i soli
             # canali selezionati e puo' mancare, mentre la panoramica deve
@@ -951,12 +951,15 @@ class Monitor:
         elif kind == "integrals":
             dt_ns = float(t_ns[1] - t_ns[0]) if len(t_ns) > 1 else 1.0
 
-            # Il cancello di integrazione e' la finestra scelta per le forme
-            # d'onda, non una terza casella da riempire: si guarda l'impulso,
-            # si stringe la vista su di esso, e si integra esattamente quello
-            # che si vede. Vuoto = tutta la traccia.
-            a_i = 0 if xlim[0] is None else int(np.searchsorted(t_ns, xlim[0], "left"))
-            b_i = len(t_ns) if xlim[1] is None else int(np.searchsorted(t_ns, xlim[1], "right"))
+            # Il cancello ha caselle sue e non viene piu' dallo zoom delle
+            # forme d'onda. Legarlo alla vista sembrava elegante -- si integra
+            # quello che si guarda -- ma costringe a ritagliare il grafico per
+            # fissare il cancello, e le due cose si vogliono indipendenti: la
+            # forma d'onda si guarda intera, la carica si integra dove c'e'
+            # l'impulso.
+            g0, g1 = gate if gate else (None, None)
+            a_i = 0 if g0 is None else int(np.searchsorted(t_ns, g0, "left"))
+            b_i = len(t_ns) if g1 is None else int(np.searchsorted(t_ns, g1, "right"))
             a_i = max(0, min(a_i, len(t_ns) - 1))
             b_i = max(a_i + 1, min(b_i, len(t_ns)))
             nscamp = b_i - a_i
@@ -1304,12 +1307,14 @@ PAGE = """<!DOCTYPE html>
   <label>bandwidth [MHz]<input id="bw" value="__BW__" placeholder="off" style="width:70px"></label>
   <label>baseline from [ns]<input id="bfrom" value="__BFROM__" placeholder="default" style="width:70px"></label>
   <label>to [ns]<input id="bto" value="__BTO__" placeholder="default" style="width:70px"></label>
+  <label>charge gate from [ns]<input id="gfrom" value="__GFROM__" placeholder="default" style="width:70px"></label>
+  <label>to [ns]<input id="gto" value="__GTO__" placeholder="default" style="width:70px"></label>
   <label>channels<input id="canali" value="" placeholder="all  e.g. 8,9,12-15" style="width:150px"></label>
   <label>threshold [offset]<input id="qcut" value="" placeholder="whole spectrum" style="width:110px"></label>
   <button id="reset">Autoscale</button>
   <button id="azzera" title="discards the events already acquired and starts from now">Reset data</button>
-  <span class="hint">waveforms · empty fields = autoscale ·
-    x min/max is also the integration gate of the charge plot</span>
+  <span class="hint">x/y limits are the waveform zoom only &middot;
+    baseline and charge gate are independent of it</span>
 </div>
 <div id="hctl"></div>
 <table id="tab"><thead><tr><th>channel</th><th>baseline</th><th>rms</th>
@@ -1332,7 +1337,7 @@ function setAlert(msg) {
   if (msg) a.textContent = msg;
   document.body.classList.toggle('stale', !!msg);
 }
-const FIELDS = ['xmin','xmax','ymin','ymax','nev','bw','bfrom','bto','canali','qcut'];
+const FIELDS = ['xmin','xmax','ymin','ymax','nev','bw','bfrom','bto','gfrom','gto','canali','qcut'];
 
 // I limiti scelti sopravvivono a un reload della pagina. localStorage puo'
 // essere inaccessibile (finestra privata, cookie bloccati): mai fatale.
@@ -1603,6 +1608,8 @@ def make_handler(monitor, refresh, defaults):
                             .replace("__YMAX__", _fmt(defaults["ymax"]))
                             .replace("__BFROM__", _fmt(defaults["bfrom"]))
                             .replace("__BTO__", _fmt(defaults["bto"]))
+                            .replace("__GFROM__", _fmt(defaults["gfrom"]))
+                            .replace("__GTO__", _fmt(defaults["gto"]))
 )
                 return self._send(200, "text/html; charset=utf-8", page.encode())
 
@@ -1663,12 +1670,14 @@ def make_handler(monitor, refresh, defaults):
                             qs.get(f"qlog_{ch}", ["0"])[0] == "1",
                             _bin(self._num(qs, f"qbin_{ch}", None)),
                         )
+                    gate = (self._num(qs, "gfrom", defaults["gfrom"]),
+                            self._num(qs, "gto", defaults["gto"]))
                     return self._send(200, "image/png",
                                       monitor.figure(kinds[route], n, xlim, ylim,
                                                      hset,
                                                      self._num(qs, "bw", defaults["bw"]),
                                                      self._num(qs, "qcut", defaults["qcut"]),
-                                                     qset))
+                                                     qset, gate))
 
             self._send(404, "text/plain", b"not found")
 
@@ -1711,6 +1720,12 @@ def main():
                          "campionamento alte la finestra intera e' corta e questi "
                          "valori vanno rivisti. Con fine <= inizio non si corregge "
                          "niente e si torna alla mediana dell'intera traccia")
+    ap.add_argument("--gate-from", type=float, default=190.0, dest="gfrom",
+                    help="inizio del cancello su cui si integra la carica [ns] "
+                         "(default 190). Indipendente dallo zoom: la forma d'onda "
+                         "si guarda intera, la carica si integra dove c'e' l'impulso")
+    ap.add_argument("--gate-to", type=float, default=1000.0, dest="gto",
+                    help="fine del cancello della carica [ns] (default 1000)")
     ap.add_argument("--bw", type=float, default=None,
                     help="mostra il segnale dopo un passa-basso a questa frequenza "
                          "[MHz], piu' le letture di un ADC a 30 MHz. Serve a vedere "
@@ -1759,7 +1774,8 @@ def main():
                 "xmin": args.xmin, "xmax": args.xmax,
                 "ymin": args.ymin, "ymax": args.ymax,
                 "hxmin": args.hxmin, "hxmax": args.hxmax, "hlog": args.hlog,
-                "bfrom": args.bfrom, "bto": args.bto}
+                "bfrom": args.bfrom, "bto": args.bto,
+                "gfrom": args.gfrom, "gto": args.gto}
 
     try:
         server = ThreadingHTTPServer((args.bind, args.port),

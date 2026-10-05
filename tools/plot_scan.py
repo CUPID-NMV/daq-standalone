@@ -359,7 +359,17 @@ def main():
         ax.set_ylabel("trigger rate  [Hz]")
         ax.set_title("Threshold scan", fontsize=11)
     ax.grid(alpha=.3, which="both" if args.logy else "major")
-    ax.legend(fontsize=8.5)
+
+    # La legenda va SOTTO gli assi, per la stessa ragione della nota piu' giu':
+    # dentro non esiste un posto sicuro. Con matplotlib che sceglieva da solo,
+    # in scala logaritmica il riquadro finiva a meta' altezza e la discesa
+    # della curva -- che e' il tratto che si guarda in uno scan in soglia -- ci
+    # passava dietro, nascosta. Le etichette qui sono lunghe (dicono canale,
+    # calibrazione e frequenza), quindi un angolo libero non c'e' comunque.
+    voci = ax.get_legend_handles_labels()[1]
+    colonne = 2 if len(voci) > 3 and max((len(v) for v in voci), default=0) < 32 else 1
+    ax.legend(fontsize=8.5, loc="upper center", bbox_to_anchor=(0.5, -0.17),
+              ncol=colonne, frameon=False)
 
     # La nota va FUORI dagli assi. Dentro non esiste un posto sicuro: avevo
     # provato in basso a sinistra (ci finiscono i limiti superiori) e poi a
@@ -377,7 +387,10 @@ def main():
     out = args.out or os.path.join(ROOT, "plots",
                                    "scan_%s.png" % time.strftime("%Y%m%d_%H%M%S"))
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    fig.tight_layout(rect=(0, 0.04, 1, 1) if sotto else None)
+    # Lo spazio sotto gli assi va riservato a mano: tight_layout non sa che la
+    # legenda e' uscita dagli assi, e senza riserva la taglia via.
+    righe = -(-len(voci) // colonne)
+    fig.tight_layout(rect=(0, 0.055 * righe + (0.05 if sotto else 0.01), 1, 1))
     fig.savefig(out, dpi=130)
     plt.close(fig)
     print("grafico: %s" % out)

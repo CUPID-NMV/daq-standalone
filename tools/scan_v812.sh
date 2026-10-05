@@ -93,7 +93,9 @@ echo "backup  : $BACKUP"
 echo
 printf "  %8s %10s %12s %14s\n" "soglia" "eventi" "durata [s]" "rate [Hz]"
 
-N_PUNTI=$(echo $SOGLIE | wc -w)
+# tr -d perche' wc impagina il numero con spazi davanti su alcuni sistemi,
+# e il marcatore deve restare leggibile da chi lo analizza.
+N_PUNTI=$(echo $SOGLIE | wc -w | tr -d " ")
 K=0
 for S in $SOGLIE; do
     K=$((K + 1))

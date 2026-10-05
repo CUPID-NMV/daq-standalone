@@ -1193,7 +1193,10 @@ class Controllo:
 
     # "[punto 3/6] offset 5": lo stampano tutti e due gli scan prima di
     # cominciare un punto.
-    PUNTO = re.compile(r"\[punto (\d+)/(\d+)\]\s*(.*)")
+    # Gli spazi intorno alla barra sono tollerati apposta: il marcatore lo
+    # scrivono due programmi diversi, uno in python e uno in bash, e un
+    # avanzamento che sparisce per uno spazio sarebbe una trappola sciocca.
+    PUNTO = re.compile(r"\[punto\s*(\d+)\s*/\s*(\d+)\s*\]\s*(.*)")
 
     def avanzamento_scan(self):
         """(fatti, totale, descrizione) dell'ultimo punto cominciato, o None."""

@@ -811,13 +811,22 @@ class Monitor:
                                label=f"smallest amplitude seen {eff:.0f} ADC"
                                      f"  ({eff * self.mv_per_count():.1f} mV)"
                                      + (f"  offset {off}" if off is not None else ""))
-                    ax.legend(fontsize=8, loc="lower right")
                 elif note:
                     # Nessuna riga: disegnarne una qui vorrebbe dire inventarsi
                     # un valore che i dati non sostengono.
                     ax.text(0.99, 0.04, note + (f"  (offset {off})" if off is not None else ""),
                             transform=ax.transAxes, ha="right", va="bottom",
                             fontsize=8, color="#d62728")
+
+                # La legenda si disegna una volta sola, alla fine, e solo se
+                # c'e' qualcosa da spiegare. Stava dentro il ramo della soglia
+                # efficace: con la banda limitata accesa e la soglia non
+                # stimabile, le due curve rosse e viola restavano senza
+                # didascalia. In alto a destra e dentro il riquadro, dove
+                # l'impulso -- che il post-trigger mette nella prima meta'
+                # della finestra -- non ci arriva.
+                if ax.get_legend_handles_labels()[1]:
+                    ax.legend(fontsize=8, loc="upper right", framealpha=.9)
 
                 label = ("last event" if n == 1 else f"last {n} events")
                 med = float(np.median(amp[:, i]))

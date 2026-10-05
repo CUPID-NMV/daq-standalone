@@ -817,7 +817,10 @@ class Monitor:
             carica = self.segno * corr[:, :, a_i:b_i].sum(axis=2) * k_pc
             self.accumula_cariche(carica, channels, (a_i, b_i))
 
-            fig, axes = plt.subplots(1, len(channels), figsize=(5 * len(channels), 3.4),
+            # Piu' alto degli altri pannelli: sotto gli assi ci vanno
+            # etichetta, legenda e il pie' di pagina, e con 3.4 pollici il
+            # grafico si sarebbe schiacciato a una striscia.
+            fig, axes = plt.subplots(1, len(channels), figsize=(5 * len(channels), 4.3),
                                      squeeze=False)
             for i, ch in enumerate(channels):
                 ax = axes[0][i]
@@ -865,7 +868,12 @@ class Monitor:
                             label="last %s events, scaled x%.0f"
                                   % (_mila(recenti.size), fattore))
                 ax.set_xlim(*est)
-                ax.legend(fontsize=7.5, loc="upper left", framealpha=.75)
+                # La legenda sotto gli assi, non dentro: uno spettro ha il
+                # picco in mezzo e le code ai lati, quindi non esiste un
+                # angolo libero per tutte le distribuzioni. In alto a sinistra
+                # finiva sopra il fianco in salita dell'istogramma.
+                ax.legend(fontsize=7.5, loc="upper center",
+                          bbox_to_anchor=(0.5, -0.22), ncol=2, frameon=False)
 
                 # Lo zero e' il piedistallo: in uno spettro di carica e' il
                 # riferimento che dice se il picco e' segnale o rumore
@@ -935,7 +943,7 @@ class Monitor:
                          fontsize=8.5,
                          color=("#d62728" if (self.cariche_persi and n_riga == 0
                                               and len(righe_pie) > 1) else "#555"))
-            rect_finale = (0, 0.05 + 0.045 * len(righe_pie), 1, 1)
+            rect_finale = (0, 0.09 + 0.040 * len(righe_pie), 1, 1)
 
         else:   # amplitudes
             fig, axes = plt.subplots(1, len(channels), figsize=(5 * len(channels), 3.4),

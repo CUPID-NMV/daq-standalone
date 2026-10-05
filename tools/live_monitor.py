@@ -88,6 +88,7 @@ class Monitor:
         self.start_time = None
 
         self.status = None        # live-status.json pubblicato dalla DAQ
+        self.segno = -1.0         # verso dell'impulso, finche' non ci sono dati
         self.gen = None           # generazione delle soglie gia' vista
         self.offsets = {}         # offset correnti, per canale
         self.frozen = {}          # cariche prima dell'ultimo cambio di soglia
@@ -378,20 +379,44 @@ class Monitor:
         if self.tail_cut:
             d = d[:, :, :max(d.shape[2] - self.tail_cut, 1)]
         base, corr, amp, noise = baseline_amplitude(d)
+        self.segno = self._verso(corr)
 
         dt_ns = float(self.hdr.get("SamplingTime", 1e-9)) * 1e9
         t_ns = np.arange(d.shape[2]) * dt_ns
-        # L'ampiezza dell'impulso e' l'escursione NEGATIVA: con polarita'
-        # falling il segnale va in giu'. Prendere il valore assoluto
-        # dell'escursione maggiore, com'era prima, faceva entrare nello spettro
-        # anche i picchi positivi di rumore come se fossero segnale.
+        # L'ampiezza dell'impulso e' l'escursione dalla parte DELL'IMPULSO,
+        # non la maggiore in valore assoluto: quella faceva entrare nello
+        # spettro anche i picchi di rumore dal lato sbagliato come se fossero
+        # segnale. Da che parte sia lo dice self.segno -- prima era cablato
+        # sui segnali negativi dei PMT, e con un SiPM positivo lo spettro
+        # usciva tutto a zero.
         #
         # In unita' di offset, cioe' divisa per l'attenuazione del Transparent
         # Mode, lo spettro si legge nelle stesse unita' della soglia del
         # self-trigger e si vede cosa taglia.
-        q = np.maximum(-corr.min(axis=2), 0.0) / self.attenuazione()
+        estremo = corr.max(axis=2) if self.segno > 0 else corr.min(axis=2)
+        q = np.maximum(self.segno * estremo, 0.0) / self.attenuazione()
         self._ana = (self.hdr, base, corr, amp, t_ns, noise, q)
         return self._ana
+
+    def _verso(self, corr):
+        """+1 se gli impulsi vanno in su, -1 se vanno in giu'.
+
+        Prima fonte la DAQ, che in live-status.json scrive il fronte di
+        discriminazione configurato: e' una dichiarazione, non una deduzione.
+        Senza self-trigger quel file non c'e' (per esempio con il solo trigger
+        esterno di un driver LED) e allora lo si chiede ai dati, guardando da
+        che parte e' piu' grande l'escursione tipica. Su puro rumore le due
+        parti si equivalgono e la risposta e' arbitraria, ma li' non c'e'
+        nessun impulso di cui sbagliare il verso.
+        """
+        pol = (self.status or {}).get("polarity")
+        if pol == "rising":
+            return 1.0
+        if pol == "falling":
+            return -1.0
+        su = float(np.median(corr.max(axis=2)))
+        giu = float(np.median(-corr.min(axis=2)))
+        return 1.0 if su > giu else -1.0
 
     def effective_threshold(self, values, rms):
         """(ampiezza minima osservata, avvertimento).
@@ -690,6 +715,65 @@ class Monitor:
             ax.grid(alpha=0.25)
             apply_limits(ax)
 
+        elif kind == "integrals":
+            dt_ns = float(t_ns[1] - t_ns[0]) if len(t_ns) > 1 else 1.0
+
+            # Il cancello di integrazione e' la finestra scelta per le forme
+            # d'onda, non una terza casella da riempire: si guarda l'impulso,
+            # si stringe la vista su di esso, e si integra esattamente quello
+            # che si vede. Vuoto = tutta la traccia.
+            a = 0 if xlim[0] is None else int(np.searchsorted(t_ns, xlim[0], "left"))
+            b = len(t_ns) if xlim[1] is None else int(np.searchsorted(t_ns, xlim[1], "right"))
+            a = max(0, min(a, len(t_ns) - 1))
+            b = max(a + 1, min(b, len(t_ns)))
+            nscamp = b - a
+
+            # In picocoulomb: l'integrale della tensione diviso l'impedenza
+            # d'ingresso. 1 mV x 1 ns / 50 ohm = 0.02 pC. E' la carica
+            # all'INGRESSO del digitizer: per risalire a quella del rivelatore
+            # servirebbero guadagno e partitori della catena, che il software
+            # non conosce.
+            k_pc = dt_ns * self.mv_per_count() / 50.0
+            carica = self.segno * corr[:, :, a:b].sum(axis=2) * k_pc
+
+            fig, axes = plt.subplots(1, len(channels), figsize=(5 * len(channels), 3.4),
+                                     squeeze=False)
+            for i, ch in enumerate(channels):
+                ax = axes[0][i]
+                val = carica[:, i]
+                _, _, logy = (hset or {}).get(int(ch), (None, None, False))
+
+                nb = min(80, max(20, val.size // 8))
+                ax.hist(val, bins=nb, color="#1f77b4", alpha=.85)
+
+                # Lo zero e' il piedistallo: in uno spettro di carica e' il
+                # riferimento che dice se il picco e' segnale o rumore
+                # integrato, ed e' il primo controllo da fare.
+                ax.axvline(0.0, color="#888", lw=1.2, ls=":")
+
+                # Quanto allarga il piedistallo il solo rumore: cresce come la
+                # radice dei campioni integrati, quindi un cancello largo lo
+                # gonfia anche se non contiene impulso. Serve a capire se il
+                # cancello va stretto.
+                rms = float(np.median(noise[:, i]))
+                sigma = rms * np.sqrt(nscamp) * k_pc
+                med = float(np.median(val))
+                ax.set_title(f"ch{ch}", fontsize=10, pad=18)
+                ax.text(0.5, 1.02,
+                        "median %.2f pC   ·   noise alone would give ±%.2f pC"
+                        % (med, sigma),
+                        transform=ax.transAxes, ha="center", va="bottom",
+                        fontsize=9, color="#1a6b1a" if abs(med) > 3 * sigma else "#d62728")
+
+                if logy:
+                    ax.set_yscale("log")
+                verso = "positive" if self.segno > 0 else "negative"
+                ax.set_xlabel("charge [pC at the 50 \u03a9 input]   "
+                              "gate %.0f-%.0f ns (%d samples) \u00b7 %s pulses"
+                              % (t_ns[a], t_ns[b - 1], nscamp, verso))
+                ax.set_ylabel("events" + (" (log)" if logy else ""))
+                ax.grid(alpha=0.25)
+
         else:   # amplitudes
             fig, axes = plt.subplots(1, len(channels), figsize=(5 * len(channels), 3.4),
                                      squeeze=False)
@@ -899,7 +983,8 @@ PAGE = """<!DOCTYPE html>
   <label>threshold [offset]<input id="qcut" value="" placeholder="whole spectrum" style="width:110px"></label>
   <button id="reset">Autoscale</button>
   <button id="azzera" title="discards the events already acquired and starts from now">Reset data</button>
-  <span class="hint">waveforms · empty fields = autoscale</span>
+  <span class="hint">waveforms · empty fields = autoscale ·
+    x min/max is also the integration gate of the charge plot</span>
 </div>
 <div id="hctl"></div>
 <table id="tab"><thead><tr><th>channel</th><th>baseline</th><th>rms</th>
@@ -909,6 +994,7 @@ PAGE = """<!DOCTYPE html>
 Open the browser console to see the error.</div>
 <img id="pano" alt="per-channel overview">
 <img id="w" alt="waveforms"><img id="a" alt="average"><img id="h" alt="amplitudes">
+<img id="q" alt="charge integrals">
 <script>
 document.getElementById('boot').style.display = 'none';
 const REFRESH = __REFRESH__ * 1000;
@@ -949,8 +1035,8 @@ function buildHistControls(channels) {
   document.getElementById('hctl').innerHTML = channels.map(ch => `
     <div class="ctl">
       <span class="grp">ch${ch}</span>
-      <label>istogramma x min [ADC]<input id="hxmin_${ch}" placeholder="auto"></label>
-      <label>istogramma x max [ADC]<input id="hxmax_${ch}" placeholder="auto"></label>
+      <label>histogram x min [ADC]<input id="hxmin_${ch}" placeholder="auto"></label>
+      <label>histogram x max [ADC]<input id="hxmax_${ch}" placeholder="auto"></label>
       <label class="chk"><input type="checkbox" id="hlog_${ch}"> log y</label>
       <button class="hreset" data-ch="${ch}">Autoscale</button>
     </div>`).join('');
@@ -1039,7 +1125,8 @@ async function tick() {
        <td>${na(c.eff)}</td></tr>`).join('');
     const p = params();
     p.set('t', Date.now());
-    for (const [id, name] of [['w','waveforms'],['a','average'],['h','amplitudes']])
+    for (const [id, name] of [['w','waveforms'],['a','average'],['h','amplitudes'],
+                             ['q','integrals']])
       document.getElementById(id).src = name + '.png?' + p.toString();
     // La panoramica copre tutti i canali e non risente della selezione, quindi
     // non serve rigenerarla a ogni giro: si aggiorna ogni 5 s per conto suo.
@@ -1181,7 +1268,8 @@ def make_handler(monitor, refresh, defaults):
                 kinds = {"panoramica.png": "panoramica",
                          "waveforms.png": "waveforms",
                          "average.png": "average",
-                         "amplitudes.png": "amplitudes"}
+                         "amplitudes.png": "amplitudes",
+                         "integrals.png": "integrals"}
                 if route in kinds:
                     # I limiti dell'istogramma sono per canale: hxmin_8, hlog_9, ...
                     # I valori da riga di comando fanno da default per tutti.

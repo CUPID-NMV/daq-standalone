@@ -41,6 +41,7 @@ import re
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -202,6 +203,44 @@ def _toml_da_ui(tipo, valore, dettagli, etichetta):
 # della soglia e l'arresto del DRS4, e sposta l'impulso dentro la finestra.
 LATENZA_NS = {"paired": 320.0, "global": 420.0}
 PASSO_NS = {"5GHz": 0.2, "2.5GHz": 0.4, "1GHz": 1.0, "750MHz": 1.333}
+
+
+# Porta su cui gira il monitor. Il link nella pagina e la sonda qui sotto
+# devono puntare allo stesso posto, quindi il numero sta scritto una volta
+# sola.
+PORTA_MONITOR = 8765
+
+# Esito dell'ultima sonda, con l'istante: la pagina chiede lo stato ogni paio
+# di secondi e aprire una connessione a ogni giro non serve a niente.
+_monitor_visto = (0.0, False)
+
+
+def monitor_acceso(porta=None):
+    """True se qualcuno ascolta sulla porta del monitor, su questa macchina.
+
+    La domanda che risponde e' "il link al monitor porta da qualche parte?".
+    Il link apre una pagina, non avvia niente: senza il processo acceso
+    l'utente trova un errore del browser e non ha modo di sapere se il
+    problema e' la rete, la VPN o il monitor che non e' stato lanciato.
+
+    Si prova una connessione TCP e basta, senza richiesta HTTP: interessa che
+    la porta risponda, e una GET costringerebbe il monitor a rigenerare roba
+    a ogni giro di polling.
+    """
+    global _monitor_visto
+    quando, esito = _monitor_visto
+    if time.time() - quando < 3.0:
+        return esito
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(0.3)
+    try:
+        esito = sock.connect_ex(("127.0.0.1", porta or PORTA_MONITOR)) == 0
+    except OSError:
+        esito = False
+    finally:
+        sock.close()
+    _monitor_visto = (time.time(), esito)
+    return esito
 
 
 def coerenza(d):
@@ -815,6 +854,7 @@ class Controllo:
         s = {"in_corso": pid is not None, "pid": pid,
              "config": self.config(), "log": self.coda_log(25),
              "azioni": ultime_azioni(), "adesso": time.time(),
+             "monitor": monitor_acceso(), "monitor_porta": PORTA_MONITOR,
              "scan": None, "coda": self.leggi_coda()}
         if scan:
             s["scan"] = {
@@ -1334,6 +1374,9 @@ PAGINA = r"""<!doctype html>
   <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     <button id="avvia">Start run</button>
     <button id="ferma">Stop run</button>
+    <a id="mon" href="#" target="_blank" rel="noopener"
+       style="margin-left:6px;font-size:13px">Open monitor</a>
+    <span id="monstato" style="font-size:12px;color:#6b6a65"></span>
     <label style="margin-left:auto;color:#6b6a65">who are you
       <input id="chi" placeholder="your name" style="width:140px">
     </label>
@@ -1442,13 +1485,31 @@ PAGINA = r"""<!doctype html>
 
 <div class="box" style="margin-top:14px"><h2>DAQ log</h2><pre id="log"></pre></div>
 <div class="box" style="margin-top:14px"><h2>Recent actions</h2><div id="azioni" class="az"></div></div>
-<p style="color:#6b6a65;font-size:12px">Plots and DQM: <a id="mon" href="#">monitor</a></p>
+<p style="color:#6b6a65;font-size:12px">Plots and DQM are in the monitor, linked at the top of this page.</p>
 
 <script>
 const $ = id => document.getElementById(id);
 $("chi").value = localStorage.getItem("chi") || "";
 $("chi").oninput = () => localStorage.setItem("chi", $("chi").value);
-$("mon").href = location.protocol + "//" + location.hostname + ":8765/";
+// Il nome host e' quello da cui arriva QUESTA pagina, non un indirizzo
+// scritto nel codice: da VPN, da collegamento diretto o da localhost il
+// monitor sta sempre sulla stessa macchina del controllore, e cosi' il link
+// resta giusto ovunque lo si apra. La porta la dichiara il server.
+let PORTA_MON = 8765;
+function aggiornaMonitor(s){
+  PORTA_MON = s.monitor_porta || PORTA_MON;
+  $("mon").href = location.protocol + "//" + location.hostname + ":" + PORTA_MON + "/";
+  // Il link apre una pagina, non avvia il monitor: senza dirlo, trovare un
+  // errore del browser lascia il dubbio se sia caduta la rete.
+  const acceso = !!s.monitor;
+  $("monstato").textContent = acceso ? "" : "(not running on port " + PORTA_MON + ")";
+  $("mon").style.color = acceso ? "" : "#6b6a65";
+  $("mon").title = acceso
+    ? "Opens the monitor in a new tab"
+    : "The monitor process is not running: start it on the DAQ machine with "
+      + "python3 tools/live_monitor.py -b 0.0.0.0";
+}
+$("mon").href = location.protocol + "//" + location.hostname + ":" + PORTA_MON + "/";
 
 const PAR = new URLSearchParams(location.search);
 const TOKEN = PAR.get("token") || "";
@@ -1503,6 +1564,7 @@ async function aggiorna(){
       : "";
   $("avvia").disabled = s.in_corso || !!s.scan || (s.coda && s.coda.attiva);
   $("ferma").disabled = !s.in_corso || !!s.scan || (s.coda && s.coda.attiva);
+  aggiornaMonitor(s);
 
   tabella($("run"), s.in_corso
     ? [["pid", s.pid],

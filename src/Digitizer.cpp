@@ -178,6 +178,18 @@ Digitizer::Digitizer()
         fChannelList.push_back(static_cast<uint32_t>(c));
     }
 
+    // Offset DC: uno scalare vale per tutti, una lista va in parallelo a
+    // ChannelList e l'ultimo valore si replica sui rimanenti.
+    fDCOffset = fConfig.GetEntryList<int64_t>("digitizer","DCOffset",
+                                              0x7000, fChannelList.size());
+    for (size_t i = 0; i < fDCOffset.size(); ++i) {
+        if (fDCOffset[i] < 0 || fDCOffset[i] > 0xFFFF) {
+            Log::OutError("DCOffset fuori range (" + std::to_string(fDCOffset[i]) +
+                          "): ammessi 0..65535. Abort.");
+            exit(1);
+        }
+    }
+
     fNActiveChannels = fChannelList.size();
     fChannelMask = 0;
     for (auto ch : fChannelList)
@@ -687,10 +699,14 @@ void Digitizer::Configure() {
         Check(CAEN_DGTZ_SetTriggerPolarity(fHandle, ch, fTriggerPolarity),
               "SetTriggerPolarity ch" + std::to_string(ch));
 
-    // Offset per ogni canale (segnali negativi)
-    for (auto ch : fChannelList) {
-        Check(CAEN_DGTZ_SetChannelDCOffset(fHandle, ch, 0x7000),
-              "SetChannelDCOffset ch" + std::to_string(ch));
+    // Offset DC per canale: dove sta il piedistallo dentro la dinamica.
+    for (size_t i = 0; i < fChannelList.size(); ++i) {
+        uint32_t off = static_cast<uint32_t>(
+            fDCOffset[i < fDCOffset.size() ? i : fDCOffset.size() - 1]);
+        Check(CAEN_DGTZ_SetChannelDCOffset(fHandle, fChannelList[i], off),
+              "SetChannelDCOffset ch" + std::to_string(fChannelList[i]));
+        Log::OutDebug("   ch" + std::to_string(fChannelList[i]) +
+                      ": DCOffset = " + IntToHex(off));
     }
 
     Log::OutSummary("Digitizer configuration complete.");

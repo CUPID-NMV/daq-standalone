@@ -106,6 +106,13 @@ private:
     CAEN_DGTZ_PulsePolarity_t   fPulsePolarity;
     CAEN_DGTZ_TriggerPolarity_t fTriggerPolarity;
 
+    // Offset DC per canale, in conteggi del DAC a 16 bit. Decide dove sta il
+    // piedistallo dentro la dinamica, quindi quanta ne resta per l'impulso.
+    // Era cablato a 0x7000, valore scelto per segnali NEGATIVI: con un SiPM,
+    // che da' impulsi positivi, lasciava solo 900 conteggi verso l'alto e il
+    // segnale tagliava a fondo scala.
+    std::vector<int64_t> fDCOffset;
+
     std::vector<uint32_t> fChannelList;
     uint32_t fBoardChannels;   // declared here to match where ctor initializes it
 

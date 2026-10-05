@@ -1302,8 +1302,8 @@ PAGE = """<!DOCTYPE html>
   <label>y max [ADC]<input id="ymax" value="__YMAX__" placeholder="auto"></label>
   <label>events<input id="nev" value="__NEVENTS__" style="width:60px"></label>
   <label>bandwidth [MHz]<input id="bw" value="__BW__" placeholder="off" style="width:70px"></label>
-  <label>baseline from [ns]<input id="bfrom" value="__BFROM__" placeholder="off" style="width:70px"></label>
-  <label>to [ns]<input id="bto" value="__BTO__" placeholder="off" style="width:70px"></label>
+  <label>baseline from [ns]<input id="bfrom" value="__BFROM__" placeholder="default" style="width:70px"></label>
+  <label>to [ns]<input id="bto" value="__BTO__" placeholder="default" style="width:70px"></label>
   <label>channels<input id="canali" value="" placeholder="all  e.g. 8,9,12-15" style="width:150px"></label>
   <label>threshold [offset]<input id="qcut" value="" placeholder="whole spectrum" style="width:110px"></label>
   <button id="reset">Autoscale</button>
@@ -1709,7 +1709,8 @@ def main():
                     help="fine della finestra del piedistallo [ns] (default 180). "
                          "Deve stare PRIMA dell'impulso: a frequenze di "
                          "campionamento alte la finestra intera e' corta e questi "
-                         "valori vanno rivisti")
+                         "valori vanno rivisti. Con fine <= inizio non si corregge "
+                         "niente e si torna alla mediana dell'intera traccia")
     ap.add_argument("--bw", type=float, default=None,
                     help="mostra il segnale dopo un passa-basso a questa frequenza "
                          "[MHz], piu' le letture di un ADC a 30 MHz. Serve a vedere "

@@ -99,6 +99,7 @@ CAMPI = [
     ("digitizer", "NEvents",         "events to acquire",  "intero", (1, 10**9)),
     ("digitizer", "TailCut",         "trailing samples dropped", "intero", (0, 200)),
     ("digitizer", "ChannelList",     "recorded channels",  "lista",  (0, 31)),
+    ("digitizer", "DCOffset",        "DC offset (higher = lower baseline)", "intero", (0, 65535)),
     ("digitizer", "Connection",      "link",               "scelta", ["auto", "ETH_V4718", "USB_A4818"]),
     ("digitizer", "DRS4Correction",  "DRS4 corrections",   "booleano", None),
     ("digitizer", "OutputFile",      "file prefix",        "testo",  None),
@@ -166,14 +167,17 @@ def _toml_da_ui(tipo, valore, dettagli, etichetta):
             raise ValueError("%s: no quotes inside the value" % etichetta)
         return '"%s"' % v
     if tipo == "intero":
+        # int(v, 0) accetta anche 0x...: DCOffset si scrive in esadecimale e
+        # convertirlo in decimale renderebbe il file meno leggibile, oltre a
+        # far sembrare "cambiata" una riga che non lo e'.
         try:
-            n = int(v)
+            n = int(v, 0)
         except ValueError:
             raise ValueError("%s: an integer is required" % etichetta)
         lo, hi = dettagli
         if not lo <= n <= hi:
             raise ValueError("%s: out of range, allowed from %d to %d" % (etichetta, lo, hi))
-        return str(n)
+        return v
     if tipo == "lista":
         pezzi = [p for p in v.replace(",", " ").split() if p]
         if not pezzi:

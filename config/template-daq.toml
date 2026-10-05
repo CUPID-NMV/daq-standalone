@@ -34,6 +34,27 @@ VMEBaseAddress  = 0x32100000
 ChannelList = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,  23, 24, 25, 26, 27, 28, 29, 30, 31]
 
 # ---------------------------------------------------------------------------
+#  Offset DC, in conteggi del DAC a 16 bit: decide DOVE sta il piedistallo
+#  dentro la dinamica, e quindi quanta ne resta all'impulso. La dinamica e'
+#  1 Vpp su 4096 conteggi.
+#
+#  Piu' alto il valore, piu' basso il piedistallo. Misurato su una V1742:
+#
+#      0x7000   piedistallo ~3185    spazio sopra  910   <- per segnali NEGATIVI
+#      0xA000   piedistallo ~1436    spazio sopra 2659
+#      0xC000   piedistallo  ~268    spazio sopra 3827   <- per segnali POSITIVI
+#      0xD000   il piedistallo esce dalla dinamica e la DAQ si ferma
+#
+#  Sbagliare verso non si vede come un errore: si vede come un rivelatore che
+#  satura. Un SiPM da 837 mV e' arrivato tagliato a 215 perche' il piedistallo
+#  era parcheggiato in alto.
+#
+#  Uno scalare vale per tutti i canali, una lista va in parallelo a
+#  ChannelList (l'ultimo valore si replica sui rimanenti).
+# ---------------------------------------------------------------------------
+DCOffset = 0x7000
+
+# ---------------------------------------------------------------------------
 #  Frequenza di campionamento del DRS4. Quattro valori, e cambiano la durata
 #  della finestra, che con 1024 campioni vale:
 #

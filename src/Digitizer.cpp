@@ -912,10 +912,14 @@ void Digitizer::SetTriggerThreshold(double offset) {
     for (const auto& kv : rms) {
         if (kv.second > 100.0) {
             Log::OutError("ch" + std::to_string(kv.first) + " baseline rms = " +
-                          std::to_string(kv.second) + " counts, expected a few: "
-                          "the readout is delivering corrupted data.");
-            Log::OutError("Reset the board (power cycle if a software reset does "
-                          "not help) before acquiring: this run would be useless.");
+                          std::to_string(kv.second) + " counts, expected a few.");
+            Log::OutError("Due cause possibili. La piu' comune: DCOffset spinge il "
+                          "piedistallo fuori dalla dinamica (sopra 4095 o sotto 0) e "
+                          "quello che si misura e' il fondo scala, non il rumore. "
+                          "Guarda il valore di DCOffset per questo canale.");
+            Log::OutError("Altrimenti la lettura sta consegnando dati corrotti: "
+                          "resetta la board, spegnendola se il reset software non "
+                          "basta. In entrambi i casi questa run sarebbe inutile.");
             exit(1);
         }
     }

@@ -905,7 +905,66 @@ class Monitor:
             # servirebbero guadagno e partitori della catena, che il software
             # non conosce.
             k_pc = dt_ns * self.mv_per_count() / 50.0
-            carica = self.segno * corr[:, :, a_i:b_i].sum(axis=2) * k_pc
+
+            # Piedistallo preso FUORI dal cancello, evento per evento.
+            #
+            # Serve perche' il piedistallo di daqio e' la mediana dell'INTERA
+            # traccia: una scelta giusta per gli impulsi dei PMT, larghi pochi
+            # nanosecondi su oltre mille campioni, che non la spostano. Un
+            # SiPM con il LED invece occupa ~400 ns su 1321, e la mediana
+            # finisce dentro la coda dell'impulso. Misurato su 2000 eventi
+            # veri: mediana di tutta la traccia 275.0 conteggi, dei soli
+            # campioni pre-impulso 271.0, della sola coda 272.0. Quattro
+            # conteggi di troppo, che integrati su 992 campioni valgono 26 pC
+            # su una carica misurata di 20: l'errore era piu' grande del
+            # segnale. Pre-impulso e coda concordano entro un conteggio,
+            # quindi non e' un sotto-tiro del segnale, e' la stima.
+            #
+            # Il cancello fa quindi un doppio lavoro: dentro c'e' il segnale,
+            # fuori il piedistallo. Senza campioni fuori non si puo' fare di
+            # meglio della mediana di tutta la traccia, e il grafico lo dice
+            # invece di lasciar credere che sia corretta.
+            # La regione del piedistallo sta PRIMA del segnale, non "fuori dal
+            # cancello": dopo l'impulso la coda non e' ancora tornata a zero e
+            # contamina la stima. Misurato su 2000 eventi, allargando il
+            # cancello dalla stessa partenza (carica mediana in pC):
+            #
+            #     cancello      nessuna corr.   solo prima   tutto fuori
+            #     190-500 ns        31.98          37.49        35.30
+            #     190-620 ns        33.83          41.52        39.93
+            #     190-800 ns        33.26          44.01        43.45
+            #     190-1000 ns       30.58          45.05        45.20
+            #     190-1348 ns       24.50          45.06        45.06
+            #
+            # Con il piedistallo preso prima l'integrale SATURA a 45 pC, come
+            # deve fare un integrale su un impulso che finisce. Senza
+            # correzione invece cala allargando il cancello -- impossibile per
+            # un impulso positivo -- perche' l'errore sul piedistallo cresce
+            # con i campioni sommati. Prendendolo da tutti e due i lati si
+            # resta in mezzo, sbagliando sui cancelli stretti.
+            inizio = a_i
+            come = "before the gate"
+            if inizio < 50:
+                # Cancello che parte da zero: il piedistallo si prende prima
+                # dell'impulso MEDIO, cosi' anche la vista di partenza -- che
+                # e' quella che si guarda piu' spesso -- e' corretta.
+                medio = corr.mean(axis=(0, 1))
+                picco = float(np.max(np.abs(medio)))
+                sopra = np.flatnonzero(np.abs(medio) > 0.1 * picco) if picco > 0 \
+                    else np.array([], dtype=int)
+                if sopra.size:
+                    inizio = max(0, int(sopra[0]) - max(5, corr.shape[2] // 100))
+                    come = "before the average pulse"
+
+            if inizio >= 50:
+                scarto = np.median(corr[:, :, :inizio], axis=2)
+                base_nota = "baseline from %d samples %s" % (inizio, come)
+            else:
+                scarto = np.zeros(corr.shape[:2])
+                base_nota = ("baseline from the whole trace: no clean stretch "
+                             "before the pulse, the charge may be biased")
+            carica = self.segno * (corr[:, :, a_i:b_i].sum(axis=2)
+                                   - scarto * nscamp) * k_pc
             self.accumula_cariche(carica, channels, (a_i, b_i))
 
             # Piu' alto degli altri pannelli: sotto gli assi ci vanno
@@ -1012,7 +1071,8 @@ class Monitor:
             righe_pie = ["charge at the 50 \u03a9 input   \u00b7   gate %.0f-%.0f ns "
                          "(%d samples)   \u00b7   %s pulses"
                          % (t_ns[a_i], t_ns[b_i - 1], nscamp,
-                            "positive" if self.segno > 0 else "negative")]
+                            "positive" if self.segno > 0 else "negative"),
+                         base_nota]
             if da:
                 righe_pie.append("   \u00b7   ".join(da))
 

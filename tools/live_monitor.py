@@ -603,7 +603,7 @@ class Monitor:
         return buf.getvalue()
 
     def figure(self, kind, n_show=1, xlim=(None, None), ylim=(None, None),
-               hset=None, bw=None, qcut=None):
+               hset=None, bw=None, qcut=None, qset=None):
         if kind == "panoramica":
             # Non passa dall'analisi di dettaglio: quella riguarda i soli
             # canali selezionati e puo' mancare, mentre la panoramica deve
@@ -742,16 +742,33 @@ class Monitor:
             for i, ch in enumerate(channels):
                 ax = axes[0][i]
                 val = carica[:, i]
-                _, _, logy = (hset or {}).get(int(ch), (None, None, False))
+                xlo, xhi, logy = (qset or {}).get(int(ch), (None, None, False))
+
+                # I bin si costruiscono DENTRO l'intervallo scelto, non si
+                # ritaglia dopo: ritagliando si vedrebbe una fetta di un
+                # istogramma calcolato su tutto, con la risoluzione sprecata
+                # fuori dalla vista. E' la stessa ragione per cui lo spettro
+                # delle ampiezze fa cosi'.
+                est = None
+                if xlo is not None or xhi is not None:
+                    lo = xlo if xlo is not None else float(np.min(val))
+                    hi = xhi if xhi is not None else float(np.max(val))
+                    if hi > lo:
+                        est = (lo, hi)
 
                 nb = min(80, max(20, val.size // 8))
-                ax.hist(val, bins=nb, color="#1f77b4", alpha=.85)
+                ax.hist(val, bins=nb, range=est, color="#1f77b4", alpha=.85)
+                if est:
+                    ax.set_xlim(*est)
 
                 # Lo zero e' il piedistallo: in uno spettro di carica e' il
                 # riferimento che dice se il picco e' segnale o rumore
                 # integrato, ed e' il primo controllo da fare.
                 ax.axvline(0.0, color="#888", lw=1.2, ls=":")
 
+                # Mediana e larghezza si calcolano su TUTTI gli eventi, anche
+                # quelli fuori dalla vista: sono la descrizione della
+                # distribuzione, non di cio' che si e' deciso di guardare.
                 med = float(np.median(val))
 
                 # La larghezza MISURATA della distribuzione, non quella dedotta
@@ -1053,30 +1070,46 @@ function buildHistControls(channels) {
   document.getElementById('hctl').innerHTML = channels.map(ch => `
     <div class="ctl">
       <span class="grp">ch${ch}</span>
-      <label>histogram x min [ADC]<input id="hxmin_${ch}" placeholder="auto"></label>
-      <label>histogram x max [ADC]<input id="hxmax_${ch}" placeholder="auto"></label>
+      <label>amplitude x min [offset]<input id="hxmin_${ch}" placeholder="auto"></label>
+      <label>amplitude x max [offset]<input id="hxmax_${ch}" placeholder="auto"></label>
       <label class="chk"><input type="checkbox" id="hlog_${ch}"> log y</label>
       <button class="hreset" data-ch="${ch}">Autoscale</button>
+    </div>
+    <div class="ctl">
+      <span class="grp">ch${ch}</span>
+      <label>charge x min [pC]<input id="qxmin_${ch}" placeholder="auto"></label>
+      <label>charge x max [pC]<input id="qxmax_${ch}" placeholder="auto"></label>
+      <label class="chk"><input type="checkbox" id="qlog_${ch}"> log y</label>
+      <button class="qreset" data-ch="${ch}">Autoscale</button>
     </div>`).join('');
 
   for (const ch of channels) {
-    for (const k of ['hxmin_' + ch, 'hxmax_' + ch]) {
+    for (const k of ['hxmin_' + ch, 'hxmax_' + ch, 'qxmin_' + ch, 'qxmax_' + ch]) {
       const v = recall(k);
       if (v !== null) document.getElementById(k).value = v;
       document.getElementById(k).addEventListener('change', tick);
     }
-    const lg = document.getElementById('hlog_' + ch);
-    if (recall('hlog_' + ch) !== null) lg.checked = (recall('hlog_' + ch) === '1');
-    lg.addEventListener('change', tick);
+    for (const k of ['hlog_' + ch, 'qlog_' + ch]) {
+      const lg = document.getElementById(k);
+      if (recall(k) !== null) lg.checked = (recall(k) === '1');
+      lg.addEventListener('change', tick);
+    }
   }
 
-  document.querySelectorAll('#hctl button.hreset').forEach(b => b.onclick = () => {
+  // Due pulsanti Autoscale distinti, uno per riga: azzerare la scala delle
+  // ampiezze mentre si sta guardando la carica, o viceversa, farebbe perdere
+  // una vista buona mentre se ne sistema un'altra.
+  const azzeraRiga = (pre, b) => {
     const ch = b.dataset.ch;
-    document.getElementById('hxmin_' + ch).value = '';
-    document.getElementById('hxmax_' + ch).value = '';
-    document.getElementById('hlog_' + ch).checked = false;
+    document.getElementById(pre + 'xmin_' + ch).value = '';
+    document.getElementById(pre + 'xmax_' + ch).value = '';
+    document.getElementById(pre + 'log_' + ch).checked = false;
     tick();
-  });
+  };
+  document.querySelectorAll('#hctl button.hreset')
+          .forEach(b => b.onclick = () => azzeraRiga('h', b));
+  document.querySelectorAll('#hctl button.qreset')
+          .forEach(b => b.onclick = () => azzeraRiga('q', b));
 }
 
 function params() {
@@ -1087,14 +1120,16 @@ function params() {
     if (v !== '') p.set(f === 'nev' ? 'n' : f, v);
   }
   if (builtChannels) for (const ch of builtChannels.split(',')) {
-    for (const k of ['hxmin_' + ch, 'hxmax_' + ch]) {
+    for (const k of ['hxmin_' + ch, 'hxmax_' + ch, 'qxmin_' + ch, 'qxmax_' + ch]) {
       const v = document.getElementById(k).value.trim();
       store(k, v);
       if (v !== '') p.set(k, v);
     }
-    const on = document.getElementById('hlog_' + ch).checked;
-    store('hlog_' + ch, on ? '1' : '0');
-    p.set('hlog_' + ch, on ? '1' : '0');
+    for (const k of ['hlog_' + ch, 'qlog_' + ch]) {
+      const on = document.getElementById(k).checked;
+      store(k, on ? '1' : '0');
+      p.set(k, on ? '1' : '0');
+    }
   }
   return p;
 }
@@ -1291,7 +1326,7 @@ def make_handler(monitor, refresh, defaults):
                 if route in kinds:
                     # I limiti dell'istogramma sono per canale: hxmin_8, hlog_9, ...
                     # I valori da riga di comando fanno da default per tutti.
-                    hset = {}
+                    hset, qset = {}, {}
                     for ch in (monitor.hdr or {}).get("ChannelList", []):
                         ch = int(ch)
                         hset[ch] = (
@@ -1300,11 +1335,21 @@ def make_handler(monitor, refresh, defaults):
                             qs.get(f"hlog_{ch}",
                                    ["1" if defaults["hlog"] else "0"])[0] == "1",
                         )
+                        # Lo spettro di carica ha la sua scala: e' in pC, e con
+                        # i limiti delle ampiezze -- che sono in unita' di
+                        # offset -- si sarebbe ritagliato su numeri che li' non
+                        # vogliono dire niente.
+                        qset[ch] = (
+                            self._num(qs, f"qxmin_{ch}", None),
+                            self._num(qs, f"qxmax_{ch}", None),
+                            qs.get(f"qlog_{ch}", ["0"])[0] == "1",
+                        )
                     return self._send(200, "image/png",
                                       monitor.figure(kinds[route], n, xlim, ylim,
                                                      hset,
                                                      self._num(qs, "bw", defaults["bw"]),
-                                                     self._num(qs, "qcut", defaults["qcut"])))
+                                                     self._num(qs, "qcut", defaults["qcut"]),
+                                                     qset))
 
             self._send(404, "text/plain", b"not found")
 

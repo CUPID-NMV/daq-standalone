@@ -1419,10 +1419,19 @@ $("mon").href = location.protocol + "//" + location.hostname + ":8765/";
 const PAR = new URLSearchParams(location.search);
 const TOKEN = PAR.get("token") || "";
 
+// Gli errori NON spariscono da soli. Un rifiuto che svanisce dopo otto
+// secondi lascia la pagina con le modifiche ancora visibili e il file
+// invariato: si lancia la run convinti di aver salvato. E' successo, con un
+// salvataggio rifiutato per conflitto che nessuno ha visto passare.
 function msg(testo, ok){
-  const m = $("msg"); m.textContent = testo;
-  m.className = "msg " + (ok ? "ok" : "ko"); m.style.display = "block";
-  setTimeout(() => { m.style.display = "none"; }, 8000);
+  const m = $("msg");
+  m.textContent = testo + (ok ? "" : "          (clic per chiudere)");
+  m.className = "msg " + (ok ? "ok" : "ko");
+  m.style.display = "block";
+  m.style.cursor = ok ? "default" : "pointer";
+  m.onclick = ok ? null : () => { m.style.display = "none"; };
+  if(window._msgT) clearTimeout(window._msgT);
+  if(ok) window._msgT = setTimeout(() => { m.style.display = "none"; }, 8000);
 }
 
 function tabella(el, coppie){

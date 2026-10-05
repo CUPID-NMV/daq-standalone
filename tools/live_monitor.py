@@ -893,7 +893,8 @@ class Monitor:
                 # che si sta misurando; gli ultimi mille servono a vedere se
                 # sta cambiando, non a definirlo.
                 val = tutte
-                xlo, xhi, logy = (qset or {}).get(int(ch), (None, None, False))
+                xlo, xhi, logy, nbin = (qset or {}).get(
+                    int(ch), (None, None, False, None))
 
                 # I bin si costruiscono DENTRO l'intervallo scelto, non si
                 # ritaglia dopo: ritagliando si vedrebbe una fetta di un
@@ -906,7 +907,7 @@ class Monitor:
                     hi = lo + 1.0
                 est = (lo, hi)
 
-                nb = min(80, max(20, val.size // 8))
+                nb = nbin or min(80, max(20, val.size // 8))
                 # Gli stessi bin per le due distribuzioni: con bin diversi il
                 # confronto a vista non vorrebbe dire niente, ed e' tutto
                 # quello per cui questo grafico esiste.
@@ -1023,7 +1024,8 @@ class Monitor:
                 values = q[:, i]
 
                 # Ogni canale ha i propri limiti e la propria scala
-                xlo, xhi, logy = (hset or {}).get(int(ch), (None, None, False))
+                xlo, xhi, logy, nbin = (hset or {}).get(
+                    int(ch), (None, None, False, None))
 
                 # Con un intervallo esplicito i bin vanno calcolati dentro quello,
                 # altrimenti si vedrebbe solo una fetta di un istogramma costruito
@@ -1049,7 +1051,7 @@ class Monitor:
                 # cambio di soglia gli eventi nuovi sono pochi e l'istogramma
                 # risulterebbe grossolano anche per la parte congelata.
                 ntot = cur.size + (old.size if old is not None else 0)
-                nb = min(80, max(20, ntot // 8))
+                nb = nbin or min(80, max(20, ntot // 8))
                 bins = np.linspace(kw["range"][0], kw["range"][1], nb + 1)
 
                 if old is not None and old.size:
@@ -1278,6 +1280,7 @@ function buildHistControls(channels) {
       <span class="grp">ch${ch}</span>
       <label>amplitude x min [offset]<input id="hxmin_${ch}" placeholder="auto"></label>
       <label>amplitude x max [offset]<input id="hxmax_${ch}" placeholder="auto"></label>
+      <label>bins<input id="hbin_${ch}" placeholder="auto" style="width:60px"></label>
       <label class="chk"><input type="checkbox" id="hlog_${ch}"> log y</label>
       <button class="hreset" data-ch="${ch}">Autoscale</button>
     </div>
@@ -1285,12 +1288,14 @@ function buildHistControls(channels) {
       <span class="grp">ch${ch}</span>
       <label>charge x min [pC]<input id="qxmin_${ch}" placeholder="auto"></label>
       <label>charge x max [pC]<input id="qxmax_${ch}" placeholder="auto"></label>
+      <label>bins<input id="qbin_${ch}" placeholder="auto" style="width:60px"></label>
       <label class="chk"><input type="checkbox" id="qlog_${ch}"> log y</label>
       <button class="qreset" data-ch="${ch}">Autoscale</button>
     </div>`).join('');
 
   for (const ch of channels) {
-    for (const k of ['hxmin_' + ch, 'hxmax_' + ch, 'qxmin_' + ch, 'qxmax_' + ch]) {
+    for (const k of ['hxmin_' + ch, 'hxmax_' + ch, 'hbin_' + ch,
+                     'qxmin_' + ch, 'qxmax_' + ch, 'qbin_' + ch]) {
       const v = recall(k);
       if (v !== null) document.getElementById(k).value = v;
       document.getElementById(k).addEventListener('change', tick);
@@ -1309,6 +1314,7 @@ function buildHistControls(channels) {
     const ch = b.dataset.ch;
     document.getElementById(pre + 'xmin_' + ch).value = '';
     document.getElementById(pre + 'xmax_' + ch).value = '';
+    document.getElementById(pre + 'bin_' + ch).value = '';
     document.getElementById(pre + 'log_' + ch).checked = false;
     tick();
   };
@@ -1326,7 +1332,8 @@ function params() {
     if (v !== '') p.set(f === 'nev' ? 'n' : f, v);
   }
   if (builtChannels) for (const ch of builtChannels.split(',')) {
-    for (const k of ['hxmin_' + ch, 'hxmax_' + ch, 'qxmin_' + ch, 'qxmax_' + ch]) {
+    for (const k of ['hxmin_' + ch, 'hxmax_' + ch, 'hbin_' + ch,
+                     'qxmin_' + ch, 'qxmax_' + ch, 'qbin_' + ch]) {
       const v = document.getElementById(k).value.trim();
       store(k, v);
       if (v !== '') p.set(k, v);
@@ -1411,6 +1418,20 @@ async function tick() {
 }
 tick(); setInterval(tick, REFRESH);
 </script></body></html>"""
+
+
+def _bin(valore):
+    """Numero di bin chiesto dalla pagina, oppure None per automatico.
+
+    Si limita l'intervallo: un numero enorme non produce un istogramma piu'
+    informativo -- con mille eventi e mille bin si guarda il rumore di Poisson
+    -- ma fa disegnare a matplotlib migliaia di rettangoli a ogni
+    aggiornamento, su un monitor che si ridisegna ogni secondo.
+    """
+    if valore is None:
+        return None
+    n = int(valore)
+    return max(5, min(500, n))
 
 
 def parse_channels(testo):
@@ -1540,6 +1561,7 @@ def make_handler(monitor, refresh, defaults):
                             self._num(qs, f"hxmax_{ch}", defaults["hxmax"]),
                             qs.get(f"hlog_{ch}",
                                    ["1" if defaults["hlog"] else "0"])[0] == "1",
+                            _bin(self._num(qs, f"hbin_{ch}", None)),
                         )
                         # Lo spettro di carica ha la sua scala: e' in pC, e con
                         # i limiti delle ampiezze -- che sono in unita' di
@@ -1549,6 +1571,7 @@ def make_handler(monitor, refresh, defaults):
                             self._num(qs, f"qxmin_{ch}", None),
                             self._num(qs, f"qxmax_{ch}", None),
                             qs.get(f"qlog_{ch}", ["0"])[0] == "1",
+                            _bin(self._num(qs, f"qbin_{ch}", None)),
                         )
                     return self._send(200, "image/png",
                                       monitor.figure(kinds[route], n, xlim, ylim,

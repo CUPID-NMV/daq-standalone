@@ -15,9 +15,14 @@ acquisisce quando almeno uno supera soglia.
 Si scrive sul **Mac**, si compila e si prova solo sul **PC DAQ**, che è l'unico
 ad avere hardware e librerie CAEN.
 
-- PC DAQ: alias SSH `daq-pc` → `192.168.99.108`, utente `daq`, repo in
+- PC DAQ: alias SSH `daq-pc` → `192.168.99.104`, utente `daq`, repo in
   `/home/daq/daq-standalone`. Login a chiave.
 - Digitizer V1742: `192.168.99.105` (non è il PC DAQ).
+- **Gli indirizzi sono assegnati da DHCP e cambiano.** Il PC DAQ è passato
+  da `.108` a `.104` dopo un riavvio, il 2026-10-05. Se `daq-pc` non
+  risponde, prima di dare per rotto qualcosa si cerca dove è finito:
+  `for i in $(seq 1 254); do (ping -c1 -W1 192.168.99.$i >/dev/null && echo $i) & done; wait`
+  L'alias sta in `~/.ssh/config` sul Mac, non nel repo.
 - Sincronizzazione **solo via git** (`CUPID-NMV/daq-standalone`, branch `main`).
   Mai `scp`: fa divergere le copie, è già costato un allineamento manuale.
 - Sul Mac **non si può compilare**: mancano libCAENDigitizer e HDF5.

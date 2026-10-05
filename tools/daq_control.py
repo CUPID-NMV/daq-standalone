@@ -47,7 +47,9 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -1471,6 +1473,9 @@ PAGINA = r"""<!doctype html>
     <button id="monferma">Stop monitor</button>
     <a id="mon" href="#" target="_blank" rel="noopener"
        style="margin-left:6px;font-size:13px">Open monitor</a>
+    <a id="mondir" href="#" target="_blank" rel="noopener"
+       style="font-size:12px;color:#6b6a65"
+       title="Straight to the monitor port: only works from a network that can reach it">direct</a>
     <span id="monstato" style="font-size:12px;color:#6b6a65"></span>
     <label style="margin-left:auto;color:#6b6a65">who are you
       <input id="chi" placeholder="your name" style="width:140px">
@@ -1593,7 +1598,13 @@ $("chi").oninput = () => localStorage.setItem("chi", $("chi").value);
 let PORTA_MON = 8765;
 function aggiornaMonitor(s){
   PORTA_MON = s.monitor_porta || PORTA_MON;
-  $("mon").href = location.protocol + "//" + location.hostname + ":" + PORTA_MON + "/";
+  // Il link passa da QUESTA porta, non da hostname:8765: la pagina di
+  // controllo spesso si guarda attraverso un inoltro di porta o una VPN dove
+  // la porta del monitor non e' raggiungibile, e un link che funziona solo
+  // dalla rete del laboratorio e' peggio di nessun link. Il collegamento
+  // diretto resta accanto per chi sta in laboratorio e lo preferisce.
+  $("mon").href = "/monitor/" + (TOKEN ? "?token=" + encodeURIComponent(TOKEN) : "");
+  $("mondir").href = location.protocol + "//" + location.hostname + ":" + PORTA_MON + "/";
   const acceso = !!s.monitor;
 
   // Spento, il link non viene nascosto ma disattivato: sparire e ricomparire
@@ -1603,6 +1614,7 @@ function aggiornaMonitor(s){
   $("mon").style.color = acceso ? "" : "#b5b5b0";
   $("monavvia").style.display = acceso ? "none" : "";
   $("monferma").style.display = acceso ? "" : "none";
+  $("mondir").style.display = acceso ? "" : "none";
   $("monstato").textContent = acceso
     ? "on port " + PORTA_MON
     : "not running";
@@ -2109,17 +2121,90 @@ def crea_handler(ctrl, token):
         def _json(self, dato, codice=200):
             self._manda(codice, "application/json", json.dumps(dato).encode())
 
+        def _inoltra(self, resto, query):
+            """Gira una richiesta al monitor e riporta indietro la risposta.
+
+            Solo GET: il monitor non espone altro. Il corpo si legge tutto in
+            memoria invece di essere ritrasmesso a pezzi perche' le risposte
+            sono una pagina o un PNG di qualche centinaio di kB, e il tempo se
+            ne va a disegnare i grafici, non a copiarli.
+            """
+            url = "http://127.0.0.1:%d/%s" % (ctrl.porta_monitor, resto)
+            if query:
+                url += "?" + query
+            try:
+                with urllib.request.urlopen(url, timeout=30) as r:
+                    corpo = r.read()
+                    tipo = r.headers.get("Content-Type", "application/octet-stream")
+            except urllib.error.HTTPError as e:
+                return self._manda(e.code, "text/plain", str(e).encode())
+            except (urllib.error.URLError, OSError) as e:
+                # Il caso tipico e' il monitor spento: dirlo qui evita la
+                # pagina bianca del browser, che non sa niente di tutto cio'.
+                return self._manda(
+                    502, "text/html; charset=utf-8",
+                    ("<p style=\"font:15px system-ui;padding:24px\">The monitor is not "
+                     "answering on port %d of the DAQ machine.<br>Go back to "
+                     "<a href=\"/\">DAQ Control</a> and press <b>Start monitor</b>."
+                     "<br><br><small>%s</small></p>"
+                     % (ctrl.porta_monitor, e)).encode())
+            self.send_response(200)
+            self.send_header("Content-Type", tipo)
+            self.send_header("Content-Length", str(len(corpo)))
+            self.send_header("Cache-Control", "no-store")
+            if getattr(self, "_cookie_token", False):
+                self.send_header("Set-Cookie",
+                                 "daqtoken=%s; Path=/monitor; SameSite=Strict" % token)
+            self.end_headers()
+            return self.wfile.write(corpo)
+
         def _autorizzato(self, qs):
             if not token:
                 return True
             dato = qs.get("token", [""])[0] or self.headers.get("X-Token", "")
-            return dato == token
+            if dato == token:
+                return True
+            # Anche da cookie: la pagina del monitor, servita qui sotto
+            # /monitor/, chiede stats.json e i PNG con indirizzi relativi e non
+            # ha modo di portarsi dietro il token. Senza questo, con un token
+            # configurato il monitor inoltrato mostrerebbe la pagina e poi
+            # nient'altro.
+            for pezzo in (self.headers.get("Cookie") or "").split(";"):
+                nome, _, val = pezzo.strip().partition("=")
+                if nome == "daqtoken" and val == token:
+                    return True
+            return False
 
         def do_GET(self):
             parti = urllib.parse.urlparse(self.path)
             qs = urllib.parse.parse_qs(parti.query)
             if parti.path == "/":
                 return self._manda(200, "text/html; charset=utf-8", PAGINA.encode())
+            # Il monitor, servito attraverso QUESTA porta. Esiste perche' il
+            # monitor gira su una porta sua, e chi guarda la pagina da fuori
+            # -- VPN, inoltro di porta di VS Code, il collegamento diretto che
+            # verra' -- quasi sempre ha inoltrata solo questa. Il link diretto
+            # a hostname:8765 funziona dalla rete del laboratorio e non
+            # altrove, e l'errore che ne esce ("Safari non puo' connettersi")
+            # non distingue fra monitor spento e porta non raggiungibile.
+            # Qui invece: se vedi la pagina di controllo, vedi il monitor.
+            if parti.path == "/monitor" or parti.path.startswith("/monitor/"):
+                if not self._autorizzato(qs):
+                    return self._manda(403, "text/plain", b"token")
+                if parti.path == "/monitor":
+                    # Senza la barra finale il browser risolverebbe gli
+                    # indirizzi relativi della pagina del monitor
+                    # ("stats.json", "waveforms.png") sulla radice di questo
+                    # servizio, e non troverebbe niente.
+                    self.send_response(302)
+                    self.send_header("Location", "/monitor/" +
+                                     ("?" + parti.query if parti.query else ""))
+                    self.end_headers()
+                    return
+                if token and qs.get("token", [""])[0] == token:
+                    self._cookie_token = True
+                return self._inoltra(parti.path[len("/monitor/"):], parti.query)
+
             if parti.path == "/api/grafici":
                 if not self._autorizzato(qs):
                     return self._json({"errore": "token mancante o sbagliato"}, 403)

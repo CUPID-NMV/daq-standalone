@@ -101,18 +101,9 @@ class Monitor:
         self.baseline_ns = (10.0, 180.0)
         self.base_finestra = None     # com'e' stata applicata davvero
 
-        # Cariche accumulate dall'inizio della run. Il monitor rilegge solo la
-        # CODA del file a ogni giro -- se no il costo di un aggiornamento
-        # crescerebbe con la durata della run -- quindi lo spettro completo non
-        # si puo' rileggere: si accumula evento per evento, man mano che
-        # passano. Si tiene l'indice assoluto gia' assorbito, cosi' un evento
-        # non entra due volte quando due giri leggono finestre che si
-        # sovrappongono.
-        self.cariche = {}         # canale -> tutte le cariche viste
-        self.cariche_gate = None  # con quale cancello sono state calcolate
-        self.cariche_file = None  # e su quale file
-        self.cariche_fino = 0     # primo indice assoluto non ancora assorbito
-        self.cariche_persi = 0    # eventi passati fra due letture, mai visti
+        # Spettri cumulati dall'inizio della run, uno per grandezza
+        # ("cariche", "ampiezze"). Vedi accumula().
+        self.cumulati = {}
         self.primo_evento = 0     # indice assoluto del primo evento in memoria
         self.gen = None           # generazione delle soglie gia' vista
         self.offsets = {}         # offset correnti, per canale
@@ -160,13 +151,10 @@ class Monitor:
         cio' che arriva.
         """
         self.origin = int(self.n_events or 0)
-        # Anche le cariche accumulate: "azzera" vuol dire ripartire da adesso,
-        # e uno spettro cumulato che sopravvive all'azzeramento direbbe il
-        # contrario di quello che la pagina promette.
-        self.cariche = {}
-        self.cariche_gate = None
-        self.cariche_fino = self.origin
-        self.cariche_persi = 0
+        # Anche gli spettri cumulati: "azzera" vuol dire ripartire da adesso,
+        # e un cumulato che sopravvive all'azzeramento direbbe il contrario di
+        # quello che la pagina promette.
+        self.cumulati = {}
         self._hist.clear()
         self.frozen = {}
         self.frozen_offsets = {}
@@ -182,11 +170,10 @@ class Monitor:
             return
         self.baseline_ns = nuova
         self._ana = None
-        # Le cariche accumulate sono state calcolate con l'altro piedistallo:
-        # sommarle a quelle nuove darebbe uno spettro che non corrisponde a
-        # nessuna misura, come quando cambia il cancello.
-        self.cariche = {}
-        self.cariche_gate = None
+        # I cumulati sono stati calcolati con l'altro piedistallo: sommarli ai
+        # nuovi darebbe uno spettro che non corrisponde a nessuna misura.
+        # Vale per le cariche come per le ampiezze.
+        self.cumulati = {}
 
     def select_channels(self, channels):
         """Limita i grafici di dettaglio a questi canali (None = tutti).
@@ -362,7 +349,18 @@ class Monitor:
         if gen != self.gen:
             # Congela la distribuzione precedente: senza questo, scorrendo la
             # coda gli eventi vecchi sparirebbero e il confronto con loro.
-            if (~is_new).any():
+            #
+            # Si prende dal CUMULATO, non dai soli eventi in memoria: quello
+            # contiene tutto cio' che e' stato acquisito con la soglia di
+            # prima, non gli ultimi due secondi, e il confronto fra il prima e
+            # il dopo e' il motivo per cui questa roba esiste. Se il cumulato
+            # e' vuoto -- monitor appena acceso -- si ripiega sugli eventi in
+            # memoria precedenti al cambio, come si faceva.
+            dep = self.cumulati.get("ampiezze", {}).get("val", {})
+            if dep:
+                self.frozen = {ch: v.copy() for ch, v in dep.items()}
+                self.frozen_offsets = dict(self.offsets)
+            elif (~is_new).any():
                 self.frozen = {ch: q[~is_new, i].copy()
                                for i, ch in enumerate(channels)}
                 self.frozen_offsets = dict(self.offsets)
@@ -370,7 +368,6 @@ class Monitor:
 
         self.offsets = {int(c["ch"]): c.get("offset")
                         for c in st.get("channels", [])}
-        self._is_new = is_new
 
     # -- analisi -------------------------------------------------------
 
@@ -509,44 +506,61 @@ class Monitor:
     # mostrare di nascosto uno spettro che ha smesso di crescere.
     MAX_CARICHE = 2_000_000
 
-    def accumula_cariche(self, carica, channels, gate):
-        """Aggiunge allo spettro cumulato le cariche non ancora viste.
+    def accumula(self, nome, valori, channels, chiave):
+        """Aggiunge a un deposito cumulato i valori degli eventi non ancora visti.
 
-        Il cancello di integrazione fa parte della definizione della carica:
-        cambiandolo, i valori accumulati prima non sono piu' confrontabili con
-        quelli nuovi, e sommarli darebbe uno spettro che non corrisponde a
-        nessuna misura. Quindi si riparte, e il grafico dice da quando.
+        Serve perche' il monitor rilegge solo la CODA del file -- se no il
+        costo di un aggiornamento crescerebbe con la durata della run -- e lo
+        spettro di tutta la run non si puo' quindi rileggere: si accumula
+        evento per evento. Si tiene l'indice assoluto gia' assorbito, cosi' un
+        evento non entra due volte quando due letture si sovrappongono.
+
+        `chiave` e' cio' che DEFINISCE il valore: il cancello per la carica,
+        la generazione delle soglie per l'ampiezza. Se cambia si riparte,
+        perche' sommare valori calcolati in modi diversi darebbe uno spettro
+        che non corrisponde a nessuna misura. Vale anche per il file: una run
+        nuova e' un'altra cosa.
+
+        Ritorna il deposito, da cui il grafico prende valori, conteggi e
+        quanto si e' perso.
         """
-        if self.cariche_gate != gate or self.cariche_file != self.path:
-            self.cariche = {}
-            self.cariche_gate = gate
-            self.cariche_file = self.path
-            self.cariche_fino = self.primo_evento
-            self.cariche_persi = 0
+        d = self.cumulati.setdefault(
+            nome, {"val": {}, "chiave": None, "fino": 0, "persi": 0})
+
+        if d["chiave"] != (chiave, self.path):
+            d.update({"val": {}, "chiave": (chiave, self.path),
+                      "fino": self.primo_evento, "persi": 0})
 
         primo = self.primo_evento
-        ultimo = primo + carica.shape[0]
-        if ultimo <= self.cariche_fino:
-            return                                  # gia' visti tutti
+        ultimo = primo + valori.shape[0]
+        if ultimo <= d["fino"]:
+            return d                                 # gia' visti tutti
 
-        if primo > self.cariche_fino:
+        if primo > d["fino"]:
             # La DAQ ha prodotto piu' eventi di quanti ne stia in una lettura:
             # quelli in mezzo non li vedremo mai. Contarli e dirlo e' l'unica
             # cosa onesta -- uno spettro "di tutta la run" che in realta' ne
             # salta dei pezzi, senza avvisare, sarebbe peggio di non averlo.
-            self.cariche_persi += primo - self.cariche_fino
-            self.cariche_fino = primo
+            d["persi"] += primo - d["fino"]
+            d["fino"] = primo
 
-        da = self.cariche_fino - primo
+        da = d["fino"] - primo
         for i, ch in enumerate(channels):
             ch = int(ch)
-            vecchio = self.cariche.get(ch)
-            nuovo = np.asarray(carica[da:, i], dtype=np.float32)
+            vecchio = d["val"].get(ch)
+            nuovo = np.asarray(valori[da:, i], dtype=np.float32)
             if vecchio is None:
-                self.cariche[ch] = nuovo
+                d["val"][ch] = nuovo
             elif vecchio.size < self.MAX_CARICHE:
-                self.cariche[ch] = np.concatenate([vecchio, nuovo])
-        self.cariche_fino = ultimo
+                d["val"][ch] = np.concatenate([vecchio, nuovo])
+        d["fino"] = ultimo
+        return d
+
+    @staticmethod
+    def da_evento(d):
+        """Primo evento assorbito dal deposito, 0 se non si sa."""
+        n = max((v.size for v in d["val"].values()), default=0)
+        return max(0, d["fino"] - n)
 
     def self_trigger_attivo(self):
         """True se la run sta usando il self-trigger del V1742.
@@ -979,7 +993,7 @@ class Monitor:
             # 30.6, 24.5), e un integrale che cala allargando la finestra su
             # un impulso positivo e' impossibile.
             carica = self.segno * corr[:, :, a_i:b_i].sum(axis=2) * k_pc
-            self.accumula_cariche(carica, channels, (a_i, b_i))
+            dep_q = self.accumula("cariche", carica, channels, (a_i, b_i))
 
             # Piu' alto degli altri pannelli: sotto gli assi ci vanno
             # etichetta, legenda e il pie' di pagina, e con 3.4 pollici il
@@ -988,7 +1002,7 @@ class Monitor:
                                      squeeze=False)
             for i, ch in enumerate(channels):
                 ax = axes[0][i]
-                val = self.cariche.get(int(ch))
+                val = dep_q["val"].get(int(ch))
                 if val is None or val.size == 0:
                     val = carica[:, i]
                 xlo, xhi, logy, nbin = (qset or {}).get(
@@ -1068,17 +1082,15 @@ class Monitor:
             # casi -- il monitor acceso a run gia' avviata, e la DAQ che fra
             # due letture produce piu' eventi di quanti ne stia in una.
             da = []
-            if self.cariche_fino and self.cariche:
-                primo_acc = self.cariche_fino - max(
-                    (v.size for v in self.cariche.values()), default=0)
-                if primo_acc > 0:
-                    da.append("from event %s" % _mila(primo_acc))
-            if self.cariche_persi:
+            primo_acc = self.da_evento(dep_q)
+            if primo_acc > 0:
+                da.append("from event %s" % _mila(primo_acc))
+            if dep_q["persi"]:
                 # Corto apposta: con quattro canali la figura e' larga, ma con
                 # uno solo e' cinque pollici e la riga usciva dai bordi --
                 # tagliata proprio sull'avvertimento.
                 da.append("%s events missed between reads"
-                          % _mila(self.cariche_persi))
+                          % _mila(dep_q["persi"]))
             # Due righe invece di una lunga: con un solo canale la figura e'
             # larga cinque pollici e la riga unica usciva dai bordi, tagliata
             # da entrambe le parti proprio dove c'era l'avvertimento.
@@ -1095,16 +1107,27 @@ class Monitor:
             for n_riga, testo in enumerate(reversed(righe_pie)):
                 fig.text(0.5, 0.012 + 0.042 * n_riga, testo, ha="center",
                          fontsize=8.5,
-                         color=("#d62728" if (self.cariche_persi and n_riga == 0
+                         color=("#d62728" if (dep_q["persi"] and n_riga == 0
                                               and len(righe_pie) > 1) else "#555"))
             rect_finale = (0, 0.09 + 0.040 * len(righe_pie), 1, 1)
 
         else:   # amplitudes
+            # Cumulato su tutta la run, come lo spettro di carica: gli eventi
+            # in memoria sono solo la coda del file e con una run lunga la
+            # distribuzione che si vedeva era quella degli ultimi due secondi.
+            # La chiave comprende la generazione delle soglie: cambiando la
+            # soglia del self-trigger la popolazione e' un'altra, e sommarle
+            # darebbe uno spettro di nessuna delle due. Si riparte da li', e
+            # la distribuzione di prima resta accanto in grigio.
+            dep_a = self.accumula("ampiezze", q, channels, self.gen)
+
             fig, axes = plt.subplots(1, len(channels), figsize=(5 * len(channels), 3.4),
                                      squeeze=False)
             for i, ch in enumerate(channels):
                 ax = axes[0][i]
-                values = q[:, i]
+                values = dep_a["val"].get(int(ch))
+                if values is None or values.size == 0:
+                    values = q[:, i]
 
                 # Ogni canale ha i propri limiti e la propria scala
                 xlo, xhi, logy, nbin = (hset or {}).get(
@@ -1120,10 +1143,11 @@ class Monitor:
                     if hi > lo:
                         kw["range"] = (lo, hi)
 
+                # Il taglio fra "prima" e "adesso" non si fa piu' qui: il
+                # deposito riparte da solo al cambio di soglia, quindi cio'
+                # che contiene e' gia' e solo "adesso".
                 old = self.frozen.get(int(ch))
-                is_new = getattr(self, "_is_new", None)
-                cur = values[is_new] if (is_new is not None and old is not None
-                                         and is_new.shape[0] == values.shape[0]) else values
+                cur = values
 
                 # I bin devono essere gli stessi per le due distribuzioni,
                 # altrimenti il confronto visivo non significa nulla.
@@ -1150,6 +1174,20 @@ class Monitor:
                 ax.set_xlim(*kw["range"])
                 if logy:
                     ax.set_yscale("log")
+
+                # Quanti eventi ci sono dentro, e da dove: lo spettro dice
+                # "tutta la run" e va detto quando non e' vero -- monitor
+                # acceso a run avviata, o eventi prodotti fra due letture.
+                conto = "%s events" % _mila(cur.size)
+                da_ev = self.da_evento(dep_a)
+                if da_ev > 0:
+                    conto += "   from %s" % _mila(da_ev)
+                ax.text(0.99, 0.97, conto, transform=ax.transAxes,
+                        ha="right", va="top", fontsize=8, color="#52514e")
+                if dep_a["persi"]:
+                    ax.text(0.99, 0.90, "%s missed between reads"
+                            % _mila(dep_a["persi"]), transform=ax.transAxes,
+                            ha="right", va="top", fontsize=8, color="#d62728")
 
                 # Frazione di eventi sotto una soglia in ampiezza. Il default
                 # e' l'estremo superiore dell'istogramma, quindi conta tutto:

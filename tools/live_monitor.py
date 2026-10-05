@@ -1207,35 +1207,43 @@ class Monitor:
                 # casella della pagina resta come scavalcamento, per provare
                 # altri valori senza toccare la DAQ.
                 mv_off = self.attenuazione() * self.mv_per_count()
-                off = self.offsets.get(int(ch))
+                off = self.offsets.get(int(ch)) if self.self_trigger_attivo() else None
+
+                # Riga e percentuale servono a vedere quanta parte dello
+                # spettro il self-trigger sta tagliando. Senza self-trigger non
+                # c'e' niente da tagliare: prima si ripiegava sull'estremo
+                # inferiore dell'istogramma e usciva un "100.0% above cut 1.7"
+                # che non dice niente. Resta se la soglia la scrive l'utente
+                # nella casella, che e' un "e se la mettessi qui?" legittimo
+                # anche a trigger esterno.
+                taglio, e_soglia = None, False
                 if qcut is not None:
-                    taglio, e_soglia = float(qcut), False
+                    taglio = float(qcut)
                 elif off is not None:
                     taglio, e_soglia = float(off), True
-                else:
-                    taglio, e_soglia = float(kw["range"][0]), False
 
-                sopra = float((cur > taglio).mean()) * 100.0 if cur.size else float("nan")
+                if taglio is not None:
+                    sopra = (float((cur > taglio).mean()) * 100.0
+                             if cur.size else float("nan"))
+                    dentro = kw["range"][0] <= taglio <= kw["range"][1]
+                    if dentro:
+                        ax.axvline(taglio, color="#2ca02c" if e_soglia else "#d62728",
+                                   lw=1.4, ls="-" if e_soglia else "--")
+                    # La soglia in vigore si disegna comunque, anche quando il
+                    # conteggio usa un altro valore: e' il riferimento fisico.
+                    if (not e_soglia and off is not None
+                            and kw["range"][0] <= off <= kw["range"][1]):
+                        ax.axvline(off, color="#2ca02c", lw=1.4)
 
-                dentro = kw["range"][0] <= taglio <= kw["range"][1]
-                if dentro:
-                    ax.axvline(taglio, color="#2ca02c" if e_soglia else "#d62728",
-                               lw=1.4, ls="-" if e_soglia else "--")
-                # La soglia in vigore si disegna comunque, anche quando il
-                # conteggio usa un altro valore: e' il riferimento fisico.
-                if (not e_soglia and off is not None
-                        and kw["range"][0] <= off <= kw["range"][1]):
-                    ax.axvline(off, color="#2ca02c", lw=1.4)
-
-                etichetta = ("self-trigger threshold %g" % off) if e_soglia else \
-                            ("cut %.1f" % taglio)
-                ax.text(0.5, 1.02, "%.1f%% above %s  (%.0f mV)"
-                        % (sopra, etichetta, taglio * mv_off),
-                        transform=ax.transAxes, ha="center", va="bottom",
-                        fontsize=9, color="#1a6b1a" if e_soglia else "#d62728")
-                if not dentro:
-                    ax.text(0.99, 0.97, "fuori scala", transform=ax.transAxes,
-                            ha="right", va="top", fontsize=8, color="#888")
+                    etichetta = ("self-trigger threshold %g" % off) if e_soglia else \
+                                ("cut %.1f" % taglio)
+                    ax.text(0.5, 1.02, "%.1f%% above %s  (%.0f mV)"
+                            % (sopra, etichetta, taglio * mv_off),
+                            transform=ax.transAxes, ha="center", va="bottom",
+                            fontsize=9, color="#1a6b1a" if e_soglia else "#d62728")
+                    if not dentro:
+                        ax.text(0.01, 0.97, "cut out of range", transform=ax.transAxes,
+                                ha="left", va="top", fontsize=8, color="#888")
 
                 # "ADC" da solo e' ambiguo: in questo progetto convivono i
                 # conteggi della forma d'onda registrata (questi) e quelli
@@ -1246,10 +1254,13 @@ class Monitor:
                 # calibrazione della soglia misurata su impulsi da 1.6 ns; i PMT
                 # sono risultati 1.80 ns, il 12% piu' larghi.
                 nota_cal = ("" if self.attenuazione_misurata()
-                            else "   NOT CALIBRATED AT THIS SAMPLING RATE")
-                ax.set_xlabel("amplitude [offset units]   "
-                              "1 offset = %.2f mV   (pulses ~1.8 ns wide)%s"
-                              % (mv_off, nota_cal))
+                            else "  \u2014  NOT CALIBRATED AT THIS SAMPLING RATE")
+                # Su due righe e piu' piccola: con un canale solo il pannello e'
+                # largo cinque pollici e la riga unica usciva da entrambi i
+                # bordi, tagliando proprio l'avvertimento sulla calibrazione.
+                ax.set_xlabel("amplitude [offset units]\n"
+                              "1 offset = %.2f mV, pulses ~1.8 ns%s"
+                              % (mv_off, nota_cal), fontsize=8.5)
                 ax.set_ylabel("events" + (" (log)" if logy else ""))
                 ax.set_title(f"ch{ch}", fontsize=10, pad=18)
                 ax.grid(alpha=0.25)

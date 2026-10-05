@@ -180,8 +180,20 @@ Digitizer::Digitizer()
 
     // Offset DC: uno scalare vale per tutti, una lista va in parallelo a
     // ChannelList e l'ultimo valore si replica sui rimanenti.
-    fDCOffset = fConfig.GetEntryList<int64_t>("digitizer","DCOffset",
-                                              0x7000, fChannelList.size());
+    // Scalare oppure lista. GetEntryList legge SOLO liste e su uno scalare
+    // ripiega in silenzio sul default: scrivere "DCOffset = 0x4000" non
+    // avrebbe avuto alcun effetto, e il sintomo sarebbe stato un offset che
+    // "non fa niente". Visto, misurato e inseguito per mezz'ora.
+    {
+        auto nodo = fConfig.GetTbl()["digitizer"]["DCOffset"];
+        if (nodo.is_array()) {
+            fDCOffset = fConfig.GetEntryList<int64_t>("digitizer","DCOffset",
+                                                      0x7000, fChannelList.size());
+        } else {
+            int64_t v = nodo ? nodo.value_or<int64_t>(0x7000) : 0x7000;
+            fDCOffset.assign(fChannelList.size() ? fChannelList.size() : 1, v);
+        }
+    }
     for (size_t i = 0; i < fDCOffset.size(); ++i) {
         if (fDCOffset[i] < 0 || fDCOffset[i] > 0xFFFF) {
             Log::OutError("DCOffset fuori range (" + std::to_string(fDCOffset[i]) +

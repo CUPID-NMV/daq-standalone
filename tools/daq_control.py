@@ -40,6 +40,7 @@ import io
 import re
 import json
 import os
+import shlex
 import signal
 import socket
 import subprocess
@@ -54,6 +55,12 @@ import tomledit
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BINARIO = os.path.join(ROOT, "build", "main", "DAQ-WC")
+MONITOR = os.path.join(ROOT, "tools", "live_monitor.py")
+
+# Opzioni con cui il controllore avvia il monitor. Sono quelle che si usano
+# davvero: -b 0.0.0.0 perche' la pagina si guarda da un'altra macchina, e il
+# resto e' la vista preferita. Si cambiano con --monitor-args.
+ARGS_MONITOR = ["-b", "0.0.0.0", "--refresh", "1", "--bw", "5"]
 AZIONI = os.path.join(ROOT, "data", "azioni.jsonl")
 
 # Stato dello scan in corso. Sta su file e non in memoria come tutto il resto:
@@ -450,6 +457,30 @@ def trova_daq():
     return None
 
 
+def trova_monitor():
+    """PID del monitor in esecuzione, oppure None.
+
+    Come per la DAQ non si cerca una stringa nella riga di comando: si chiede
+    a /proc che l'eseguibile sia un python e che il PRIMO argomento sia
+    proprio live_monitor.py. Cercare "live_monitor.py" fra tutti gli
+    argomenti prende anche la shell che lo ha lanciato -- e un SIGTERM a
+    quella lascia il monitor vivo e orfano. E' successo oggi.
+    """
+    for voce in os.listdir("/proc"):
+        if not voce.isdigit():
+            continue
+        try:
+            exe = os.readlink("/proc/%s/exe" % voce)
+            argv = open("/proc/%s/cmdline" % voce).read().split("\0")
+        except OSError:
+            continue
+        if not os.path.basename(exe).startswith("python"):
+            continue
+        if len(argv) > 1 and os.path.basename(argv[1]) == "live_monitor.py":
+            return int(voce)
+    return None
+
+
 def elenco_grafici(n=12):
     """I grafici piu' recenti prodotti dagli scan."""
     try:
@@ -622,11 +653,14 @@ def ultime_azioni(n=12):
 #  Stato
 # ---------------------------------------------------------------------------
 class Controllo:
-    def __init__(self, toml, log_path):
+    def __init__(self, toml, log_path, porta_monitor=PORTA_MONITOR,
+                 args_monitor=None):
         self.toml = os.path.abspath(toml)
         self.log_path = log_path
         self.lock = threading.Lock()
         self.storia = []          # (istante, eventi) per il rate recente
+        self.porta_monitor = porta_monitor
+        self.args_monitor = list(args_monitor or ARGS_MONITOR)
 
     # -- configurazione ----------------------------------------------------
     def config(self):
@@ -854,7 +888,9 @@ class Controllo:
         s = {"in_corso": pid is not None, "pid": pid,
              "config": self.config(), "log": self.coda_log(25),
              "azioni": ultime_azioni(), "adesso": time.time(),
-             "monitor": monitor_acceso(), "monitor_porta": PORTA_MONITOR,
+             "monitor": monitor_acceso(self.porta_monitor),
+             "monitor_pid": trova_monitor(),
+             "monitor_porta": self.porta_monitor,
              "scan": None, "coda": self.leggi_coda()}
         if scan:
             s["scan"] = {
@@ -1297,6 +1333,63 @@ class Controllo:
                 return True, "DAQ started."
         return False, "Started but I cannot find it among the processes: check the log."
 
+    def avvia_monitor(self):
+        """Accende il monitor sulla macchina DAQ.
+
+        La pagina offriva un link e basta, e un link apre una pagina: se il
+        processo non c'era si finiva su un errore del browser, senza sapere se
+        mancasse il monitor, la rete o l'inoltro della porta. Potendolo
+        accendere da qui la domanda non si pone piu'.
+        """
+        with self.lock:
+            if trova_monitor():
+                return False, "The monitor is already running."
+            if not os.path.exists(MONITOR):
+                return False, "Not found: %s" % MONITOR
+            try:
+                log = open(os.path.join(ROOT, "data", "monitor-console.log"), "wb")
+            except OSError as e:
+                return False, "Cannot write the monitor log: %s" % e
+            try:
+                # start_new_session come per la DAQ: il monitor deve
+                # sopravvivere al riavvio del controllore, se no riavviare
+                # questa pagina spegnerebbe la vista sulla run in corso.
+                subprocess.Popen([sys.executable, MONITOR] + self.args_monitor,
+                                 cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+                                 stdin=subprocess.DEVNULL, start_new_session=True)
+            except OSError as e:
+                return False, "Start failed: %s" % e
+            finally:
+                log.close()
+            # Si aspetta la PORTA, non il processo: e' quella che serve a chi
+            # clicca il link, e un processo che parte e muore subito (porta
+            # occupata, file dati assente) risulterebbe comunque "avviato".
+            for _ in range(60):
+                time.sleep(0.1)
+                global _monitor_visto
+                _monitor_visto = (0.0, False)
+                if monitor_acceso(self.porta_monitor):
+                    return True, "Monitor started."
+            return False, ("Started but it is not answering on port %d: "
+                           "look at data/monitor-console.log." % self.porta_monitor)
+
+    def ferma_monitor(self):
+        with self.lock:
+            pid = trova_monitor()
+            if not pid:
+                return False, "The monitor is not running."
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError as e:
+                return False, "Cannot stop it: %s" % e
+            for _ in range(ATTESA_ARRESTO_S * 2):
+                time.sleep(0.5)
+                if not trova_monitor():
+                    global _monitor_visto
+                    _monitor_visto = (0.0, False)
+                    return True, "Monitor stopped."
+            return False, "It is not closing: pid %d is still there." % pid
+
     def ferma(self, da_coda=False):
         with self.lock:
             return self._ferma(da_coda)
@@ -1374,6 +1467,8 @@ PAGINA = r"""<!doctype html>
   <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     <button id="avvia">Start run</button>
     <button id="ferma">Stop run</button>
+    <button id="monavvia">Start monitor</button>
+    <button id="monferma">Stop monitor</button>
     <a id="mon" href="#" target="_blank" rel="noopener"
        style="margin-left:6px;font-size:13px">Open monitor</a>
     <span id="monstato" style="font-size:12px;color:#6b6a65"></span>
@@ -1499,15 +1594,21 @@ let PORTA_MON = 8765;
 function aggiornaMonitor(s){
   PORTA_MON = s.monitor_porta || PORTA_MON;
   $("mon").href = location.protocol + "//" + location.hostname + ":" + PORTA_MON + "/";
-  // Il link apre una pagina, non avvia il monitor: senza dirlo, trovare un
-  // errore del browser lascia il dubbio se sia caduta la rete.
   const acceso = !!s.monitor;
-  $("monstato").textContent = acceso ? "" : "(not running on port " + PORTA_MON + ")";
-  $("mon").style.color = acceso ? "" : "#6b6a65";
+
+  // Spento, il link non viene nascosto ma disattivato: sparire e ricomparire
+  // sotto il puntatore e' peggio che restare li' spiegando perche' non si
+  // puo' cliccare.
+  $("mon").style.pointerEvents = acceso ? "" : "none";
+  $("mon").style.color = acceso ? "" : "#b5b5b0";
+  $("monavvia").style.display = acceso ? "none" : "";
+  $("monferma").style.display = acceso ? "" : "none";
+  $("monstato").textContent = acceso
+    ? "on port " + PORTA_MON
+    : "not running";
   $("mon").title = acceso
     ? "Opens the monitor in a new tab"
-    : "The monitor process is not running: start it on the DAQ machine with "
-      + "python3 tools/live_monitor.py -b 0.0.0.0";
+    : "The monitor is not running: press Start monitor";
 }
 $("mon").href = location.protocol + "//" + location.hostname + ":" + PORTA_MON + "/";
 
@@ -1546,6 +1647,21 @@ async function azione(nome, conferma){
   }catch(e){ msg("Request failed: " + e, false); }
   aggiorna();
 }
+
+// Il monitor non chiede conferma: accenderlo e spegnerlo non tocca i dati
+// ne' la run, ed e' un gesto che si fa spesso.
+async function azioneMonitor(che){
+  $("monavvia").disabled = $("monferma").disabled = true;
+  try{
+    const q = new URLSearchParams({chi: $("chi").value, token: TOKEN, azione: che});
+    const d = await (await fetch("/api/monitor?" + q, {method: "POST"})).json();
+    msg(d.messaggio, d.esito);
+  }catch(e){ msg("Request failed: " + e, false); }
+  $("monavvia").disabled = $("monferma").disabled = false;
+  aggiorna();
+}
+$("monavvia").onclick = () => azioneMonitor("avvia");
+$("monferma").onclick = () => azioneMonitor("ferma");
 
 $("avvia").onclick = () => azione("avvia", "Start a new run?");
 $("ferma").onclick = () => azione("ferma",
@@ -2053,6 +2169,16 @@ def crea_handler(ctrl, token):
                 esito, messaggio = ctrl.ferma()
                 registra(chi, da, "ferma", messaggio)
 
+            elif parti.path == "/api/monitor":
+                azione = qs.get("azione", [""])[0]
+                if azione == "avvia":
+                    esito, messaggio = ctrl.avvia_monitor()
+                elif azione == "ferma":
+                    esito, messaggio = ctrl.ferma_monitor()
+                else:
+                    return self._manda(404, "text/plain", b"not found")
+                registra(chi, da, "monitor/" + azione, messaggio)
+
             elif parti.path == "/api/config":
                 try:
                     n = int(self.headers.get("Content-Length", 0))
@@ -2140,11 +2266,22 @@ def main():
                     help="se impostato, va passato come ?token=... Non e' "
                          "autenticazione vera, e' una cintura in piu' quando la "
                          "pagina e' raggiungibile da fuori")
+    ap.add_argument("--monitor-port", type=int, default=PORTA_MONITOR,
+                    help="porta del monitor, per il link e per avviarlo "
+                         "(default %d)" % PORTA_MONITOR)
+    ap.add_argument("--monitor-args", default=" ".join(ARGS_MONITOR),
+                    help="opzioni con cui avviare il monitor "
+                         "(default: %(default)s)")
     ap.add_argument("--log", default=os.path.join(ROOT, "data", "daq-console.log"),
                     help="dove finisce l'uscita della DAQ")
     args = ap.parse_args()
 
-    ctrl = Controllo(args.config, args.log)
+    args_mon = shlex.split(args.monitor_args)
+    # La porta del monitor deve comparire anche fra le sue opzioni, se no il
+    # controllore sonderebbe una porta e il monitor ne aprirebbe un'altra.
+    if "-p" not in args_mon and "--port" not in args_mon:
+        args_mon += ["-p", str(args.monitor_port)]
+    ctrl = Controllo(args.config, args.log, args.monitor_port, args_mon)
     stampa = lambda s: print(s, flush=True)
     stampa("Configurazione : %s" % ctrl.toml)
     stampa("Binario        : %s%s" % (BINARIO, "" if os.path.exists(BINARIO) else "   NON ESISTE"))

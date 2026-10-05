@@ -38,12 +38,6 @@ import daqio
 from daqio import load, baseline_amplitude, DaqFileError
 
 
-# Quanti eventi recenti si sovrappongono allo spettro cumulato. Mille e' un
-# compromesso: abbastanza da avere una forma, pochi da reagire in fretta se
-# qualcosa cambia -- a 500 Hz sono gli ultimi due secondi.
-ULTIMI_CARICA = 1000
-
-
 def _mila(n):
     """1234567 -> '1 234 567'. Su uno spettro da centomila eventi la cifra
     nuda si legge male proprio quando serve confrontarla con mille."""
@@ -502,6 +496,17 @@ class Monitor:
                 self.cariche[ch] = np.concatenate([vecchio, nuovo])
         self.cariche_fino = ultimo
 
+    def self_trigger_attivo(self):
+        """True se la run sta usando il self-trigger del V1742.
+
+        Lo si deduce da live-status.json, che la DAQ pubblica SOLO con
+        SelfTrigger = true e che refresh() scarta se appartiene a un'altra
+        run. E' quindi una dichiarazione della DAQ sulla run in corso, non una
+        lettura del TOML -- che puo' essere gia' stato cambiato per la
+        prossima run mentre questa e' ancora in aria.
+        """
+        return self.status is not None
+
     def _verso(self, corr):
         """+1 se gli impulsi vanno in su, -1 se vanno in giu'.
 
@@ -587,9 +592,11 @@ class Monitor:
         out["shown"] = int(self.data.shape[0])
         out["sampling"] = str(hdr.get("SamplingRate", "?"))
         by_ch = {int(c["ch"]): c for c in (self.status or {}).get("channels", [])}
+        st_on = self.self_trigger_attivo()
         for i, ch in enumerate(hdr["ChannelList"]):
             rms = float(np.median(noise[:, i]))
-            eff, note = self.effective_threshold(amp[:, i], rms)
+            eff, note = ((None, "no self-trigger") if not st_on
+                         else self.effective_threshold(amp[:, i], rms))
             info = by_ch.get(int(ch), {})
             out["channels"].append({
                 "ch": int(ch),
@@ -778,7 +785,19 @@ class Monitor:
                             alpha=1.0 if n == 1 else 0.5)
                 ax.axhline(0, color="k", lw=0.8, ls=":")
 
-                if bw:
+                # La curva filtrata e i campioni a 30 MHz sono un modello
+                # della STRADA DEL TRIGGER: la copia attenuata in Transparent
+                # Mode su cui il comparatore del self-trigger decide. Con il
+                # trigger esterno quella strada non decide niente, e
+                # disegnarla sopra la forma d'onda vera vuol dire sovrapporre
+                # al dato un modello di qualcosa che non sta succedendo.
+                if bw and not self.self_trigger_attivo():
+                    ax.text(0.01, 0.04,
+                            "bandwidth model hidden: it describes the "
+                            "self-trigger path, which this run is not using",
+                            transform=ax.transAxes, ha="left", va="bottom",
+                            fontsize=8, color="#888")
+                elif bw:
                     dt = float(t_ns[1] - t_ns[0])
                     grezzo = corr[-1, i]
                     filtrato = self.banda_limitata(grezzo, dt, bw)
@@ -804,7 +823,14 @@ class Monitor:
                             bbox=dict(fc="white", ec="#ccc", alpha=.85))
 
                 rms = float(np.median(noise[:, i]))
-                eff, note = self.effective_threshold(amp[:, i], rms)
+                # Anche questa riga parla del self-trigger: e' l'ampiezza del
+                # piu' piccolo impulso che lo ha fatto scattare. Con il
+                # trigger esterno non c'e' nessuna selezione in ampiezza,
+                # quindi il "bordo" e' solo la fluttuazione piu' piccola
+                # capitata, e l'avvertimento "threshold inside the noise"
+                # denuncia una soglia che non esiste.
+                eff, note = ((None, None) if not self.self_trigger_attivo()
+                             else self.effective_threshold(amp[:, i], rms))
                 off = self.offsets.get(int(ch))
                 if eff is not None:
                     ax.axhline(eff, color="#d62728", lw=1.1, ls="--",
@@ -885,14 +911,9 @@ class Monitor:
                                      squeeze=False)
             for i, ch in enumerate(channels):
                 ax = axes[0][i]
-                recenti = carica[-ULTIMI_CARICA:, i]
-                tutte = self.cariche.get(int(ch))
-                if tutte is None or tutte.size == 0:
-                    tutte = recenti
-                # Le statistiche descrivono lo spettro completo, che e' quello
-                # che si sta misurando; gli ultimi mille servono a vedere se
-                # sta cambiando, non a definirlo.
-                val = tutte
+                val = self.cariche.get(int(ch))
+                if val is None or val.size == 0:
+                    val = carica[:, i]
                 xlo, xhi, logy, nbin = (qset or {}).get(
                     int(ch), (None, None, False, None))
 
@@ -901,8 +922,8 @@ class Monitor:
                 # istogramma calcolato su tutto, con la risoluzione sprecata
                 # fuori dalla vista. E' la stessa ragione per cui lo spettro
                 # delle ampiezze fa cosi'.
-                lo = xlo if xlo is not None else float(min(val.min(), recenti.min()))
-                hi = xhi if xhi is not None else float(max(val.max(), recenti.max()))
+                lo = xlo if xlo is not None else float(val.min())
+                hi = xhi if xhi is not None else float(val.max())
                 if not hi > lo:
                     hi = lo + 1.0
                 est = (lo, hi)
@@ -913,38 +934,17 @@ class Monitor:
                 # quello per cui questo grafico esiste.
                 bordi = np.linspace(lo, hi, nb + 1)
 
-                ax.hist(val, bins=bordi, color="#1f77b4", alpha=.85,
-                        label="whole run, %s events" % _mila(val.size))
-
-                # Gli ultimi mille a CONTORNO, non riempiti: un secondo
-                # istogramma pieno coprirebbe il primo, che e' quello con la
-                # statistica. Riscalati all'area del cumulato, se no con mille
-                # eventi contro centomila sarebbero una riga sullo zero; il
-                # fattore sta in legenda, cosi' nessuno legge quei conteggi
-                # come se fossero eventi veri.
-                if recenti.size and val.size > recenti.size:
-                    fattore = val.size / float(recenti.size)
-                    cnt, _ = np.histogram(recenti, bins=bordi)
-                    y = cnt * fattore
-                    if logy:
-                        # In scala logaritmica lo zero non esiste: senza
-                        # questo la spezzata precipitava sul fondo dell'asse a
-                        # ogni bin vuoto, e sulle code -- dove i bin vuoti
-                        # sono la maggioranza -- restava un pettine di righe
-                        # verticali al posto della distribuzione. Interrompere
-                        # la linea dice la cosa giusta: li' non c'e' misura.
-                        y = np.where(cnt > 0, y, np.nan)
-                    ax.step(bordi, np.concatenate([[np.nan if logy else 0.0], y]),
-                            where="pre", color="#d62728", lw=1.6,
-                            label="last %s events, scaled x%.0f"
-                                  % (_mila(recenti.size), fattore))
+                # Un solo istogramma, quello di tutta la run. La
+                # sovrapposizione degli ultimi mille eventi riscalati c'e'
+                # stata e l'abbiamo tolta: con una statistica gia' grande le
+                # due curve coincidono a meno del rumore di Poisson del
+                # campione piccolo, quindi aggiungeva disturbo e non
+                # informazione.
+                ax.hist(val, bins=bordi, color="#1f77b4", alpha=.85)
                 ax.set_xlim(*est)
-                # La legenda sotto gli assi, non dentro: uno spettro ha il
-                # picco in mezzo e le code ai lati, quindi non esiste un
-                # angolo libero per tutte le distribuzioni. In alto a sinistra
-                # finiva sopra il fianco in salita dell'istogramma.
-                ax.legend(fontsize=7.5, loc="upper center",
-                          bbox_to_anchor=(0.5, -0.22), ncol=2, frameon=False)
+                ax.text(0.99, 0.97, "%s events" % _mila(val.size),
+                        transform=ax.transAxes, ha="right", va="top",
+                        fontsize=8, color="#52514e")
 
                 # Lo zero e' il piedistallo: in uno spettro di carica e' il
                 # riferimento che dice se il picco e' segnale o rumore
@@ -995,9 +995,12 @@ class Monitor:
                 primo_acc = self.cariche_fino - max(
                     (v.size for v in self.cariche.values()), default=0)
                 if primo_acc > 0:
-                    da.append("accumulated from event %s" % _mila(primo_acc))
+                    da.append("from event %s" % _mila(primo_acc))
             if self.cariche_persi:
-                da.append("%s events never seen (produced between two reads)"
+                # Corto apposta: con quattro canali la figura e' larga, ma con
+                # uno solo e' cinque pollici e la riga usciva dai bordi --
+                # tagliata proprio sull'avvertimento.
+                da.append("%s events missed between reads"
                           % _mila(self.cariche_persi))
             # Due righe invece di una lunga: con un solo canale la figura e'
             # larga cinque pollici e la riga unica usciva dai bordi, tagliata

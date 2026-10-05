@@ -701,11 +701,13 @@ class Monitor:
         axes[2].set_ylabel("noise [mV]")
         axes[2].set_xlabel("channel")
 
-        if any(sotto):
-            axes[1].text(0.995, 0.93,
-                         "hatched: nothing above the cut, median over all events",
-                         transform=axes[1].transAxes, ha="right", va="top",
-                         fontsize=7.5, color="#2ca02c")
+        # Sotto la figura, non dentro il pannello: con un canale solo la barra
+        # occupa il centro e la scritta ci finiva sopra.
+        nota_sotto = any(sotto)
+        if nota_sotto:
+            fig.text(0.5, 0.008,
+                     "hatched: no event above the cut \u2014 median amplitude over all events",
+                     ha="center", fontsize=8, color="#2ca02c")
 
         for ax in axes:
             ax.grid(alpha=.25, axis="y")
@@ -719,7 +721,7 @@ class Monitor:
         fig.suptitle("Overview of %d channels  (last %d events)"
                      % (len(righe), ov["eventi"]), fontsize=10)
 
-        fig.tight_layout()
+        fig.tight_layout(rect=(0, 0.035, 1, 1) if nota_sotto else None)
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=110)
         plt.close(fig)

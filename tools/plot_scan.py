@@ -111,7 +111,11 @@ def per_canale(d, tipo, k_mv_offset):
             soglia_mv, prima, dopo = p.get("soglia_mv"), None, None
         else:
             nome, durata = d.get("file"), d.get("secondi_per_punto")
-            soglia_mv = p.get("distanza", 0) * k_mv_offset
+            # abs() per la stessa ragione di leggi(): col fronte di salita
+            # "distanza" e' negativa, e una soglia negativa qui sotto e'
+            # peggio di un asse specchiato -- il confronto con |ampiezza| la
+            # supera sempre, quindi ogni canale contava TUTTI gli eventi.
+            soglia_mv = abs(p.get("distanza", 0)) * k_mv_offset
             prima, dopo = p.get("eventi_da"), p.get("eventi_a")
         if not nome or not durata:
             continue

@@ -95,6 +95,11 @@ class Monitor:
 
         self.status = None        # live-status.json pubblicato dalla DAQ
         self.segno = -1.0         # verso dell'impulso, finche' non ci sono dati
+        # Finestra in cui si misura il piedistallo, in ns. Prima dell'impulso
+        # e non dal campione zero: i primi campioni dopo la cella di trigger
+        # del DRS4 non sono puliti.
+        self.baseline_ns = (10.0, 180.0)
+        self.base_finestra = None     # com'e' stata applicata davvero
 
         # Cariche accumulate dall'inizio della run. Il monitor rilegge solo la
         # CODA del file a ogni giro -- se no il costo di un aggiornamento
@@ -169,6 +174,19 @@ class Monitor:
         self._ov = None
         self._prev = None
         self.rate = 0.0
+
+    def set_baseline_ns(self, a, b):
+        """Finestra del piedistallo. Cambiarla invalida l'analisi in memoria."""
+        nuova = (a, b)
+        if nuova == self.baseline_ns:
+            return
+        self.baseline_ns = nuova
+        self._ana = None
+        # Le cariche accumulate sono state calcolate con l'altro piedistallo:
+        # sommarle a quelle nuove darebbe uno spettro che non corrisponde a
+        # nessuna misura, come quando cambia il cancello.
+        self.cariche = {}
+        self.cariche_gate = None
 
     def select_channels(self, channels):
         """Limita i grafici di dettaglio a questi canali (None = tutti).
@@ -437,6 +455,40 @@ class Monitor:
 
         dt_ns = float(self.hdr.get("SamplingTime", 1e-9)) * 1e9
         t_ns = np.arange(d.shape[2]) * dt_ns
+
+        # Piedistallo misurato in una finestra DICHIARATA, prima dell'impulso,
+        # evento per evento.
+        #
+        # daqio prende la mediana dell'intera traccia: giusta per gli impulsi
+        # dei PMT, larghi pochi nanosecondi su oltre mille campioni, sbagliata
+        # per un SiPM con il LED che ne occupa 400 su 1321 e tira dentro la
+        # mediana la sua stessa coda. Misurato: mediana di tutta la traccia
+        # 275.0 conteggi, dei soli campioni pre-impulso 271.0. I quattro
+        # conteggi di differenza, integrati, valgono piu' del segnale.
+        #
+        # La finestra si dichiara invece di dedurla: una rilevazione
+        # automatica dell'inizio impulso che avevo provato scattava
+        # sull'offset stesso che doveva correggere. Qui chi guarda sa dove
+        # viene presa, la vede scritta sull'asse, e la sposta se la
+        # configurazione cambia -- a 5 GHz la finestra intera dura 205 ns e
+        # 10-180 non e' piu' un tratto pulito.
+        self.base_finestra = None
+        a, b = self.baseline_ns
+        if a is not None and b is not None and b > a:
+            i0 = int(np.searchsorted(t_ns, a))
+            i1 = int(np.searchsorted(t_ns, b, "right"))
+            i1 = min(i1, d.shape[2])
+            if i1 - i0 >= 5:
+                off = np.median(corr[:, :, i0:i1], axis=2)
+                corr = corr - off[:, :, None]
+                base = base + off
+                # Il rumore si rimisura li' dentro: la MAD sull'intera traccia
+                # comprende l'impulso e lo conta come fluttuazione.
+                noise = 1.4826 * np.median(
+                    np.abs(corr[:, :, i0:i1]), axis=2)
+                hi, lo = corr.max(axis=2), corr.min(axis=2)
+                amp = np.where(np.abs(lo) > np.abs(hi), lo, hi)
+                self.base_finestra = (float(t_ns[i0]), float(t_ns[i1 - 1]), i1 - i0)
         # L'ampiezza dell'impulso e' l'escursione dalla parte DELL'IMPULSO,
         # non la maggiore in valore assoluto: quella faceva entrare nello
         # spettro anche i picchi di rumore dal lato sbagliato come se fossero
@@ -765,6 +817,10 @@ class Monitor:
             frequenza di campionamento. E' gia' costato un falso allarme.
             """
             parti = []
+            if self.base_finestra:
+                parti.append("baseline %.0f-%.0f ns" % self.base_finestra[:2])
+            else:
+                parti.append("baseline: whole trace")
             if self.tail_cut:
                 parti.append(f"last {self.tail_cut} samples dropped")
             if xlim[0] is not None or xlim[1] is not None:
@@ -906,75 +962,14 @@ class Monitor:
             # non conosce.
             k_pc = dt_ns * self.mv_per_count() / 50.0
 
-            # Piedistallo preso FUORI dal cancello, evento per evento.
-            #
-            # Serve perche' il piedistallo di daqio e' la mediana dell'INTERA
-            # traccia: una scelta giusta per gli impulsi dei PMT, larghi pochi
-            # nanosecondi su oltre mille campioni, che non la spostano. Un
-            # SiPM con il LED invece occupa ~400 ns su 1321, e la mediana
-            # finisce dentro la coda dell'impulso. Misurato su 2000 eventi
-            # veri: mediana di tutta la traccia 275.0 conteggi, dei soli
-            # campioni pre-impulso 271.0, della sola coda 272.0. Quattro
-            # conteggi di troppo, che integrati su 992 campioni valgono 26 pC
-            # su una carica misurata di 20: l'errore era piu' grande del
-            # segnale. Pre-impulso e coda concordano entro un conteggio,
-            # quindi non e' un sotto-tiro del segnale, e' la stima.
-            #
-            # Il cancello fa quindi un doppio lavoro: dentro c'e' il segnale,
-            # fuori il piedistallo. Senza campioni fuori non si puo' fare di
-            # meglio della mediana di tutta la traccia, e il grafico lo dice
-            # invece di lasciar credere che sia corretta.
-            # La regione del piedistallo sta PRIMA del segnale, non "fuori dal
-            # cancello": dopo l'impulso la coda non e' ancora tornata a zero e
-            # contamina la stima. Misurato su 2000 eventi, allargando il
-            # cancello dalla stessa partenza (carica mediana in pC):
-            #
-            #     cancello      nessuna corr.   solo prima   tutto fuori
-            #     190-500 ns        31.98          37.49        35.30
-            #     190-620 ns        33.83          41.52        39.93
-            #     190-800 ns        33.26          44.01        43.45
-            #     190-1000 ns       30.58          45.05        45.20
-            #     190-1348 ns       24.50          45.06        45.06
-            #
-            # Con il piedistallo preso prima l'integrale SATURA a 45 pC, come
-            # deve fare un integrale su un impulso che finisce. Senza
-            # correzione invece cala allargando il cancello -- impossibile per
-            # un impulso positivo -- perche' l'errore sul piedistallo cresce
-            # con i campioni sommati. Prendendolo da tutti e due i lati si
-            # resta in mezzo, sbagliando sui cancelli stretti.
-            inizio = a_i
-            come = "before the gate"
-            if inizio < 50:
-                # Cancello che parte da zero: il piedistallo si prende prima
-                # dell'impulso MEDIO, cosi' anche la vista di partenza -- che
-                # e' quella che si guarda piu' spesso -- e' corretta.
-                # Due accorgimenti, tutti e due necessari. Si ricentra la
-                # traccia media sulla sua mediana, perche' l'offset che stiamo
-                # cercando di correggere (-4 conteggi) era esso stesso vicino
-                # al 10% del picco (4.1) e faceva scattare il rivelatore di
-                # inizio impulso al primo campione: il risultato era che non
-                # si trovava mai un tratto pulito. E si guarda l'escursione
-                # NEL VERSO dell'impulso, non il valore assoluto, cosi' una
-                # fluttuazione dalla parte sbagliata non viene scambiata per
-                # l'inizio del segnale.
-                medio = corr.mean(axis=(0, 1))
-                medio = self.segno * (medio - np.median(medio))
-                picco = float(medio.max())
-                sopra = np.flatnonzero(medio > 0.1 * picco) if picco > 0 \
-                    else np.array([], dtype=int)
-                if sopra.size:
-                    inizio = max(0, int(sopra[0]) - max(5, corr.shape[2] // 100))
-                    come = "before the average pulse"
-
-            if inizio >= 50:
-                scarto = np.median(corr[:, :, :inizio], axis=2)
-                base_nota = "baseline from %d samples %s" % (inizio, come)
-            else:
-                scarto = np.zeros(corr.shape[:2])
-                base_nota = ("baseline from the whole trace: no clean stretch "
-                             "before the pulse, the charge may be biased")
-            carica = self.segno * (corr[:, :, a_i:b_i].sum(axis=2)
-                                   - scarto * nscamp) * k_pc
+            # Il piedistallo e' gia' stato tolto in analysis(), nella
+            # finestra dichiarata ed evento per evento, quindi qui si somma e
+            # basta. La prova che la sottrazione e' quella giusta: allargando
+            # il cancello dalla stessa partenza l'integrale SATURA (37.5,
+            # 41.5, 44.0, 45.1, 45.1 pC) invece di calare (32.0, 33.8, 33.3,
+            # 30.6, 24.5), e un integrale che cala allargando la finestra su
+            # un impulso positivo e' impossibile.
+            carica = self.segno * corr[:, :, a_i:b_i].sum(axis=2) * k_pc
             self.accumula_cariche(carica, channels, (a_i, b_i))
 
             # Piu' alto degli altri pannelli: sotto gli assi ci vanno
@@ -1082,7 +1077,9 @@ class Monitor:
                          "(%d samples)   \u00b7   %s pulses"
                          % (t_ns[a_i], t_ns[b_i - 1], nscamp,
                             "positive" if self.segno > 0 else "negative"),
-                         base_nota]
+                         (("baseline from %.0f-%.0f ns (%d samples), per event"
+                           % self.base_finestra) if self.base_finestra
+                          else "baseline from the whole trace: the charge may be biased")]
             if da:
                 righe_pie.append("   \u00b7   ".join(da))
 
@@ -1299,6 +1296,8 @@ PAGE = """<!DOCTYPE html>
   <label>y max [ADC]<input id="ymax" value="__YMAX__" placeholder="auto"></label>
   <label>events<input id="nev" value="__NEVENTS__" style="width:60px"></label>
   <label>bandwidth [MHz]<input id="bw" value="__BW__" placeholder="off" style="width:70px"></label>
+  <label>baseline from [ns]<input id="bfrom" value="__BFROM__" placeholder="off" style="width:70px"></label>
+  <label>to [ns]<input id="bto" value="__BTO__" placeholder="off" style="width:70px"></label>
   <label>channels<input id="canali" value="" placeholder="all  e.g. 8,9,12-15" style="width:150px"></label>
   <label>threshold [offset]<input id="qcut" value="" placeholder="whole spectrum" style="width:110px"></label>
   <button id="reset">Autoscale</button>
@@ -1327,7 +1326,7 @@ function setAlert(msg) {
   if (msg) a.textContent = msg;
   document.body.classList.toggle('stale', !!msg);
 }
-const FIELDS = ['xmin','xmax','ymin','ymax','nev','bw','canali','qcut'];
+const FIELDS = ['xmin','xmax','ymin','ymax','nev','bw','bfrom','bto','canali','qcut'];
 
 // I limiti scelti sopravvivono a un reload della pagina. localStorage puo'
 // essere inaccessibile (finestra privata, cookie bloccati): mai fatale.
@@ -1596,8 +1595,16 @@ def make_handler(monitor, refresh, defaults):
                             .replace("__XMAX__", _fmt(defaults["xmax"]))
                             .replace("__YMIN__", _fmt(defaults["ymin"]))
                             .replace("__YMAX__", _fmt(defaults["ymax"]))
+                            .replace("__BFROM__", _fmt(defaults["bfrom"]))
+                            .replace("__BTO__", _fmt(defaults["bto"]))
 )
                 return self._send(200, "text/html; charset=utf-8", page.encode())
+
+            # La finestra del piedistallo e' stato del monitor, non un
+            # parametro di disegno: la usano l'analisi, le statistiche e le
+            # cariche accumulate, non solo la figura che si sta chiedendo.
+            monitor.set_baseline_ns(self._num(qs, "bfrom", defaults["bfrom"]),
+                                    self._num(qs, "bto", defaults["bto"]))
 
             # I valori della pagina hanno la precedenza su quelli da riga di comando
             xlim = (self._num(qs, "xmin", defaults["xmin"]),
@@ -1688,6 +1695,15 @@ def main():
     ap.add_argument("--tail-cut", type=int, default=Monitor.TAGLIO_CODA,
                     help="campioni finali da scartare: il V1742 ci mette spesso "
                          "un picco positivo spurio (0 per non scartarne)")
+    ap.add_argument("--baseline-from", type=float, default=10.0, dest="bfrom",
+                    help="inizio della finestra in cui si misura il piedistallo "
+                         "[ns] (default 10: i primi campioni dopo la cella di "
+                         "trigger del DRS4 non sono puliti)")
+    ap.add_argument("--baseline-to", type=float, default=180.0, dest="bto",
+                    help="fine della finestra del piedistallo [ns] (default 180). "
+                         "Deve stare PRIMA dell'impulso: a frequenze di "
+                         "campionamento alte la finestra intera e' corta e questi "
+                         "valori vanno rivisti")
     ap.add_argument("--bw", type=float, default=None,
                     help="mostra il segnale dopo un passa-basso a questa frequenza "
                          "[MHz], piu' le letture di un ADC a 30 MHz. Serve a vedere "
@@ -1731,10 +1747,12 @@ def main():
                       min_interval=max(0.3, args.refresh / 2), vpp=args.vpp)
     monitor.tail_cut = max(0, args.tail_cut)
     monitor.att_forzata = args.attenuazione
+    monitor.baseline_ns = (args.bfrom, args.bto)
     defaults = {"n": args.nevents, "bw": args.bw, "qcut": args.qcut,
                 "xmin": args.xmin, "xmax": args.xmax,
                 "ymin": args.ymin, "ymax": args.ymax,
-                "hxmin": args.hxmin, "hxmax": args.hxmax, "hlog": args.hlog}
+                "hxmin": args.hxmin, "hxmax": args.hxmax, "hlog": args.hlog,
+                "bfrom": args.bfrom, "bto": args.bto}
 
     try:
         server = ThreadingHTTPServer((args.bind, args.port),

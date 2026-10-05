@@ -106,6 +106,7 @@ CAMPI = [
 
     ("digitizer", "ExternalTrigger", "external trigger (TRG-IN)", "booleano", None),
     ("digitizer", "IOLevel",         "front panel level",  "scelta", ["NIM", "TTL"]),
+    ("digitizer", "TriggerPolarity", "discrimination edge (0 = rising/positive pulses, 1 = falling/negative)", "intero", (0, 1)),
     ("digitizer", "SelfTrigger",     "self-trigger",       "booleano", None),
     ("digitizer", "SelfTriggerMode", "self-trigger mode",  "scelta", ["paired", "global"]),
     ("digitizer", "SelfTriggerChannels", "self-trigger channels", "lista", (0, 31)),
@@ -298,6 +299,35 @@ def coerenza(d):
                 avvisi.append("The pulse would fall at %.0f ns in a %.0f ns window: too "
                               "close to the end, you risk clipping its tail."
                               % (pos, finestra))
+
+    # Verso del fronte contro verso del piedistallo. Sono due chiavi lontane
+    # nel file e indipendenti nel codice, ma descrivono lo stesso segnale: con
+    # DCOffset alto il piedistallo sta in fondo alla dinamica, quindi lo spazio
+    # per l'impulso e' VERSO L'ALTO e il fronte da discriminare e' quello di
+    # salita. La combinazione sbagliata non da' alcun errore: la soglia viene
+    # messa qualche conteggio dalla parte dove il segnale non va mai, e la run
+    # acquisisce zero eventi senza lamentarsi. E' costata una run di 52 s a
+    # vuoto con il SiPM (piedistallo 979 in Transparent Mode, soglia 974,
+    # impulso positivo). Il confine e' 0x9000: li' il piedistallo misurato
+    # passa per meta' dinamica (0x7000 -> 3185 conteggi, 0xA000 -> 1436).
+    # Resta un avviso e non un errore perche' DCOffset e' per canale mentre
+    # TriggerPolarity e' uno solo: con polarita' mescolate un compromesso e'
+    # inevitabile.
+    pol = g.get("TriggerPolarity")
+    dco = [x for x in lista(g.get("DCOffset")) if isinstance(x, int)]
+    if pol in (0, 1) and dco:
+        if pol == 1 and min(dco) > 0x9000:
+            avvisi.append("TriggerPolarity = 1 (falling edge) but DCOffset is %s: the "
+                          "baseline sits at the BOTTOM of the range, so there is room "
+                          "only for positive pulses. The threshold would end up a few "
+                          "counts below a baseline the signal never goes below, and the "
+                          "run would record nothing. Use 0 for positive pulses."
+                          % ", ".join(hex(x) for x in dco))
+        elif pol == 0 and max(dco) < 0x8000:
+            avvisi.append("TriggerPolarity = 0 (rising edge) but DCOffset is %s: the "
+                          "baseline sits HIGH, which is the setting for negative pulses. "
+                          "Use 1 for those, or raise DCOffset (higher = lower baseline)."
+                          % ", ".join(hex(x) for x in dco))
 
     if str(g.get("IOLevel", "NIM")).upper() == "TTL" and c.get("Enabled"):
         avvisi.append("Front panel set to TTL but the V812 CFD is on: its OR output "

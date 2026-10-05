@@ -51,6 +51,10 @@ ChannelList = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
 #
 #  Uno scalare vale per tutti i canali, una lista va in parallelo a
 #  ChannelList (l'ultimo valore si replica sui rimanenti).
+#
+#  Va cambiato INSIEME a TriggerPolarity, piu' sotto: le due chiavi descrivono
+#  lo stesso segnale da due parti del file. Piedistallo in basso (DCOffset
+#  alto) vuol dire impulsi positivi, e quindi fronte di SALITA.
 # ---------------------------------------------------------------------------
 DCOffset = 0x7000
 
@@ -113,8 +117,19 @@ TailCut = 12    # numero di sample da eliminare alla fine di ogni canale
 DRS4Correction = true
 
 
-# --- Fronte di discriminazione, vale per TRn e per il self-trigger ---
-TriggerPolarity = 1          # 0 = rising, 1 = falling (impulsi negativi)
+# ---------------------------------------------------------------------------
+#  Fronte di discriminazione, vale per TRn e per il self-trigger.
+#
+#      0 = rising    impulsi POSITIVI   (va con DCOffset alto, piedistallo basso)
+#      1 = falling   impulsi NEGATIVI   (va con DCOffset basso, piedistallo alto)
+#
+#  In modo "relative" la soglia si posa a SelfTriggerThresholdOffset conteggi
+#  dal piedistallo misurato in Transparent Mode, da questo lato. Col verso
+#  sbagliato finisce dalla parte dove il segnale non va mai: nessun errore,
+#  nessun trigger, zero eventi. E' quello che e' successo passando dai PMT
+#  (negativi) a un SiPM (positivo) lasciando qui l'1.
+# ---------------------------------------------------------------------------
+TriggerPolarity = 1
 
 
 # ---------------------------------------------------------------------------

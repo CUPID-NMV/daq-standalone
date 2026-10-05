@@ -756,7 +756,7 @@ class Monitor:
             if ylim[0] is not None or ylim[1] is not None:
                 ax.set_ylim(bottom=ylim[0], top=ylim[1])
 
-        def etichetta_tempo():
+        def etichetta_tempo(extra=None):
             """Dichiara sull'asse quando la vista e' ritagliata.
 
             Un grafico zoomato e uno i cui dati finiscono davvero li' sono
@@ -772,6 +772,8 @@ class Monitor:
                 b = xlim[1] if xlim[1] is not None else float(t_ns[-1])
                 parti.append(f"ZOOM {a:.0f}-{b:.0f} ns of the "
                              f"{t_ns[0]:.0f}-{t_ns[-1]:.0f} acquired")
+            if extra:
+                parti.append(extra)
             return "time [ns]" + (f"      ({' · '.join(parti)})" if parti else "")
 
         if kind == "waveforms":
@@ -792,11 +794,7 @@ class Monitor:
                 # disegnarla sopra la forma d'onda vera vuol dire sovrapporre
                 # al dato un modello di qualcosa che non sta succedendo.
                 if bw and not self.self_trigger_attivo():
-                    ax.text(0.01, 0.04,
-                            "bandwidth model hidden: it describes the "
-                            "self-trigger path, which this run is not using",
-                            transform=ax.transAxes, ha="left", va="bottom",
-                            fontsize=8, color="#888")
+                    pass        # lo si dice sull'asse, piu' sotto
                 elif bw:
                     dt = float(t_ns[1] - t_ns[0])
                     grezzo = corr[-1, i]
@@ -862,7 +860,13 @@ class Monitor:
                 ax.set_ylabel("ADC − baseline")
                 ax.grid(alpha=0.25)
                 apply_limits(ax)
-            axes[-1][0].set_xlabel(etichetta_tempo())
+            # La spiegazione va sull'ASSE e non dentro il riquadro: li' dentro
+            # non c'e' un angolo sicuro -- in basso la trova l'escursione
+            # negativa, in alto il picco di un segnale positivo.
+            axes[-1][0].set_xlabel(etichetta_tempo(
+                "bandwidth model hidden: it describes the self-trigger path, "
+                "not used in this run"
+                if (bw and not self.self_trigger_attivo()) else None))
 
         elif kind == "average":
             fig, ax = plt.subplots(figsize=(9, 4))

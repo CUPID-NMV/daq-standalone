@@ -104,6 +104,7 @@ CAMPI = [
     ("digitizer", "OutputFile",      "file prefix",        "testo",  None),
 
     ("digitizer", "ExternalTrigger", "external trigger (TRG-IN)", "booleano", None),
+    ("digitizer", "IOLevel",         "front panel level",  "scelta", ["NIM", "TTL"]),
     ("digitizer", "SelfTrigger",     "self-trigger",       "booleano", None),
     ("digitizer", "SelfTriggerMode", "self-trigger mode",  "scelta", ["paired", "global"]),
     ("digitizer", "SelfTriggerChannels", "self-trigger channels", "lista", (0, 31)),
@@ -293,6 +294,11 @@ def coerenza(d):
                 avvisi.append("The pulse would fall at %.0f ns in a %.0f ns window: too "
                               "close to the end, you risk clipping its tail."
                               % (pos, finestra))
+
+    if str(g.get("IOLevel", "NIM")).upper() == "TTL" and c.get("Enabled"):
+        avvisi.append("Front panel set to TTL but the V812 CFD is on: its OR output "
+                      "is standard NIM, so it would not be read. Either set NIM or "
+                      "put a converter in between.")
 
     if c.get("Enabled"):
         if str(g.get("Connection", "")) == "USB_A4818":

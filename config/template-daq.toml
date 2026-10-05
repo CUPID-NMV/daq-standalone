@@ -80,8 +80,24 @@ TriggerPolarity = 1          # 0 = rising, 1 = falling (impulsi negativi)
 # ---------------------------------------------------------------------------
 ExternalTrigger = true       # <<< true = abilitato, false = disabilitato
 
-# NOTA: ExtTriggerMode non e' letto dal codice. Il livello di I/O e' fissato a
-# NIM in Digitizer::Configure() (CAEN_DGTZ_IOLevel_NIM).
+# ---------------------------------------------------------------------------
+#  Livello elettrico del pannello frontale: "NIM" oppure "TTL".
+#
+#  Vale per TUTTO il pannello, TRG-IN e TRG-OUT insieme: non si puo' avere
+#  l'ingresso TTL e l'uscita NIM. Se il generatore o la logica che pilota
+#  TRG-IN e' TTL e qui resta NIM, il trigger semplicemente non arriva, e non
+#  c'e' niente nel log che lo dica -- si vede solo una run che non acquisisce.
+#
+#  Attenzione se si usa il CFD V812: la sua uscita OR e' NIM standard, quindi
+#  con IOLevel = "TTL" non verrebbe letta. Serve NIM, o un convertitore.
+#
+#  Un valore diverso da questi due e' un errore fatale, non un ripiego
+#  silenzioso su NIM.
+# ---------------------------------------------------------------------------
+IOLevel         = "NIM"
+
+# NOTA: ExtTriggerMode non e' letto dal codice: il livello lo decide IOLevel,
+# qui sopra. Resta solo per non rompere i file di configurazione vecchi.
 ExtTriggerMode  = "NIM"
 
 

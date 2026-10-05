@@ -131,6 +131,25 @@ Digitizer::Digitizer()
                            ? fOutputDir + "/live-threshold.txt"
                            : fLiveThresholdFileCfg;
     fStatusPath        = fOutputDir + "/live-status.json";
+    // Livello del pannello frontale: NIM oppure TTL. Un valore sconosciuto e'
+    // fatale invece che silenziosamente NIM, perche' un trigger che non arriva
+    // e' il sintomo piu' dispendioso da diagnosticare che ci sia.
+    fIOLevelStr = fConfig.GetEntry<std::string>("digitizer","IOLevel","NIM");
+    {
+        std::string v;
+        for (char c : fIOLevelStr)
+            if (!std::isspace(static_cast<unsigned char>(c)))
+                v += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        if (v == "NIM")      fIOLevel = CAEN_DGTZ_IOLevel_NIM;
+        else if (v == "TTL") fIOLevel = CAEN_DGTZ_IOLevel_TTL;
+        else {
+            Log::OutError("IOLevel = \"" + fIOLevelStr + "\" non riconosciuto: "
+                          "ammessi \"NIM\" e \"TTL\". Abort.");
+            exit(1);
+        }
+        fIOLevelStr = v;
+    }
+
     fLiveThresholdMtime = 0;
     fThresholdGen       = 0;
     fThresholdGenRow    = 0;
@@ -651,7 +670,9 @@ void Digitizer::Configure() {
     Check(CAEN_DGTZ_SetAcquisitionMode(fHandle, CAEN_DGTZ_SW_CONTROLLED), "SetAcquisitionMode");
 
     // IO Level NIM
-    Check(CAEN_DGTZ_SetIOLevel(fHandle, CAEN_DGTZ_IOLevel_NIM), "SetIOLevel");
+    Check(CAEN_DGTZ_SetIOLevel(fHandle, fIOLevel), "SetIOLevel");
+    Log::OutSummary("→ Livello del pannello frontale: " + fIOLevelStr +
+                    "  (vale per TRG-IN e TRG-OUT insieme)");
 
     // profondità FIFO
 //    Check(CAEN_DGTZ_SetMaxNumEventsBLT(fHandle, 2048), "SetMaxNumEventsBLT");

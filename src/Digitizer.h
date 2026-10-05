@@ -96,6 +96,13 @@ private:
     CAEN_DGTZ_TriggerMode_t  fSelfTriggerMode;
     CAEN_DGTZ_TriggerMode_t  fExternalTriggerMode;
 
+    // Livello elettrico del pannello frontale. Vale per TUTTO il pannello,
+    // TRG-IN e TRG-OUT insieme: non si puo' avere l'ingresso TTL e l'uscita
+    // NIM. Era cablato a NIM nel codice, e con un trigger TTL non scattava
+    // niente senza che niente lo spiegasse.
+    std::string fIOLevelStr;
+    CAEN_DGTZ_IOLevel_t fIOLevel;
+
     CAEN_DGTZ_PulsePolarity_t   fPulsePolarity;
     CAEN_DGTZ_TriggerPolarity_t fTriggerPolarity;
 

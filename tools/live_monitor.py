@@ -615,6 +615,7 @@ class Monitor:
             return self._placeholder()
         hdr, _, corr, amp, t_ns, noise, q = res
         channels = hdr["ChannelList"]
+        rect_finale = None
 
         def apply_limits(ax):
             """Limiti espliciti dove indicati, autoscale dove no."""
@@ -722,11 +723,11 @@ class Monitor:
             # d'onda, non una terza casella da riempire: si guarda l'impulso,
             # si stringe la vista su di esso, e si integra esattamente quello
             # che si vede. Vuoto = tutta la traccia.
-            a = 0 if xlim[0] is None else int(np.searchsorted(t_ns, xlim[0], "left"))
-            b = len(t_ns) if xlim[1] is None else int(np.searchsorted(t_ns, xlim[1], "right"))
-            a = max(0, min(a, len(t_ns) - 1))
-            b = max(a + 1, min(b, len(t_ns)))
-            nscamp = b - a
+            a_i = 0 if xlim[0] is None else int(np.searchsorted(t_ns, xlim[0], "left"))
+            b_i = len(t_ns) if xlim[1] is None else int(np.searchsorted(t_ns, xlim[1], "right"))
+            a_i = max(0, min(a_i, len(t_ns) - 1))
+            b_i = max(a_i + 1, min(b_i, len(t_ns)))
+            nscamp = b_i - a_i
 
             # In picocoulomb: l'integrale della tensione diviso l'impedenza
             # d'ingresso. 1 mV x 1 ns / 50 ohm = 0.02 pC. E' la carica
@@ -734,7 +735,7 @@ class Monitor:
             # servirebbero guadagno e partitori della catena, che il software
             # non conosce.
             k_pc = dt_ns * self.mv_per_count() / 50.0
-            carica = self.segno * corr[:, :, a:b].sum(axis=2) * k_pc
+            carica = self.segno * corr[:, :, a_i:b_i].sum(axis=2) * k_pc
 
             fig, axes = plt.subplots(1, len(channels), figsize=(5 * len(channels), 3.4),
                                      squeeze=False)
@@ -751,28 +752,45 @@ class Monitor:
                 # integrato, ed e' il primo controllo da fare.
                 ax.axvline(0.0, color="#888", lw=1.2, ls=":")
 
-                # Quanto allarga il piedistallo il solo rumore: cresce come la
-                # radice dei campioni integrati, quindi un cancello largo lo
-                # gonfia anche se non contiene impulso. Serve a capire se il
-                # cancello va stretto.
-                rms = float(np.median(noise[:, i]))
-                sigma = rms * np.sqrt(nscamp) * k_pc
                 med = float(np.median(val))
-                ax.set_title(f"ch{ch}", fontsize=10, pad=18)
+
+                # La larghezza MISURATA della distribuzione, non quella dedotta
+                # dal rumore per campione: su un canale senza segnale questi
+                # integrali sono risultati larghi oltre dieci volte la
+                # previsione a rumore bianco, perche' il rumore del DRS4 e'
+                # correlato fra campioni e la radice di N non vale. La
+                # previsione resta accanto, come pavimento: quando la misura la
+                # supera di molto, il cancello sta raccogliendo struttura della
+                # linea di base e non rumore, e va stretto.
+                sparso = 1.4826 * float(np.median(np.abs(val - med)))
+                rms = float(np.median(noise[:, i]))
+                bianco = rms * np.sqrt(nscamp) * k_pc
+
+                ax.set_title("ch%s \u2014 median %.2f pC" % (ch, med),
+                             fontsize=10, pad=16)
                 ax.text(0.5, 1.02,
-                        "median %.2f pC   ·   noise alone would give ±%.2f pC"
-                        % (med, sigma),
+                        "spread %.2f pC   \u00b7   white-noise floor %.2f pC"
+                        % (sparso, bianco),
                         transform=ax.transAxes, ha="center", va="bottom",
-                        fontsize=9, color="#1a6b1a" if abs(med) > 3 * sigma else "#d62728")
+                        fontsize=9,
+                        color="#1a6b1a" if abs(med) > 3 * sparso else "#d62728")
 
                 if logy:
                     ax.set_yscale("log")
-                verso = "positive" if self.segno > 0 else "negative"
-                ax.set_xlabel("charge [pC at the 50 \u03a9 input]   "
-                              "gate %.0f-%.0f ns (%d samples) \u00b7 %s pulses"
-                              % (t_ns[a], t_ns[b - 1], nscamp, verso))
+                ax.set_xlabel("charge [pC]")
                 ax.set_ylabel("events" + (" (log)" if logy else ""))
                 ax.grid(alpha=0.25)
+
+            # Cancello, impedenza e verso valgono per tutti i pannelli: scritti
+            # su ogni asse si sovrapponevano fra un pannello e l'altro, proprio
+            # con piu' canali, che e' il caso normale.
+            fig.text(0.5, 0.012,
+                     "charge at the 50 \u03a9 input   \u00b7   gate %.0f-%.0f ns "
+                     "(%d samples)   \u00b7   %s pulses"
+                     % (t_ns[a_i], t_ns[b_i - 1], nscamp,
+                        "positive" if self.segno > 0 else "negative"),
+                     ha="center", fontsize=9, color="#555")
+            rect_finale = (0, 0.07, 1, 1)
 
         else:   # amplitudes
             fig, axes = plt.subplots(1, len(channels), figsize=(5 * len(channels), 3.4),
@@ -890,7 +908,7 @@ class Monitor:
                 ax.set_title(f"ch{ch}", fontsize=10, pad=18)
                 ax.grid(alpha=0.25)
 
-        fig.tight_layout()
+        fig.tight_layout(rect=rect_finale)
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=100)
         plt.close(fig)

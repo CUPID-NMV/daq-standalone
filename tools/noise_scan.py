@@ -136,7 +136,15 @@ def main():
     for off in args.offsets:
         applied = set_offset(args.data_dir, channels, off)
         thr = tuple(applied[ch][1] for ch in channels)
-        dists = [applied[ch][0] - applied[ch][1] for ch in channels]
+        # Il valore ASSOLUTO: la soglia sta sotto il piedistallo con gli
+        # impulsi negativi e sopra con quelli positivi, e la coda gaussiana
+        # non sa distinguere i due casi -- e' la stessa coda vista dai due
+        # lati. Senza abs(), col fronte di salita le distanze venivano
+        # negative, erfc() tendeva a 2 e il rate atteso usciva saturo a 3e7 Hz
+        # su tutta la riga, mentre il sigma implicito non si poteva nemmeno
+        # calcolare. Il verso e' registrato altrove (campo "polarity" di
+        # live-status.json), qui non aggiunge niente.
+        dists = [abs(applied[ch][0] - applied[ch][1]) for ch in channels]
 
         if thr == prev_thr:
             print(f"  {off:7g} {str(thr):>13}   COLLASSA sulla soglia precedente, salto")
@@ -191,7 +199,7 @@ def main():
         ax.semilogy(xs, [max(predicted([v] * len(channels), sm), 1e-3) for v in xs],
                     ":", label=f"σ implicito dai dati = {sm:.2f}")
 
-    ax.set_xlabel("distanza baseline − soglia [conteggi]")
+    ax.set_xlabel("distanza fra piedistallo e soglia [conteggi]")
     ax.set_ylabel("rate di trigger [Hz]")
     ax.set_title("Pavimento di rumore del self-trigger", fontsize=11)
     ax.grid(alpha=.3, which="both")

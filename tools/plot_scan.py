@@ -35,6 +35,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Vedi measurements/larghezza_pmt_20260930.json e CLAUDE.md.
 MV_PER_OFFSET = {"2.5Gs": 3.5, "1Gs": 2.7}
 
+# I tag che la DAQ scrive nel nome del file (Digitizer.cpp). Stanno in un
+# elenco SEPARATO dalla tabella di calibrazione, e la separazione e' il punto:
+# a 750 MS/s la frequenza si riconosce benissimo, ma la conversione in
+# millivolt non e' misurata -- e dipende dalla frequenza del 29% fra 2.5 e
+# 1 GS/s, per un meccanismo che non e' capito, quindi non si interpola.
+# Tenendole insieme, un tag senza calibrazione sembrava un nome di file
+# illeggibile e lo scan non si disegnava affatto.
+TAG_FREQUENZA = ["5Gs", "2.5Gs", "1Gs", "750Ms"]
+
 # Il colore distingue le SERIE, non lo strumento: due scan dello stesso
 # modulo -- per esempio un canale per volta -- devono avere colori diversi, se
 # no non si distinguono. A dire quale strumento sia ci pensano il marker e il
@@ -142,14 +151,26 @@ def per_canale(d, tipo, k_mv_offset):
 
 def frequenza(nome_file):
     """Frequenza di campionamento dedotta dal nome della run."""
-    for tag in MV_PER_OFFSET:
+    for tag in TAG_FREQUENZA:
         if "_%s_" % tag in nome_file:
             return tag
     return None
 
 
+def leggibile(tag):
+    """Il tag come si scrive su un asse: '750Ms' -> '750 MS/s'."""
+    if not tag:
+        return "?"
+    return tag.replace("Gs", " GS/s").replace("Ms", " MS/s")
+
+
 def leggi(path, mv_per_offset_forzato):
-    """Normalizza i due formati in (tipo, soglie_mv, rate, limite, nota)."""
+    """Normalizza i due formati in (tipo, soglie, rate, limite, nota, dati, unita).
+
+    L'ultimo elemento e' l'unita' dell'asse x, "mV" oppure "offset": senza una
+    calibrazione misurata alla frequenza della run il grafico si fa comunque,
+    ma in conteggi di offset, e chi legge deve saperlo.
+    """
     d = json.load(open(path))
     punti = d.get("punti", [])
     if not punti:
@@ -160,22 +181,34 @@ def leggi(path, mv_per_offset_forzato):
         y = np.array([p["rate"] for p in punti], dtype=float)
         lim = np.array([p["eventi"] == 0 for p in punti])
         nota = "V812 CFD   %s" % _canali(d.get("canali"))
-        return "v812", x, y, lim, nota, d
+        return "v812", x, y, lim, nota, d, "mV"
 
     # formato di noise_scan.py: soglia in conteggi di offset
     tag = frequenza(d.get("file", ""))
     k = mv_per_offset_forzato or MV_PER_OFFSET.get(tag)
-    if k is None:
-        raise SystemExit(
-            "Non riesco a dedurre la frequenza di campionamento da '%s', quindi "
-            "non so convertire gli offset in millivolt.\n"
-            "Passa --mv-per-offset con il valore giusto." % d.get("file", "?"))
-    x = np.array([p["distanza"] for p in punti], dtype=float) * k
+
+    # Il valore assoluto, non il numero firmato: "distanza" e' baseline meno
+    # soglia, quindi cambia segno col fronte di discriminazione -- positiva
+    # con gli impulsi negativi dei PMT, NEGATIVA con un SiPM positivo, dove la
+    # soglia sta sopra il piedistallo. Il segno dice solo da che parte del
+    # piedistallo si discrimina, che e' nel titolo della run; quello che si
+    # grafica e di cui si confrontano gli scan e' la distanza.
+    dist = np.abs(np.array([p["distanza"] for p in punti], dtype=float))
     y = np.array([max(p["rate"], 0.0) for p in punti], dtype=float)
     lim = np.array([p.get("conteggi", 1) == 0 for p in punti])
+
+    if k is None:
+        # Senza calibrazione si disegna comunque, in conteggi di offset: e' la
+        # grandezza che lo scan ha davvero variato. Inventare un fattore --
+        # anche solo prendendo quello della frequenza vicina -- vorrebbe dire
+        # scrivere "mV" su un asse che non lo e'.
+        nota = "V1742 self-trigger   %s   (offset counts: mV NOT CALIBRATED at %s)" % (
+            _canali(d.get("canali")), leggibile(tag))
+        return "v1742", dist, y, lim, nota, d, "offset"
+
     nota = "V1742 self-trigger   %s   (%.1f mV/offset at %s)" % (
-        _canali(d.get("canali")), k, (tag or "?").replace("Gs", " GS/s"))
-    return "v1742", x, y, lim, nota, d
+        _canali(d.get("canali")), k, leggibile(tag))
+    return "v1742", dist * k, y, lim, nota, d, "mV"
 
 
 def main():
@@ -212,6 +245,21 @@ def main():
     # la stessa etichetta, e una legenda con due voci identiche non distingue
     # niente. Quando succede si aggiunge l'ora dello scan.
     serie = [leggi(path, args.mv_per_offset) for path in args.json]
+
+    # Un asse, una unita'. Mescolare uno scan in millivolt con uno in conteggi
+    # di offset significherebbe disegnare due grandezze diverse sulla stessa
+    # ascissa: le curve starebbero una accanto all'altra e il confronto, che e'
+    # il motivo per cui questo script sovrappone gli scan, sarebbe falso.
+    unita = sorted({x[6] for x in serie})
+    if len(unita) > 1:
+        raise SystemExit(
+            "Questi scan non stanno sullo stesso asse: %s.\n"
+            "Succede quando uno e' a una frequenza con la calibrazione misurata e "
+            "un altro no (per esempio 750 MS/s).\n"
+            "Con --mv-per-offset <valore> si forza la conversione per tutti, "
+            "sapendo che a quella frequenza e' un'assunzione." % ", ".join(unita))
+    unita = unita[0]
+
     note = [s[4] for s in serie]
     for i, s in enumerate(serie):
         if note.count(s[4]) > 1:
@@ -222,10 +270,25 @@ def main():
         # Una curva per canale, ricontata sui dati: il rate del trigger non
         # sa dire quale ingresso abbia sparato, le forme d'onda si'.
         n = 0
-        for tipo, _, _, _, nota, d in serie:
-            k = MV_PER_OFFSET.get(frequenza(d.get("file", "")) or "", 3.5)
-            if args.mv_per_offset:
-                k = args.mv_per_offset
+        for tipo, _, _, _, nota, d, _u in serie:
+            # Qui il fattore serve per forza: il conteggio per canale confronta
+            # la soglia con l'ampiezza RICOSTRUITA, che e' in millivolt, quindi
+            # la soglia va portata in millivolt e non c'e' un asse alternativo
+            # in conteggi di offset. Prima c'era un default nascosto di 3.5
+            # mV/offset: a 750 MS/s avrebbe applicato la calibrazione dei
+            # 2.5 GS/s senza dirlo, cioe' un numero sbagliato scritto "mV".
+            k = args.mv_per_offset or (MV_PER_OFFSET.get(frequenza(d.get("file", "")))
+                                       if tipo == "v1742" else 1.0)
+            if k is None:
+                raise SystemExit(
+                    "Il conteggio per canale confronta la soglia con l'ampiezza "
+                    "ricostruita in millivolt, e a %s la conversione "
+                    "offset -> mV non e' misurata.\n"
+                    "Il grafico del rate del trigger si fa comunque (in conteggi di "
+                    "offset): togli l'opzione per canale.\n"
+                    "Per forzarla: --mv-per-offset <valore>, sapendo che a quella "
+                    "frequenza e' un'assunzione."
+                    % leggibile(frequenza(d.get("file", ""))))
             canali = per_canale(d, tipo, k)
             if not canali:
                 raise SystemExit("Non sono riuscito a rileggere nessun dato: "
@@ -249,7 +312,7 @@ def main():
             visti.append(tipo)
         serie = []
 
-    for n, (tipo, x, y, lim, nota, d) in enumerate(serie):
+    for n, (tipo, x, y, lim, nota, d, _u) in enumerate(serie):
         col, mk, ls = PALETTE[n], MARKER[tipo], TRATTO[tipo]
         visti.append(tipo)
 
@@ -283,7 +346,12 @@ def main():
         # falserebbe la lettura di quanto una curva e' scesa.
         ax.set_ylim(bottom=0)
 
-    ax.set_xlabel("threshold  [mV at the detector input]")
+    if unita == "mV":
+        ax.set_xlabel("threshold  [mV at the detector input]")
+    else:
+        # Si dice "from baseline" perche' e' una distanza, non una soglia
+        # assoluta: il piedistallo sta scritto nel JSON di ogni scan.
+        ax.set_xlabel("threshold distance from baseline  [offset counts]")
     if args.per_channel:
         ax.set_ylabel("rate above threshold  [Hz]")
         ax.set_title("Threshold scan — per channel", fontsize=11)

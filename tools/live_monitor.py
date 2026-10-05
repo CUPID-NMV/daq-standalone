@@ -261,6 +261,13 @@ class Monitor:
                     "rms": rms,
                     "occupazione": float(ok.mean()),
                     "ampiezza": float(np.median(amp[ok])) if ok.sum() > 2 else 0.0,
+                    # L'ampiezza SENZA taglio. Serve quando il taglio a 8 rms
+                    # non lo passa nessuno: un canale con impulsi veri ma
+                    # piccoli -- un SiPM a 5 rms dal rumore -- risultava
+                    # altrimenti identico a un canale morto, con due barre a
+                    # zero. Il grafico le distingue tratteggiando questa.
+                    "ampiezza_tutti": float(np.median(amp)),
+                    "taglio": float(taglio),
                 })
         finally:
             f.close()
@@ -667,19 +674,38 @@ class Monitor:
         if rtot:
             axes[0].bar(x, [r["occupazione"] * rtot for r in righe],
                         width=wbar, color="#1f77b4")
-            axes[0].set_ylabel("rate [Hz]")
+            axes[0].set_ylabel("rate [Hz]\nabove 8 rms")
         else:
             axes[0].bar(x, [100 * r["occupazione"] for r in righe],
                         width=wbar, color="#1f77b4")
-            axes[0].set_ylabel("occupancy [%]")
+            axes[0].set_ylabel("occupancy [%]\nabove 8 rms")
             axes[0].set_ylim(0, 105)
 
-        axes[1].bar(x, [abs(r["ampiezza"]) * mv for r in righe], width=wbar, color="#2ca02c")
+        # Dove il taglio non lo passa nessuno si disegna l'ampiezza mediana di
+        # TUTTI gli eventi, tratteggiata: dice "c'e' qualcosa, ma sotto il
+        # taglio", che e' un'informazione diversa da "non c'e' niente" e che
+        # prima andava persa.
+        sotto = [r["ampiezza"] == 0.0 for r in righe]
+        alt = [abs(r["ampiezza"] if not giu else r["ampiezza_tutti"]) * mv
+               for r, giu in zip(righe, sotto)]
+        axes[1].bar([k for k, g in enumerate(sotto) if not g],
+                    [v for v, g in zip(alt, sotto) if not g],
+                    width=wbar, color="#2ca02c")
+        axes[1].bar([k for k, g in enumerate(sotto) if g],
+                    [v for v, g in zip(alt, sotto) if g],
+                    width=wbar, color="white", edgecolor="#2ca02c",
+                    hatch="///", linewidth=1.0)
         axes[1].set_ylabel("amplitude [mV]")
 
         axes[2].bar(x, [r["rms"] * mv for r in righe], width=wbar, color="#d62728")
         axes[2].set_ylabel("noise [mV]")
         axes[2].set_xlabel("channel")
+
+        if any(sotto):
+            axes[1].text(0.995, 0.93,
+                         "hatched: nothing above the cut, median over all events",
+                         transform=axes[1].transAxes, ha="right", va="top",
+                         fontsize=7.5, color="#2ca02c")
 
         for ax in axes:
             ax.grid(alpha=.25, axis="y")

@@ -38,6 +38,18 @@ import daqio
 from daqio import load, baseline_amplitude, DaqFileError
 
 
+# Quanti eventi recenti si sovrappongono allo spettro cumulato. Mille e' un
+# compromesso: abbastanza da avere una forma, pochi da reagire in fretta se
+# qualcosa cambia -- a 500 Hz sono gli ultimi due secondi.
+ULTIMI_CARICA = 1000
+
+
+def _mila(n):
+    """1234567 -> '1 234 567'. Su uno spettro da centomila eventi la cifra
+    nuda si legge male proprio quando serve confrontarla con mille."""
+    return f"{int(n):,}".replace(",", "\u202f")
+
+
 # ----------------------------------------------------------------------
 #  Stato condiviso
 # ----------------------------------------------------------------------
@@ -89,6 +101,20 @@ class Monitor:
 
         self.status = None        # live-status.json pubblicato dalla DAQ
         self.segno = -1.0         # verso dell'impulso, finche' non ci sono dati
+
+        # Cariche accumulate dall'inizio della run. Il monitor rilegge solo la
+        # CODA del file a ogni giro -- se no il costo di un aggiornamento
+        # crescerebbe con la durata della run -- quindi lo spettro completo non
+        # si puo' rileggere: si accumula evento per evento, man mano che
+        # passano. Si tiene l'indice assoluto gia' assorbito, cosi' un evento
+        # non entra due volte quando due giri leggono finestre che si
+        # sovrappongono.
+        self.cariche = {}         # canale -> tutte le cariche viste
+        self.cariche_gate = None  # con quale cancello sono state calcolate
+        self.cariche_file = None  # e su quale file
+        self.cariche_fino = 0     # primo indice assoluto non ancora assorbito
+        self.cariche_persi = 0    # eventi passati fra due letture, mai visti
+        self.primo_evento = 0     # indice assoluto del primo evento in memoria
         self.gen = None           # generazione delle soglie gia' vista
         self.offsets = {}         # offset correnti, per canale
         self.frozen = {}          # cariche prima dell'ultimo cambio di soglia
@@ -135,6 +161,13 @@ class Monitor:
         cio' che arriva.
         """
         self.origin = int(self.n_events or 0)
+        # Anche le cariche accumulate: "azzera" vuol dire ripartire da adesso,
+        # e uno spettro cumulato che sopravvive all'azzeramento direbbe il
+        # contrario di quello che la pagina promette.
+        self.cariche = {}
+        self.cariche_gate = None
+        self.cariche_fino = self.origin
+        self.cariche_persi = 0
         self._hist.clear()
         self.frozen = {}
         self.frozen_offsets = {}
@@ -258,7 +291,9 @@ class Monitor:
         primo = total - data.shape[0]
         if self.origin > primo:
             data = data[self.origin - primo:]
+            primo = self.origin
         self.data = data
+        self.primo_evento = primo
         self._ana = None          # ricalcolata sotto, una volta sola
 
         res = self.analysis()
@@ -397,6 +432,50 @@ class Monitor:
         q = np.maximum(self.segno * estremo, 0.0) / self.attenuazione()
         self._ana = (self.hdr, base, corr, amp, t_ns, noise, q)
         return self._ana
+
+    # Oltre questo numero di cariche per canale si smette di accumulare. A
+    # 500 Hz sono piu' di un'ora di run, e il grafico lo dichiara invece di
+    # mostrare di nascosto uno spettro che ha smesso di crescere.
+    MAX_CARICHE = 2_000_000
+
+    def accumula_cariche(self, carica, channels, gate):
+        """Aggiunge allo spettro cumulato le cariche non ancora viste.
+
+        Il cancello di integrazione fa parte della definizione della carica:
+        cambiandolo, i valori accumulati prima non sono piu' confrontabili con
+        quelli nuovi, e sommarli darebbe uno spettro che non corrisponde a
+        nessuna misura. Quindi si riparte, e il grafico dice da quando.
+        """
+        if self.cariche_gate != gate or self.cariche_file != self.path:
+            self.cariche = {}
+            self.cariche_gate = gate
+            self.cariche_file = self.path
+            self.cariche_fino = self.primo_evento
+            self.cariche_persi = 0
+
+        primo = self.primo_evento
+        ultimo = primo + carica.shape[0]
+        if ultimo <= self.cariche_fino:
+            return                                  # gia' visti tutti
+
+        if primo > self.cariche_fino:
+            # La DAQ ha prodotto piu' eventi di quanti ne stia in una lettura:
+            # quelli in mezzo non li vedremo mai. Contarli e dirlo e' l'unica
+            # cosa onesta -- uno spettro "di tutta la run" che in realta' ne
+            # salta dei pezzi, senza avvisare, sarebbe peggio di non averlo.
+            self.cariche_persi += primo - self.cariche_fino
+            self.cariche_fino = primo
+
+        da = self.cariche_fino - primo
+        for i, ch in enumerate(channels):
+            ch = int(ch)
+            vecchio = self.cariche.get(ch)
+            nuovo = np.asarray(carica[da:, i], dtype=np.float32)
+            if vecchio is None:
+                self.cariche[ch] = nuovo
+            elif vecchio.size < self.MAX_CARICHE:
+                self.cariche[ch] = np.concatenate([vecchio, nuovo])
+        self.cariche_fino = ultimo
 
     def _verso(self, corr):
         """+1 se gli impulsi vanno in su, -1 se vanno in giu'.
@@ -736,12 +815,20 @@ class Monitor:
             # non conosce.
             k_pc = dt_ns * self.mv_per_count() / 50.0
             carica = self.segno * corr[:, :, a_i:b_i].sum(axis=2) * k_pc
+            self.accumula_cariche(carica, channels, (a_i, b_i))
 
             fig, axes = plt.subplots(1, len(channels), figsize=(5 * len(channels), 3.4),
                                      squeeze=False)
             for i, ch in enumerate(channels):
                 ax = axes[0][i]
-                val = carica[:, i]
+                recenti = carica[-ULTIMI_CARICA:, i]
+                tutte = self.cariche.get(int(ch))
+                if tutte is None or tutte.size == 0:
+                    tutte = recenti
+                # Le statistiche descrivono lo spettro completo, che e' quello
+                # che si sta misurando; gli ultimi mille servono a vedere se
+                # sta cambiando, non a definirlo.
+                val = tutte
                 xlo, xhi, logy = (qset or {}).get(int(ch), (None, None, False))
 
                 # I bin si costruiscono DENTRO l'intervallo scelto, non si
@@ -749,17 +836,36 @@ class Monitor:
                 # istogramma calcolato su tutto, con la risoluzione sprecata
                 # fuori dalla vista. E' la stessa ragione per cui lo spettro
                 # delle ampiezze fa cosi'.
-                est = None
-                if xlo is not None or xhi is not None:
-                    lo = xlo if xlo is not None else float(np.min(val))
-                    hi = xhi if xhi is not None else float(np.max(val))
-                    if hi > lo:
-                        est = (lo, hi)
+                lo = xlo if xlo is not None else float(min(val.min(), recenti.min()))
+                hi = xhi if xhi is not None else float(max(val.max(), recenti.max()))
+                if not hi > lo:
+                    hi = lo + 1.0
+                est = (lo, hi)
 
                 nb = min(80, max(20, val.size // 8))
-                ax.hist(val, bins=nb, range=est, color="#1f77b4", alpha=.85)
-                if est:
-                    ax.set_xlim(*est)
+                # Gli stessi bin per le due distribuzioni: con bin diversi il
+                # confronto a vista non vorrebbe dire niente, ed e' tutto
+                # quello per cui questo grafico esiste.
+                bordi = np.linspace(lo, hi, nb + 1)
+
+                ax.hist(val, bins=bordi, color="#1f77b4", alpha=.85,
+                        label="whole run, %s events" % _mila(val.size))
+
+                # Gli ultimi mille a CONTORNO, non riempiti: un secondo
+                # istogramma pieno coprirebbe il primo, che e' quello con la
+                # statistica. Riscalati all'area del cumulato, se no con mille
+                # eventi contro centomila sarebbero una riga sullo zero; il
+                # fattore sta in legenda, cosi' nessuno legge quei conteggi
+                # come se fossero eventi veri.
+                if recenti.size and val.size > recenti.size:
+                    fattore = val.size / float(recenti.size)
+                    cnt, _ = np.histogram(recenti, bins=bordi)
+                    ax.step(bordi, np.concatenate([[0.0], cnt * fattore]),
+                            where="pre", color="#d62728", lw=1.6,
+                            label="last %s events, scaled x%.0f"
+                                  % (_mila(recenti.size), fattore))
+                ax.set_xlim(*est)
+                ax.legend(fontsize=7.5, loc="upper left", framealpha=.75)
 
                 # Lo zero e' il piedistallo: in uno spettro di carica e' il
                 # riferimento che dice se il picco e' segnale o rumore
@@ -801,12 +907,28 @@ class Monitor:
             # Cancello, impedenza e verso valgono per tutti i pannelli: scritti
             # su ogni asse si sovrapponevano fra un pannello e l'altro, proprio
             # con piu' canali, che e' il caso normale.
+            # Da dove parte il cumulato e quanto se n'e' perso: lo spettro
+            # dice "whole run", e va detto quando non e' vero. Capita in due
+            # casi -- il monitor acceso a run gia' avviata, e la DAQ che fra
+            # due letture produce piu' eventi di quanti ne stia in una.
+            da = []
+            if self.cariche_fino and self.cariche:
+                primo_acc = self.cariche_fino - max(
+                    (v.size for v in self.cariche.values()), default=0)
+                if primo_acc > 0:
+                    da.append("accumulated from event %s" % _mila(primo_acc))
+            if self.cariche_persi:
+                da.append("%s events never seen (produced between two reads)"
+                          % _mila(self.cariche_persi))
+            coda = ("   \u00b7   " + "   \u00b7   ".join(da)) if da else ""
+
             fig.text(0.5, 0.012,
                      "charge at the 50 \u03a9 input   \u00b7   gate %.0f-%.0f ns "
-                     "(%d samples)   \u00b7   %s pulses"
+                     "(%d samples)   \u00b7   %s pulses%s"
                      % (t_ns[a_i], t_ns[b_i - 1], nscamp,
-                        "positive" if self.segno > 0 else "negative"),
-                     ha="center", fontsize=9, color="#555")
+                        "positive" if self.segno > 0 else "negative", coda),
+                     ha="center", fontsize=9,
+                     color="#d62728" if self.cariche_persi else "#555")
             rect_finale = (0, 0.07, 1, 1)
 
         else:   # amplitudes

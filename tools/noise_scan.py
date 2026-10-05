@@ -133,7 +133,12 @@ def main():
 
     rows = []
     prev_thr = None
-    for off in args.offsets:
+    for k, off in enumerate(args.offsets, 1):
+        # Marcatore di avanzamento, letto dalla pagina di controllo. Senza, da
+        # fuori non si distingue uno scan che sta lavorando da uno piantato:
+        # la tabella stampa una riga solo a punto FINITO, e con 20 s per punto
+        # sono venti secondi di silenzio.
+        print(f"[punto {k}/{len(args.offsets)}] offset {off:g}", flush=True)
         applied = set_offset(args.data_dir, channels, off)
         thr = tuple(applied[ch][1] for ch in channels)
         # Il valore ASSOLUTO: la soglia sta sotto il piedistallo con gli

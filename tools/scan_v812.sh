@@ -93,7 +93,14 @@ echo "backup  : $BACKUP"
 echo
 printf "  %8s %10s %12s %14s\n" "soglia" "eventi" "durata [s]" "rate [Hz]"
 
+N_PUNTI=$(echo $SOGLIE | wc -w)
+K=0
 for S in $SOGLIE; do
+    K=$((K + 1))
+    # Marcatore di avanzamento, letto dalla pagina di controllo: la tabella
+    # stampa una riga solo a punto finito, e fino ad allora da fuori non si
+    # distingue uno scan che lavora da uno piantato.
+    echo "[punto $K/$N_PUNTI] soglia $S mV"
     sed -i -E "s|^Threshold  *=.*|Threshold   = [$S, $S]|" "$TOML"
 
     USCITA="$LAVORO/punto_$S.out"

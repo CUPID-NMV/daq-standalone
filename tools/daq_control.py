@@ -893,9 +893,11 @@ class Controllo:
              "monitor": monitor_acceso(self.porta_monitor),
              "monitor_pid": trova_monitor(),
              "monitor_porta": self.porta_monitor,
-             "scan": None, "coda": self.leggi_coda()}
+             "scan": None, "coda": self.leggi_coda(),
+             "scan_log": self.coda_scan(12) if not scan else None}
         if scan:
             s["scan"] = {
+                "avanzamento": self.avanzamento_scan(),
                 "tipo": scan["tipo"],
                 "etichetta": SCAN[scan["tipo"]]["etichetta"],
                 "valori": scan.get("valori"),
@@ -1189,6 +1191,18 @@ class Controllo:
         except OSError:
             return []
 
+    # "[punto 3/6] offset 5": lo stampano tutti e due gli scan prima di
+    # cominciare un punto.
+    PUNTO = re.compile(r"\[punto (\d+)/(\d+)\]\s*(.*)")
+
+    def avanzamento_scan(self):
+        """(fatti, totale, descrizione) dell'ultimo punto cominciato, o None."""
+        for riga in reversed(self.coda_scan(60)):
+            m = self.PUNTO.search(riga)
+            if m:
+                return [int(m.group(1)), int(m.group(2)), m.group(3).strip()]
+        return None
+
     def avvia_scan(self, tipo, valori, secondi):
         """Lancia uno scan. I due hanno prerequisiti OPPOSTI, e la pagina deve
         dirlo chiaro invece di limitarsi a fallire: quello del V1742 cambia le
@@ -1253,6 +1267,29 @@ class Controllo:
                     json.dump(stato, f)
             except OSError:
                 pass
+
+            # Uno scan che si rifiuta di partire muore in meno di un secondo:
+            # i controlli preliminari degli script -- "serve una run in
+            # corso", "live-status.json e' vecchio", "gira con SelfTrigger =
+            # false" -- stampano e escono. Senza questa attesa la pagina
+            # diceva "scan started", la riga SCAN RUNNING lampeggiava per un
+            # giro e spariva, e il motivo restava solo dentro un file di log
+            # che nessuno guarda. E' successo: sei avvii di fila, tutti
+            # registrati come riusciti, nessuno partito davvero.
+            for _ in range(20):
+                time.sleep(0.1)
+                if proc.poll() is not None:
+                    break
+            if proc.poll() is not None:
+                righe = [r for r in self.coda_scan(12) if r.strip()]
+                perche = " ".join(righe[-3:]) if righe else \
+                    "no output: look at data/scan-console.log"
+                try:
+                    os.unlink(SCAN_STATO)
+                except OSError:
+                    pass
+                return False, "The scan stopped at once. " + perche
+
             return True, "%s scan started on %d points." % (spec["etichetta"], len(pezzi))
 
     def ferma_scan(self):
@@ -1721,17 +1758,31 @@ async function aggiorna(){
   // e' il momento in cui lo si vuole guardare.
   if(window._scanPrima && !sc) caricaGrafici().then(disegna);
   window._scanPrima = !!sc;
+  // L'avanzamento e' la risposta a "sta andando?": senza, fra un punto e
+  // l'altro passano venti secondi in cui la pagina dice solo "SCAN RUNNING" e
+  // non si distingue uno scan che lavora da uno piantato.
+  let avz = "";
+  if(sc && sc.avanzamento){
+    const [fatti, tot, che] = sc.avanzamento;
+    const resta = Math.max(0, (tot - fatti + 1) * sc.secondi);
+    avz = `<b>point ${fatti} of ${tot}</b> (${che}) &middot;
+           ~${Math.round(resta)} s left &middot; `;
+  }
   $("scanstato").innerHTML = sc
     ? `<span class="stato corso">SCAN RUNNING</span>
-       <span style="margin-left:12px;color:#52514e">${sc.etichetta} &middot;
+       <span style="margin-left:12px;color:#52514e">${avz}${sc.etichetta} &middot;
        points: ${sc.valori} &middot; ${sc.secondi} s each &middot;
        for ${Math.round(sc.da_secondi)} s</span>`
     : '<span style="color:#6b6a65">no scan running</span>';
   $("s1go").disabled = !!sc || !s.in_corso;
   $("s2go").disabled = !!sc || s.in_corso;
   $("sstop").disabled = !sc;
-  $("scanlog").style.display = sc ? "block" : "none";
-  if(sc) $("scanlog").textContent = (sc.log || []).join("\n");
+  // Il log resta visibile anche a scan finito: e' li' che si legge perche'
+  // uno scan si e' rifiutato di partire, e nasconderlo appena il processo
+  // muore vuol dire nasconderlo proprio quando serve.
+  const righeScan = (sc && sc.log) || s.scan_log || [];
+  $("scanlog").style.display = righeScan.length ? "block" : "none";
+  $("scanlog").textContent = righeScan.join("\n");
 
   $("log").textContent = (s.log || []).join("\n");
   $("azioni").innerHTML = (s.azioni || []).slice().reverse().map(a =>

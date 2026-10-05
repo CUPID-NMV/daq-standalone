@@ -1253,11 +1253,12 @@ class Monitor:
                 # e' l'attenuazione per il passo dell'ADC, cioe' la
                 # calibrazione della soglia misurata su impulsi da 1.6 ns; i PMT
                 # sono risultati 1.80 ns, il 12% piu' larghi.
+                # Su due righe, piu' piccola e con l'avvertimento accorciato:
+                # con un canale solo il pannello e' largo cinque pollici e la
+                # riga unica usciva da entrambi i bordi, tagliando proprio
+                # l'avvertimento sulla calibrazione.
                 nota_cal = ("" if self.attenuazione_misurata()
-                            else "  \u2014  NOT CALIBRATED AT THIS SAMPLING RATE")
-                # Su due righe e piu' piccola: con un canale solo il pannello e'
-                # largo cinque pollici e la riga unica usciva da entrambi i
-                # bordi, tagliando proprio l'avvertimento sulla calibrazione.
+                            else "  \u2014  NOT CALIBRATED here")
                 ax.set_xlabel("amplitude [offset units]\n"
                               "1 offset = %.2f mV, pulses ~1.8 ns%s"
                               % (mv_off, nota_cal), fontsize=8.5)

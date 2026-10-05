@@ -1315,6 +1315,8 @@ PAGINA = r"""<!doctype html>
     <div id="tabcfd" style="margin-top:14px"></div>
     <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button id="salva" style="background:#2a78d6;color:#fff">Save to TOML</button>
+      <span id="nonsalvato" style="display:none;color:#a8321f;font-weight:600;font-size:12px">
+        &#9679; unsaved changes</span>
       <button id="ricarica" style="background:#ececea">Reload file</button>
       <span style="font-size:12px;color:#6b6a65">
         applies from the next run, except entries marked <b>live</b>
@@ -1627,6 +1629,26 @@ async function caricaConfig(){
   }
   $("cfg").innerHTML = html + "</table>";
   disegnaTabelle();
+  // Delega: le caselle vengono ricreate a ogni ricarica del modulo, quindi
+  // si ascolta sui contenitori e non sui singoli campi.
+  for(const id of ["cfg", "tabdig", "tabcfd"]){
+    $(id).oninput  = aggiornaStatoSalva;
+    $(id).onchange = aggiornaStatoSalva;
+  }
+  aggiornaStatoSalva();
+}
+
+// Le modifiche restano nel browser finche' non si preme Salva, e il pulsante
+// sta in fondo a un modulo lungo con due tabelle scorrevoli: e' facilissimo
+// spuntare una casella, lanciare una run e non capire perche' non cambia
+// niente. E' successo. Da qui l'avviso, che compare appena qualcosa differisce
+// da quello che c'e' nel file.
+function aggiornaStatoSalva(){
+  if(!CFG) return;
+  const n = modificheCorrenti().length;
+  $("nonsalvato").style.display = n ? "inline" : "none";
+  $("nonsalvato").textContent = "\u25cf " + n + (n === 1 ? " unsaved change" : " unsaved changes");
+  $("salva").style.background = n ? "#a8321f" : "#2a78d6";
 }
 
 function valoreCampo(c){
@@ -1667,7 +1689,7 @@ $("salva").onclick = async () => {
     msg(d.messaggio, d.esito);
   }catch(e){ msg("Save failed: " + e, false); }
   $("salva").disabled = false;
-  caricaConfig();
+  caricaConfig();   // rilegge dal file e azzera l'avviso
 };
 
 $("applica").onclick = async () => {

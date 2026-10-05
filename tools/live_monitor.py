@@ -920,16 +920,22 @@ class Monitor:
             if self.cariche_persi:
                 da.append("%s events never seen (produced between two reads)"
                           % _mila(self.cariche_persi))
-            coda = ("   \u00b7   " + "   \u00b7   ".join(da)) if da else ""
+            # Due righe invece di una lunga: con un solo canale la figura e'
+            # larga cinque pollici e la riga unica usciva dai bordi, tagliata
+            # da entrambe le parti proprio dove c'era l'avvertimento.
+            righe_pie = ["charge at the 50 \u03a9 input   \u00b7   gate %.0f-%.0f ns "
+                         "(%d samples)   \u00b7   %s pulses"
+                         % (t_ns[a_i], t_ns[b_i - 1], nscamp,
+                            "positive" if self.segno > 0 else "negative")]
+            if da:
+                righe_pie.append("   \u00b7   ".join(da))
 
-            fig.text(0.5, 0.012,
-                     "charge at the 50 \u03a9 input   \u00b7   gate %.0f-%.0f ns "
-                     "(%d samples)   \u00b7   %s pulses%s"
-                     % (t_ns[a_i], t_ns[b_i - 1], nscamp,
-                        "positive" if self.segno > 0 else "negative", coda),
-                     ha="center", fontsize=9,
-                     color="#d62728" if self.cariche_persi else "#555")
-            rect_finale = (0, 0.07, 1, 1)
+            for n_riga, testo in enumerate(reversed(righe_pie)):
+                fig.text(0.5, 0.012 + 0.042 * n_riga, testo, ha="center",
+                         fontsize=8.5,
+                         color=("#d62728" if (self.cariche_persi and n_riga == 0
+                                              and len(righe_pie) > 1) else "#555"))
+            rect_finale = (0, 0.05 + 0.045 * len(righe_pie), 1, 1)
 
         else:   # amplitudes
             fig, axes = plt.subplots(1, len(channels), figsize=(5 * len(channels), 3.4),

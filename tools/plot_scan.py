@@ -368,6 +368,7 @@ def main():
     # calibrazione e frequenza), quindi un angolo libero non c'e' comunque.
     voci = ax.get_legend_handles_labels()[1]
     colonne = 2 if len(voci) > 3 and max((len(v) for v in voci), default=0) < 32 else 1
+    righe = -(-len(voci) // colonne)
     ax.legend(fontsize=8.5, loc="upper center", bbox_to_anchor=(0.5, -0.17),
               ncol=colonne, frameon=False)
 
@@ -379,19 +380,23 @@ def main():
     # qualunque siano i dati e la scala.
     sotto = ("v1742" in visti and "v812" in visti) and not args.per_channel
     if sotto:
-        fig.text(0.5, 0.012,
-                 "Both discriminators see the same signal. "
-                 "A gap at equal threshold is efficiency, not calibration.",
-                 ha="center", fontsize=8, color=INCHIOSTRO)
+        # In coordinate degli ASSI, non della figura: cosi' la nota sta sempre
+        # sotto la legenda qualunque sia il numero di voci, e non c'e' nessuna
+        # altezza da indovinare. Ci pensa bbox_inches a far crescere la tela.
+        ax.annotate("Both discriminators see the same signal. "
+                    "A gap at equal threshold is efficiency, not calibration.",
+                    xy=(0.5, -0.20 - 0.075 * righe), xycoords="axes fraction",
+                    ha="center", va="top", fontsize=8, color=INCHIOSTRO)
 
     out = args.out or os.path.join(ROOT, "plots",
                                    "scan_%s.png" % time.strftime("%Y%m%d_%H%M%S"))
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    # Lo spazio sotto gli assi va riservato a mano: tight_layout non sa che la
-    # legenda e' uscita dagli assi, e senza riserva la taglia via.
-    righe = -(-len(voci) // colonne)
-    fig.tight_layout(rect=(0, 0.055 * righe + (0.05 if sotto else 0.01), 1, 1))
-    fig.savefig(out, dpi=130)
+    # La tela cresce di quanto serve invece di riservare una fascia a
+    # occhio: la legenda sta fuori dagli assi e tight_layout non la vede,
+    # quindi o la tagliava via o lasciava una striscia bianca a seconda di
+    # quante voci c'erano.
+    fig.tight_layout()
+    fig.savefig(out, dpi=130, bbox_inches="tight")
     plt.close(fig)
     print("grafico: %s" % out)
 

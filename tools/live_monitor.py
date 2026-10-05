@@ -948,9 +948,19 @@ class Monitor:
                 # Cancello che parte da zero: il piedistallo si prende prima
                 # dell'impulso MEDIO, cosi' anche la vista di partenza -- che
                 # e' quella che si guarda piu' spesso -- e' corretta.
+                # Due accorgimenti, tutti e due necessari. Si ricentra la
+                # traccia media sulla sua mediana, perche' l'offset che stiamo
+                # cercando di correggere (-4 conteggi) era esso stesso vicino
+                # al 10% del picco (4.1) e faceva scattare il rivelatore di
+                # inizio impulso al primo campione: il risultato era che non
+                # si trovava mai un tratto pulito. E si guarda l'escursione
+                # NEL VERSO dell'impulso, non il valore assoluto, cosi' una
+                # fluttuazione dalla parte sbagliata non viene scambiata per
+                # l'inizio del segnale.
                 medio = corr.mean(axis=(0, 1))
-                picco = float(np.max(np.abs(medio)))
-                sopra = np.flatnonzero(np.abs(medio) > 0.1 * picco) if picco > 0 \
+                medio = self.segno * (medio - np.median(medio))
+                picco = float(medio.max())
+                sopra = np.flatnonzero(medio > 0.1 * picco) if picco > 0 \
                     else np.array([], dtype=int)
                 if sopra.size:
                     inizio = max(0, int(sopra[0]) - max(5, corr.shape[2] // 100))

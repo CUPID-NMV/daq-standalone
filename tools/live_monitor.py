@@ -863,7 +863,16 @@ class Monitor:
                 if recenti.size and val.size > recenti.size:
                     fattore = val.size / float(recenti.size)
                     cnt, _ = np.histogram(recenti, bins=bordi)
-                    ax.step(bordi, np.concatenate([[0.0], cnt * fattore]),
+                    y = cnt * fattore
+                    if logy:
+                        # In scala logaritmica lo zero non esiste: senza
+                        # questo la spezzata precipitava sul fondo dell'asse a
+                        # ogni bin vuoto, e sulle code -- dove i bin vuoti
+                        # sono la maggioranza -- restava un pettine di righe
+                        # verticali al posto della distribuzione. Interrompere
+                        # la linea dice la cosa giusta: li' non c'e' misura.
+                        y = np.where(cnt > 0, y, np.nan)
+                    ax.step(bordi, np.concatenate([[np.nan if logy else 0.0], y]),
                             where="pre", color="#d62728", lw=1.6,
                             label="last %s events, scaled x%.0f"
                                   % (_mila(recenti.size), fattore))

@@ -33,7 +33,28 @@ VMEBaseAddress  = 0x32100000
 
 ChannelList = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,  23, 24, 25, 26, 27, 28, 29, 30, 31]
 
-SamplingRate = "1GHz"    # Possibili valori: "5GHz", "2.5GHz", "1GHz"
+# ---------------------------------------------------------------------------
+#  Frequenza di campionamento del DRS4. Quattro valori, e cambiano la durata
+#  della finestra, che con 1024 campioni vale:
+#
+#      "5GHz"     0.2    ns/campione     205 ns
+#      "2.5GHz"   0.4    ns/campione     410 ns
+#      "1GHz"     1.0    ns/campione    1024 ns
+#      "750MHz"   1.333  ns/campione    1365 ns   <- la finestra piu' lunga
+#
+#  Conta per il self-trigger, che ha una latenza di ~320 ns in "paired" e
+#  ~420 ns in "global": la finestra deve essere piu' lunga della latenza, se
+#  no l'impulso cade fuori. A 5 GHz non si puo' proprio, a 750 MHz c'e' il
+#  margine maggiore.
+#
+#  Un valore non riconosciuto e' un errore fatale: una run fatta a una
+#  frequenza diversa da quella chiesta e' gia' costata una giornata.
+#
+#  ATTENZIONE: la calibrazione soglia-millivolt e' stata misurata solo a
+#  2.5 GS/s e 1 GS/s, e fra le due differisce del 29%. A 750 MHz il monitor
+#  mostra la scala in millivolt segnalando che NON e' calibrata.
+# ---------------------------------------------------------------------------
+SamplingRate = "1GHz"
 
 RecordLength    = 1024
 PostTriggerSize = 50

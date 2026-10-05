@@ -93,7 +93,7 @@ SCAN = {
 #  (sezione, chiave, etichetta, tipo, dettagli)
 # ---------------------------------------------------------------------------
 CAMPI = [
-    ("digitizer", "SamplingRate",    "sampling rate",      "scelta", ["5GHz", "2.5GHz", "1GHz"]),
+    ("digitizer", "SamplingRate",    "sampling rate",      "scelta", ["5GHz", "2.5GHz", "1GHz", "750MHz"]),
     ("digitizer", "RecordLength",    "samples per event",  "intero", (1, 1024)),
     ("digitizer", "PostTriggerSize", "post-trigger [%]",   "intero", (0, 100)),
     ("digitizer", "NEvents",         "events to acquire",  "intero", (1, 10**9)),

@@ -533,9 +533,14 @@ void Digitizer::SelectBoard()
         freq = CAEN_DGTZ_DRS4_2_5GHz;  sTime = 0.4e-9;  fSamplingRateStr = "2.5GHz";
     } else if (rate == "1ghz" || rate == "1.0ghz" || rate == "1") {
         freq = CAEN_DGTZ_DRS4_1GHz;    sTime = 1.0e-9;  fSamplingRateStr = "1GHz";
+    } else if (rate == "750mhz" || rate == "0.75ghz" || rate == "750") {
+        // La quarta frequenza del DRS4: 1/750 MHz = 1.3333 ns per campione,
+        // finestra di 1365 ns con 1024 campioni. E' la piu' lunga, quindi
+        // quella che lascia piu' margine alla latenza del self-trigger.
+        freq = CAEN_DGTZ_DRS4_750MHz;  sTime = 1.0 / 750e6;  fSamplingRateStr = "750MHz";
     } else {
         Log::OutError("Unknown SamplingRate = '" + fSamplingRateStr +
-                      "'. Accepted values: \"5GHz\", \"2.5GHz\", \"1GHz\".");
+                      "'. Accepted values: \"5GHz\", \"2.5GHz\", \"1GHz\", \"750MHz\".");
         exit(1);
     }
 
@@ -2043,17 +2048,15 @@ void Digitizer::PrepareOutput() {
         exit(1);
     }
 
+    // Il nome del file porta la frequenza, ed e' spesso l'unica cosa che si
+    // guarda mesi dopo: deve essere esatta. A questo punto la stringa e' gia'
+    // stata normalizzata e un valore sconosciuto ha fatto uscire il programma,
+    // quindi qui non si indovina: le alternative sono quattro e basta.
     std::string rateTag = "_unkRate";
     if (fSamplingRateStr == "5GHz")         rateTag = "_5Gs";
     else if (fSamplingRateStr == "2.5GHz")  rateTag = "_2.5Gs";
     else if (fSamplingRateStr == "1GHz")    rateTag = "_1Gs";
-    else {
-        std::string s = fSamplingRateStr;
-        s.erase(std::remove_if(s.begin(), s.end(), ::isspace), s.end());
-        if (s.find("5")   != std::string::npos)   rateTag = "_5Gs";
-        else if (s.find("2.5") != std::string::npos) rateTag = "_2.5Gs";
-        else if (s.find("1")   != std::string::npos)   rateTag = "_1Gs";
-    }
+    else if (fSamplingRateStr == "750MHz")  rateTag = "_750Ms";
 
     std::ostringstream fname;
     fname << fOutputDir << "/"

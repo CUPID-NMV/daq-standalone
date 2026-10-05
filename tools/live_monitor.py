@@ -352,6 +352,18 @@ class Monitor:
             return self.att_forzata
         return self.ATTENUAZIONE.get(str((self.hdr or {}).get("SamplingRate", "")), 16.1)
 
+    def attenuazione_misurata(self):
+        """Vero se per QUESTA frequenza l'attenuazione e' stata misurata.
+
+        A 750 MHz non lo e': senza questo, il grafico mostrerebbe una scala in
+        millivolt ricavata dal valore di 2.5 GS/s e nessuno saprebbe che e'
+        inventata. La calibrazione dipende dalla frequenza del 29% fra 2.5 e
+        1 GS/s, quindi non e' un dettaglio.
+        """
+        if self.att_forzata:
+            return True
+        return str((self.hdr or {}).get("SamplingRate", "")) in self.ATTENUAZIONE
+
     def analysis(self):
         """(hdr, base, corr, amp, t_ns) oppure None se non ci sono ancora dati."""
         if self.data is None or self.data.shape[0] == 0:
@@ -785,8 +797,11 @@ class Monitor:
                 # e' l'attenuazione per il passo dell'ADC, cioe' la
                 # calibrazione della soglia misurata su impulsi da 1.6 ns; i PMT
                 # sono risultati 1.80 ns, il 12% piu' larghi.
+                nota_cal = ("" if self.attenuazione_misurata()
+                            else "   NOT CALIBRATED AT THIS SAMPLING RATE")
                 ax.set_xlabel("amplitude [offset units]   "
-                              "1 offset = %.2f mV   (pulses ~1.8 ns wide)" % mv_off)
+                              "1 offset = %.2f mV   (pulses ~1.8 ns wide)%s"
+                              % (mv_off, nota_cal))
                 ax.set_ylabel("events" + (" (log)" if logy else ""))
                 ax.set_title(f"ch{ch}", fontsize=10, pad=18)
                 ax.grid(alpha=0.25)

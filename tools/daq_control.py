@@ -113,6 +113,7 @@ CAMPI = [
     ("digitizer", "Connection",      "link",               "scelta", ["auto", "ETH_V4718", "USB_A4818"]),
     ("digitizer", "DRS4Correction",  "DRS4 corrections",   "booleano", None),
     ("digitizer", "OutputFile",      "file prefix",        "testo",  None),
+    ("digitizer", "OutputDir",       "output directory",   "testo",  None),
 
     ("digitizer", "ExternalTrigger", "external trigger (TRG-IN)", "booleano", None),
     ("digitizer", "IOLevel",         "front panel level",  "scelta", ["NIM", "TTL"]),
@@ -273,6 +274,21 @@ def coerenza(d):
     canali = lista(g.get("ChannelList"))
     if not canali:
         errori.append("ChannelList is empty: nothing would be recorded.")
+
+    # La cartella di uscita: la DAQ non la crea, si rifiuta di partire con
+    # "Output directory does not exist" dopo aver gia' aperto il collegamento.
+    # Meglio dirlo qui, che costa una chiamata a stat.
+    od = g.get("OutputDir")
+    if od is not None:
+        od = str(od)
+        if not os.path.isabs(od):
+            errori.append("OutputDir must be an absolute path: the DAQ runs from "
+                          "build/, so a relative path would not point where you think.")
+        elif not os.path.isdir(od):
+            errori.append("OutputDir does not exist: %s. The DAQ does not create it "
+                          "and would refuse to start." % od)
+        elif not os.access(od, os.W_OK):
+            errori.append("OutputDir is not writable: %s." % od)
 
     self_on = bool(g.get("SelfTrigger"))
     est_on = bool(g.get("ExternalTrigger"))
@@ -1375,6 +1391,17 @@ class Controllo:
                 return True, "DAQ started."
         return False, "Started but I cannot find it among the processes: check the log."
 
+    def cartella_uscita(self):
+        """OutputDir dal TOML, oppure None se non si riesce a leggerlo."""
+        try:
+            import tomllib
+            with open(self.toml, "rb") as f:
+                d = tomllib.load(f)
+            v = d.get("digitizer", {}).get("OutputDir")
+            return str(v) if v else None
+        except Exception:
+            return None
+
     def avvia_monitor(self):
         """Accende il monitor sulla macchina DAQ.
 
@@ -1392,11 +1419,22 @@ class Controllo:
                 log = open(os.path.join(ROOT, "data", "monitor-console.log"), "wb")
             except OSError as e:
                 return False, "Cannot write the monitor log: %s" % e
+            # Il monitor deve guardare DOVE scrive la DAQ. Da quando la
+            # cartella si cambia dalla pagina, l'alternativa era un monitor
+            # che continua a mostrare la cartella vecchia -- cioe' dati di
+            # un'altra sessione presentati come se fossero di adesso, che e'
+            # esattamente l'equivoco che si vuole togliere di mezzo.
+            args = list(self.args_monitor)
+            if not any(a in ("-d", "--data-dir") for a in args):
+                cartella = self.cartella_uscita()
+                if cartella:
+                    args += ["-d", cartella]
+
             try:
                 # start_new_session come per la DAQ: il monitor deve
                 # sopravvivere al riavvio del controllore, se no riavviare
                 # questa pagina spegnerebbe la vista sulla run in corso.
-                subprocess.Popen([sys.executable, MONITOR] + self.args_monitor,
+                subprocess.Popen([sys.executable, MONITOR] + args,
                                  cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                                  stdin=subprocess.DEVNULL, start_new_session=True)
             except OSError as e:

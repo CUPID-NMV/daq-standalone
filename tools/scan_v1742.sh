@@ -46,7 +46,25 @@ if ! pgrep -f "main/DAQ-WC" > /dev/null; then
     exit 1
 fi
 
-STATO="$ROOT/data/live-status.json"
+# La cartella dei dati e' quella che la DAQ dichiara nel TOML, non "data"
+# cablata: da quando OutputDir si cambia dalla pagina di controllo, cercare
+# qui dentro vorrebbe dire guardare la cartella sbagliata e concludere che la
+# DAQ non sta pubblicando lo stato.
+TOML="${TOML:-$ROOT/config/run-local.toml}"
+DATI=$(python3 - "$TOML" <<'EOF'
+import sys
+try:
+    import tomllib
+    with open(sys.argv[1], "rb") as f:
+        v = tomllib.load(f).get("digitizer", {}).get("OutputDir")
+    print(v or "")
+except Exception:
+    print("")          # niente TOML, niente chiave: ci pensa il ripiego sotto
+EOF
+)
+[[ -z "$DATI" ]] && DATI="$ROOT/data"
+
+STATO="$DATI/live-status.json"
 if [[ ! -f "$STATO" ]]; then
     echo "ERRORE: manca $STATO." >&2
     echo "Lo pubblica la DAQ solo con SelfTrigger = true: controlla il TOML." >&2
@@ -67,7 +85,7 @@ echo "offset  : $OFFSETS"
 echo "durata  : $SECONDI s per punto"
 echo
 
-ARGS=(--offsets $OFFSETS --seconds "$SECONDI")
+ARGS=(--offsets $OFFSETS --seconds "$SECONDI" --data-dir "$DATI")
 [[ -n "$SIGMA" ]] && ARGS+=(--sigma "$SIGMA")
 
 python3 "$ROOT/tools/noise_scan.py" "${ARGS[@]}"

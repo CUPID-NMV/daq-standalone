@@ -768,11 +768,36 @@ bool Digitizer::MeasureBaseline(std::map<uint32_t,double>& mean,
 
     CAEN_DGTZ_ErrorCode re;
 
+    // Il piedistallo si misura su istantanee SENZA segnale, e per averle
+    // bisogna che l'unica sorgente di trigger sia quella software di questa
+    // funzione. Con TRG-IN attivo, un LED o una coincidenza che battono a
+    // qualche centinaio di hertz riempiono il buffer di eventi VERI, che
+    // ReadData consegna insieme ai nostri: quello che si misura non e' piu'
+    // il rumore ma l'impulso.
+    //
+    // Misurato: con tutti eventi LED la media viene 380.7 conteggi e l'rms
+    // 183.5, contro 270.6 e 8.9 sulle sole istantanee pulite. La DAQ si e'
+    // rifiutata di partire con "rms = 176.65, expected a few" -- e l'rms
+    // all'avvio ballava da 6 a 177 fra una run e l'altra a seconda di quanti
+    // eventi veri capitavano dentro, sporcando in silenzio tutte le
+    // baseline precedenti.
+    CAEN_DGTZ_SetExtTriggerInputMode(fHandle, CAEN_DGTZ_TRGMODE_DISABLED);
+
+    // Da rimettere com'era su OGNI uscita, anche quelle d'errore: lasciare la
+    // board senza trigger esterno dopo una misura fallita vorrebbe dire una
+    // run che acquisisce zero eventi senza spiegazione.
+    auto RipristinaTrigger = [&]() {
+        CAEN_DGTZ_SetExtTriggerInputMode(
+            fHandle, fExternalTrigger ? fExternalTriggerMode
+                                      : CAEN_DGTZ_TRGMODE_DISABLED);
+    };
+
     CAEN_DGTZ_ClearData(fHandle);      // niente residui nel primo blocco letto
     re = CAEN_DGTZ_SWStartAcquisition(fHandle);
     if (re != CAEN_DGTZ_Success) {
         Log::OutError("Start acquisition failed in MeasureBaseline (" + tag +
                       "). Code: " + std::to_string(re));
+        RipristinaTrigger();
         return false;
     }
     fAcqRunning = true;
@@ -785,6 +810,7 @@ bool Digitizer::MeasureBaseline(std::map<uint32_t,double>& mean,
     auto Stop = [&]() {
         CAEN_DGTZ_SWStopAcquisition(fHandle);
         fAcqRunning = false;
+        RipristinaTrigger();
     };
 
     for (uint32_t t = 0; t < ntriggers; ++t) {

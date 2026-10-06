@@ -117,6 +117,8 @@ class Monitor:
         # rate basso due aggiornamenti possono non contenere alcun evento, e il
         # numero mostrato sarebbe zero pur stando acquisendo.
         self._hist = collections.deque(maxlen=4000)
+        self._ultimo_conteggio = -1       # per capire se il file cresce ancora
+        self._cresciuto = 0.0             # ultimo istante in cui e' cresciuto
 
     # -- lettura -------------------------------------------------------
 
@@ -294,8 +296,32 @@ class Monitor:
             return
 
         self.error = None
+
+        # Cambio di file: si riparte da zero con tutto cio' che e' storia.
+        #
+        # Succede quando la run finisce: il file diventa .h5.gz, qui si cercano
+        # solo i .h5, e si ripiega sul piu' recente rimasto -- che puo' essere
+        # di giorni prima. Senza azzerare, il rate veniva calcolato fra il
+        # conteggio della run finita e quello del file vecchio e usciva
+        # NEGATIVO: -30.37 Hz, visto davvero.
+        if path != self.path:
+            self._prev = None
+            self._hist.clear()
+            self.rate = 0.0
+            self.origin = 0
+            self.cumulati = {}
+            self._ana = None
+            self.status = None
+
         self.path = path
         total = int(hdr.get("NEventsInFile", data.shape[0]))
+
+        # Il file cresce ancora? E' la differenza fra "sto guardando la run in
+        # corso" e "sto guardando un file fermo", che sulla pagina erano
+        # indistinguibili: stessi grafici, stessi numeri, nessun avviso.
+        if self._ultimo_conteggio != total:
+            self._ultimo_conteggio = total
+            self._cresciuto = now
 
         if self._prev is not None:
             prev_n, prev_t = self._prev
@@ -647,6 +673,13 @@ class Monitor:
             "ratemed": (lambda t: round(t[0], 2) if t[0] else None)(self.rate_avg()),
             "ratemednota": self.rate_avg()[1],
             "error": self.error,
+            # Da quanto il file non cresce, e di quando e'. Servono a dire
+            # "questa non e' una run in corso": senza, un file fermo di giorni
+            # prima si presenta identico a una run viva.
+            "ferma_da": (round(time.time() - self._cresciuto, 1)
+                         if self._cresciuto else None),
+            "file_quando": (os.path.getmtime(self.path)
+                            if self.path and os.path.exists(self.path) else None),
             "shown": 0,
             "channels": [],
         }
@@ -1506,9 +1539,27 @@ async function tick() {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const s = await r.json();
     lastOk = new Date();
-    setAlert(null);
-    document.getElementById('upd').textContent =
-      'updated at ' + lastOk.toLocaleTimeString();
+
+    // Un file che non cresce non e' una run in corso. Quando una run finisce
+    // il suo file viene compresso e questo monitor ripiega sul .h5 non
+    // compresso piu' recente rimasto in data/, che puo' essere di giorni
+    // prima: stessi grafici, stessi numeri, nessun avviso. E' successo, con
+    // un file del 1 ottobre mostrato come se fosse la run del momento.
+    const FERMA_S = 15;
+    const ferma = s.ferma_da !== null && s.ferma_da !== undefined
+                  && s.ferma_da > FERMA_S;
+    if (ferma) {
+      const quando = s.file_quando
+        ? new Date(s.file_quando * 1000).toLocaleString() : 'unknown date';
+      setAlert('No run in progress. Showing ' + (s.file || '?') +
+               ', last written ' + quando + ' (' + Math.round(s.ferma_da) +
+               ' s ago). These are not live data.');
+    } else {
+      setAlert(null);
+    }
+    document.getElementById('upd').textContent = ferma
+      ? 'file not growing since ' + Math.round(s.ferma_da) + ' s'
+      : 'updated at ' + lastOk.toLocaleTimeString();
     show('rate100', s.rate100); show('ratemed', s.ratemed);
     document.getElementById('ratemednota').textContent =
         'Hz · run average' + (s.ratemednota || '');

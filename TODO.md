@@ -64,6 +64,26 @@ Non serve: scegliere i canali da plottare c'e' gia', e' la casella `channels`
 La panoramica apposta non la rispetta: serve a vedere quali canali sono vivi.
 Da decidere se farla seguire comunque.
 
+## Pannelli richiudibili — PROPOSTO, da approvare
+
+Proposto il 2026-10-07. Mockup: `proposta-pannelli-richiudibili.png`.
+
+Il bersaglio vero sono le due tabelle per canale dentro *Configuration*:
+**32 righe** per il V1742 e **16** per il V812, contate nel codice
+(`tabellaCanali`), non stimate. Sono di gran lunga la cosa piu' alta della
+pagina, e quasi sempre non si guardano.
+
+1. Le due tabelle diventano richiudibili dal loro stesso titolo.
+2. Chiuse tengono una riga di RIEPILOGO -- "record 16 · self-trigger 16,
+   offset 3" -- cosi' richiudere non fa perdere l'informazione per cui le si
+   aprirebbe.
+3. La tabella del CFD parte chiusa quando `cfd.Enabled = false`: quando il
+   modulo non si usa sono sedici righe di peso morto.
+4. Lo stesso meccanismo su tutti i riquadri di primo livello, con lo stato
+   ricordato nel browser come per le spiegazioni col "?".
+
+Stima: con le due tabelle e *Recent actions* chiusi, -56% di altezza.
+
 ## Da guardare sullo schermo
 
 Delle due pagine rifatte si e' verificata la struttura, non l'aspetto.

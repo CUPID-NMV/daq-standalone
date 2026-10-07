@@ -743,7 +743,7 @@ class Monitor:
         idx = np.clip(idx, 0, len(t_ns) - 1)
         return t_ns[idx], sig[idx]
 
-    def _figura_panoramica(self):
+    def _figura_panoramica(self, scala="M"):
         """Rate, ampiezza e rumore per ogni canale, raggruppati per gruppo."""
         ov = self.overview()
         if ov is None:
@@ -758,7 +758,17 @@ class Monitor:
         # figura proporzionale sarebbe da seimila pixel, scomoda da
         # guardare e pesante da rigenerare ogni cinque secondi.
         larg = min(20.0, max(7.0, 0.22 * len(righe) + 3))
-        fig, axes = plt.subplots(3, 1, figsize=(larg, 5.0), sharex=True)
+        k = self.SCALE.get(str(scala).upper(), 1.0)
+
+        # Con pochi canali questi tre pannelli sono quasi vuoti e rubavano
+        # mezzo schermo in cima alla pagina: la panoramica risponde a "quali
+        # canali sono vivi", che e' una domanda da un'occhiata, non da
+        # studiare. Sotto gli otto canali si stringe; sopra torna alta, perche'
+        # li' le barre da confrontare sono tante.
+        stretta = len(righe) <= 8
+        fig, axes = plt.subplots(3, 1, sharex=True, figsize=(
+            (larg * 0.55 if stretta else larg) * k,
+            (3.2 if stretta else 5.0) * k))
         # Con pochi canali le barre a larghezza piena sembrano blocchi.
         wbar = 0.8 if len(righe) > 8 else 0.35
         # Bande alternate per gruppo del V1742: con molti canali si perde
@@ -833,13 +843,19 @@ class Monitor:
         plt.close(fig)
         return buf.getvalue()
 
+    # Moltiplicatore delle figure. La dimensione giusta dipende dallo schermo
+    # di chi guarda -- un portatile in laboratorio e un monitor grande non
+    # vogliono la stessa cosa -- quindi la sceglie la pagina invece di essere
+    # indovinata qui dentro.
+    SCALE = {"S": 0.78, "M": 1.0, "L": 1.3}
+
     def figure(self, kind, n_show=1, xlim=(None, None), ylim=(None, None),
-               hset=None, bw=None, qcut=None, qset=None, gate=None):
+               hset=None, bw=None, qcut=None, qset=None, gate=None, scala="M"):
         if kind == "panoramica":
             # Non passa dall'analisi di dettaglio: quella riguarda i soli
             # canali selezionati e puo' mancare, mentre la panoramica deve
             # poter rispondere comunque.
-            return self._figura_panoramica()
+            return self._figura_panoramica(scala)
 
         res = self.analysis()
         if res is None:
@@ -847,6 +863,7 @@ class Monitor:
         hdr, _, corr, amp, t_ns, noise, q = res
         channels = hdr["ChannelList"]
         rect_finale = None
+        k = self.SCALE.get(str(scala).upper(), 1.0)
 
         def apply_limits(ax):
             """Limiti espliciti dove indicati, autoscale dove no."""
@@ -880,7 +897,11 @@ class Monitor:
             return "time [ns]" + (f"      ({' · '.join(parti)})" if parti else "")
 
         if kind == "waveforms":
-            fig, axes = plt.subplots(len(channels), 1, figsize=(9, 2.9 * len(channels)),
+            # Piu' larghe di tutte le altre: su una forma d'onda si guarda il
+            # tempo, e 200 px in piu' sull'asse x si leggono. Sono l'unica
+            # figura che CRESCE in questo riassetto.
+            fig, axes = plt.subplots(len(channels), 1,
+                                     figsize=(11 * k, 3.3 * k * len(channels)),
                                      squeeze=False, sharex=True)
             n = max(1, min(n_show, corr.shape[0]))
             for i, ch in enumerate(channels):
@@ -972,7 +993,7 @@ class Monitor:
                 if (bw and not self.self_trigger_attivo()) else None))
 
         elif kind == "average":
-            fig, ax = plt.subplots(figsize=(9, 4))
+            fig, ax = plt.subplots(figsize=(7 * k, 2.5 * k))
             for i, ch in enumerate(channels):
                 line, = ax.plot(t_ns, corr[:, i].mean(axis=0), lw=1.4, label=f"ch{ch}")
 
@@ -1031,7 +1052,8 @@ class Monitor:
             # Piu' alto degli altri pannelli: sotto gli assi ci vanno
             # etichetta, legenda e il pie' di pagina, e con 3.4 pollici il
             # grafico si sarebbe schiacciato a una striscia.
-            fig, axes = plt.subplots(1, len(channels), figsize=(5 * len(channels), 4.3),
+            fig, axes = plt.subplots(1, len(channels),
+                                     figsize=(4.8 * k * len(channels), 3.4 * k),
                                      squeeze=False)
             for i, ch in enumerate(channels):
                 ax = axes[0][i]
@@ -1154,7 +1176,8 @@ class Monitor:
             # la distribuzione di prima resta accanto in grigio.
             dep_a = self.accumula("ampiezze", q, channels, self.gen)
 
-            fig, axes = plt.subplots(1, len(channels), figsize=(5 * len(channels), 3.4),
+            fig, axes = plt.subplots(1, len(channels),
+                                     figsize=(4.8 * k * len(channels), 3.0 * k),
                                      squeeze=False)
             for i, ch in enumerate(channels):
                 ax = axes[0][i]
@@ -1349,6 +1372,14 @@ PAGE = """<!DOCTYPE html>
   th,td { padding:6px 14px; text-align:right; border-bottom:1px solid var(--line); }
   th { color:var(--mut); font-weight:500; font-size:12px; text-transform:uppercase; }
   td:first-child,th:first-child { text-align:left; }
+  .gr { position:relative; display:inline-block; margin-bottom:12px; vertical-align:top; }
+  .gr img { margin-bottom:0; }
+  .gr .apri { position:absolute; top:7px; right:7px; width:20px; height:20px; line-height:20px;
+              text-align:center; border-radius:5px; background:var(--bg); border:1px solid var(--line);
+              color:var(--mut); font-size:13px; cursor:pointer; opacity:0; transition:opacity .12s;
+              text-decoration:none; }
+  .gr:hover .apri { opacity:1; }
+  .affianca { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start; }
   img { max-width:100%; border:1px solid var(--line); border-radius:8px; margin-bottom:16px;
         background:#fff; }
   .err { color:#c33; }
@@ -1394,6 +1425,8 @@ PAGE = """<!DOCTYPE html>
   <label>to [ns]<input id="gto" value="__GTO__" placeholder="default" style="width:70px"></label>
   <label>channels<input id="canali" value="" placeholder="all  e.g. 8,9,12-15" style="width:150px"></label>
   <label>threshold [offset]<input id="qcut" value="" placeholder="whole spectrum" style="width:110px"></label>
+  <label>plot size<select id="scala" style="font:13px inherit;padding:5px 7px">
+    <option>S</option><option selected>M</option><option>L</option></select></label>
   <button id="reset">Autoscale</button>
   <button id="azzera" title="discards the events already acquired and starts from now">Reset data</button>
   <span class="hint">x/y limits are the waveform zoom only &middot;
@@ -1405,9 +1438,16 @@ PAGE = """<!DOCTYPE html>
 <th>min amp. [mV]</th><th>min amp. [ADC]</th></tr></thead><tbody></tbody></table>
 <div id="boot" class="err">JavaScript did not run: the page cannot update.
 Open the browser console to see the error.</div>
-<img id="pano" alt="per-channel overview">
-<img id="w" alt="waveforms"><img id="a" alt="average"><img id="h" alt="amplitudes">
-<img id="q" alt="charge integrals">
+<!-- Ogni grafico ha il suo "apri" che lo stacca in una finestra a parte, utile
+     col secondo schermo: le forme d'onda di la', i controlli di qua. I due
+     spettri stanno affiancati, sono due distribuzioni della stessa cosa. -->
+<div class="gr"><a class="apri" data-img="pano">&#8599;</a><img id="pano" alt="per-channel overview"></div>
+<div class="gr"><a class="apri" data-img="w">&#8599;</a><img id="w" alt="waveforms"></div>
+<div class="gr"><a class="apri" data-img="a">&#8599;</a><img id="a" alt="average"></div>
+<div class="affianca">
+  <div class="gr"><a class="apri" data-img="h">&#8599;</a><img id="h" alt="amplitudes"></div>
+  <div class="gr"><a class="apri" data-img="q">&#8599;</a><img id="q" alt="charge integrals"></div>
+</div>
 <script>
 document.getElementById('boot').style.display = 'none';
 const REFRESH = __REFRESH__ * 1000;
@@ -1420,7 +1460,8 @@ function setAlert(msg) {
   if (msg) a.textContent = msg;
   document.body.classList.toggle('stale', !!msg);
 }
-const FIELDS = ['xmin','xmax','ymin','ymax','nev','bw','bfrom','bto','gfrom','gto','canali','qcut'];
+const FIELDS = ['xmin','xmax','ymin','ymax','nev','bw','bfrom','bto','gfrom','gto',
+                'canali','qcut','scala'];
 
 // I limiti scelti sopravvivono a un reload della pagina. localStorage puo'
 // essere inaccessibile (finestra privata, cookie bloccati): mai fatale.
@@ -1494,6 +1535,42 @@ function buildHistControls(channels) {
           .forEach(b => b.onclick = () => azzeraRiga('q', b));
 }
 
+// Finestre separate, una per grafico. Non hanno uno script loro: e' questa
+// pagina che, a ogni giro, gli riscrive la src dell'immagine. Cosi' non serve
+// una rotta nuova sul server, e una finestra rimasta aperta mentre la pagina
+// madre e' chiusa smette semplicemente di aggiornarsi invece di mostrare dati
+// vecchi fingendo di essere viva.
+const finestre = [];
+
+function apriFinestra(id, titolo) {
+  const img = document.getElementById(id);
+  const w = window.open("", "daqmon_" + id, "width=1020,height=620,scrollbars=yes");
+  if (!w) { setAlert("The browser blocked the pop-up window. Allow pop-ups for this page."); return; }
+  w.document.open();
+  w.document.write(
+    "<!DOCTYPE html><html><head><meta charset=utf-8><title>" + titolo + "</title>" +
+    "<style>html,body{margin:0;background:#16181d;color:#999;" +
+    "font:12px system-ui,sans-serif}" +
+    "img{max-width:100%;display:block}" +
+    "p{margin:6px 10px}</style></head><body>" +
+    "<img id=p src='" + img.src + "'>" +
+    "<p>" + titolo + " &middot; aggiornato dalla pagina principale: se la chiudi, questa si ferma.</p>" +
+    "</body></html>");
+  w.document.close();
+  finestre.push({w: w, id: id});
+}
+
+function aggiornaFinestre() {
+  for (let i = finestre.length - 1; i >= 0; i--) {
+    const f = finestre[i];
+    if (f.w.closed) { finestre.splice(i, 1); continue; }
+    try {
+      const dentro = f.w.document.getElementById("p");
+      if (dentro) dentro.src = document.getElementById(f.id).src;
+    } catch (e) { finestre.splice(i, 1); }
+  }
+}
+
 function params() {
   const p = new URLSearchParams();
   for (const f of FIELDS) {
@@ -1516,6 +1593,12 @@ function params() {
   }
   return p;
 }
+
+document.querySelectorAll('.gr .apri').forEach(a => {
+  a.title = 'open in a separate window';
+  a.onclick = () => apriFinestra(a.dataset.img,
+                                 document.getElementById(a.dataset.img).alt);
+});
 
 document.getElementById('azzera').onclick = async () => {
   // Non ricarica la pagina: l'azzeramento vive nel server, e il giro
@@ -1587,8 +1670,9 @@ async function tick() {
     const pano = document.getElementById('pano');
     if (!pano.dataset.t || (Date.now() - pano.dataset.t) > 5000) {
       pano.dataset.t = Date.now();
-      pano.src = 'panoramica.png?t=' + pano.dataset.t;
+      pano.src = 'panoramica.png?' + p.toString();
     }
+    aggiornaFinestre();
   } catch (e) {
     // Le immagini restano quelle di prima: senza un avviso vistoso la pagina
     // sembrerebbe viva mentre mostra dati fermi.
@@ -1778,7 +1862,8 @@ def make_handler(monitor, refresh, defaults):
                                                      hset,
                                                      self._num(qs, "bw", defaults["bw"]),
                                                      self._num(qs, "qcut", defaults["qcut"]),
-                                                     qset, gate))
+                                                     qset, gate,
+                                                     qs.get("scala", ["M"])[0]))
 
             self._send(404, "text/plain", b"not found")
 

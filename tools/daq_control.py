@@ -1510,15 +1510,28 @@ PAGINA = r"""<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DAQ Control</title>
 <style>
- body{font:14px/1.45 system-ui,sans-serif;margin:0;padding:18px;background:#f6f6f4;color:#1a1a19}
+ body{font:14px/1.45 system-ui,sans-serif;margin:0;padding:12px;background:#f6f6f4;color:#1a1a19}
  h1{font-size:18px;margin:0 0 14px}
  .riga{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
- .box{background:#fff;border:1px solid #e2e2de;border-radius:8px;padding:14px;flex:1 1 320px}
- .box h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:#6b6a65;margin:0 0 10px}
+ .box{background:#fff;border:1px solid #e2e2de;border-radius:8px;padding:10px 12px;flex:1 1 320px}
+ /* Colonna di riquadri impilati dentro una .riga: serve per mettere i pannelli
+    bassi di fianco a Configuration, che e' alto e lasciava un vuoto. */
+ .colonna{display:flex;flex-direction:column;gap:12px;flex:1 1 330px;min-width:0}
+ .colonna>.box{flex:0 0 auto}
+ /* Le spiegazioni lunghe stanno dietro un "?": servono a chi arriva nuovo,
+    non ogni giorno, e in mezzo ai piedi costano quattro righe a testa. */
+ .qm{display:inline-block;width:15px;height:15px;line-height:15px;text-align:center;
+     border:1px solid #d5d5d0;border-radius:50%;font-size:10px;color:#6b6a65;
+     cursor:pointer;margin-left:6px;vertical-align:1px;user-select:none}
+ .qm:hover{background:#ececea}
+ .aiuto{display:none;font-size:12px;color:#6b6a65;margin-top:8px;
+        border-left:2px solid #e2e2de;padding-left:8px}
+ .aiuto.apri{display:block}
+ .box h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:#6b6a65;margin:0 0 6px}
  .stato{display:inline-block;padding:4px 12px;border-radius:999px;font-weight:600}
  .ferma{background:#ececea;color:#52514e}
  .corso{background:#dcefe4;color:#15603a}
- button{font:inherit;padding:9px 20px;border-radius:7px;border:1px solid transparent;cursor:pointer}
+ button{font:inherit;padding:6px 14px;border-radius:6px;border:1px solid transparent;cursor:pointer}
  button:disabled{opacity:.4;cursor:not-allowed}
  #avvia{background:#15603a;color:#fff}
  #ferma{background:#a8321f;color:#fff}
@@ -1531,7 +1544,7 @@ PAGINA = r"""<!doctype html>
  .cantab thead td{position:sticky;top:0;background:#fafaf8;color:#6b6a65;font-weight:600}
  .cantab input[type=text]{width:58px;padding:2px 5px;font-size:12px}
  pre{background:#1a1a19;color:#e6e6e2;padding:10px;border-radius:6px;overflow:auto;
-     max-height:260px;font-size:12px;margin:0;white-space:pre-wrap}
+     max-height:170px;font-size:12px;margin:0;white-space:pre-wrap}
  .msg{padding:9px 12px;border-radius:6px;margin:10px 0;display:none}
  .ok{background:#dcefe4;color:#15603a}
  .ko{background:#f8e0da;color:#8a2a18}
@@ -1563,7 +1576,7 @@ PAGINA = r"""<!doctype html>
 </div>
 
 <div class="riga">
-  <div class="box" style="flex:2 1 520px"><h2>Configuration</h2>
+  <div class="box" style="flex:2 1 560px"><h2>Configuration</h2>
     <div id="cfgfile" style="font-size:12px;color:#6b6a65;margin-bottom:8px"></div>
     <div id="cfg"></div>
     <div id="tabdig" style="margin-top:14px"></div>
@@ -1584,10 +1597,10 @@ PAGINA = r"""<!doctype html>
       <button id="applica" style="background:#ececea;margin-left:6px">Apply now</button>
     </div>
   </div>
+  <div class="colonna">
   <div class="box"><h2>Current run</h2><table id="run"></table></div>
-</div>
 
-<div class="box" style="margin-top:14px"><h2>Run queue</h2>
+<div class="box"><h2>Run queue<span class="qm" data-aiuto="aiutocoda">?</span></h2>
   <div id="codastato" style="margin-bottom:10px"></div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <input id="cnome" placeholder="run name" style="width:190px">
@@ -1600,7 +1613,7 @@ PAGINA = r"""<!doctype html>
       <button id="cclr" style="background:#ececea">Clear</button>
     </span>
   </div>
-  <div style="font-size:12px;color:#6b6a65;margin-top:6px">
+  <div id="aiutocoda" class="aiuto">
     An entry is the difference between what you have in the form now and what is in
     the file: set the parameters, give it a name, add it. Then change them and add
     another. The TOML is saved when the queue starts and restored when it ends.
@@ -1608,7 +1621,7 @@ PAGINA = r"""<!doctype html>
   <div id="codatab" style="margin-top:10px"></div>
 </div>
 
-<div class="box" style="margin-top:14px"><h2>Threshold scan</h2>
+<div class="box"><h2>Threshold scan</h2>
   <div id="scanstato" style="margin-bottom:10px"></div>
   <div style="display:flex;gap:22px;flex-wrap:wrap">
     <div>
@@ -1631,8 +1644,10 @@ PAGINA = r"""<!doctype html>
   </div>
   <pre id="scanlog" style="margin-top:12px;display:none"></pre>
 </div>
+  </div>
+</div>
 
-<div class="box" style="margin-top:14px"><h2>Scan plots</h2>
+<div class="box" style="margin-top:12px"><h2>Scan plots<span class="qm" data-aiuto="aiutoplot">?</span></h2>
   <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
     <select id="gsel" multiple size="5"
             style="font:inherit;padding:4px 8px;border:1px solid #d5d5d0;border-radius:6px;min-width:400px"></select>
@@ -1651,7 +1666,7 @@ PAGINA = r"""<!doctype html>
       <a id="gapri" href="#" target="_blank" style="font-size:12px">open full size</a>
     </div>
   </div>
-  <div style="font-size:12px;color:#6b6a65;margin-top:6px">
+  <div id="aiutoplot" class="aiuto">
     Pick one or more measurements (ctrl-click) and draw them together. Up to 8:
     beyond that the curves stop being distinguishable. With <b>per channel</b>,
     leaving the channel box empty draws every channel in the file &mdash; including
@@ -1661,8 +1676,10 @@ PAGINA = r"""<!doctype html>
   <img id="gimg" style="margin-top:10px;max-width:100%;border:1px solid #e2e2de;border-radius:6px;display:none">
 </div>
 
-<div class="box" style="margin-top:14px"><h2>DAQ log</h2><pre id="log"></pre></div>
-<div class="box" style="margin-top:14px"><h2>Recent actions</h2><div id="azioni" class="az"></div></div>
+<div class="riga" style="margin-top:12px">
+  <div class="box" style="flex:1 1 440px"><h2>DAQ log</h2><pre id="log"></pre></div>
+  <div class="box" style="flex:1 1 360px"><h2>Recent actions</h2><div id="azioni" class="az"></div></div>
+</div>
 <p style="color:#6b6a65;font-size:12px">Plots and DQM are in the monitor, linked at the top of this page.</p>
 
 <script>
@@ -1752,6 +1769,21 @@ async function azioneMonitor(che){
 }
 $("monavvia").onclick = () => azioneMonitor("avvia");
 $("monferma").onclick = () => azioneMonitor("ferma");
+
+// Le spiegazioni lunghe si aprono col "?" e lo stato resta fra un reload e
+// l'altro: chi le vuole aperte non deve riaprirle ogni volta, chi non le vuole
+// non se le ritrova.
+document.querySelectorAll(".qm").forEach(q => {
+  const id = q.dataset.aiuto;
+  const box = $(id);
+  try { if(localStorage.getItem("aiuto." + id) === "1") box.classList.add("apri"); }
+  catch(e){}
+  q.onclick = () => {
+    box.classList.toggle("apri");
+    try { localStorage.setItem("aiuto." + id, box.classList.contains("apri") ? "1" : "0"); }
+    catch(e){}
+  };
+});
 
 $("avvia").onclick = () => azione("avvia", "Start a new run?");
 $("ferma").onclick = () => azione("ferma",

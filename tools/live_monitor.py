@@ -1154,7 +1154,10 @@ class Monitor:
             # Due righe invece di una lunga: con un solo canale la figura e'
             # larga cinque pollici e la riga unica usciva dai bordi, tagliata
             # da entrambe le parti proprio dove c'era l'avvertimento.
-            righe_pie = ["charge at the 50 \u03a9 input   \u00b7   gate %.0f-%.0f ns "
+            # "charge at the 50 ohm input" era ridondante con l'etichetta
+            # dell'asse, che gia' dice "charge [pC]", e a 480 px di larghezza
+            # faceva uscire la riga da tutti e due i bordi.
+            righe_pie = ["50 \u03a9   \u00b7   gate %.0f-%.0f ns "
                          "(%d samples)   \u00b7   %s pulses"
                          % (t_ns[a_i], t_ns[b_i - 1], nscamp,
                             "positive" if self.segno > 0 else "negative"),

@@ -64,7 +64,7 @@ Non serve: scegliere i canali da plottare c'e' gia', e' la casella `channels`
 La panoramica apposta non la rispetta: serve a vedere quali canali sono vivi.
 Da decidere se farla seguire comunque.
 
-## Pannelli richiudibili — APPROVATO, da fare appena possibile
+## ~~Pannelli richiudibili~~ — FATTO il 2026-10-07
 
 Approvato il 2026-10-07. Mockup: `proposta-pannelli-richiudibili.png`.
 
@@ -84,7 +84,7 @@ pagina, e quasi sempre non si guardano.
 
 Stima: con le due tabelle e *Recent actions* chiusi, -56% di altezza.
 
-## Pulizia dei grafici del monitor — PROPOSTO, da approvare
+## ~~Pulizia dei grafici del monitor~~ — FATTO il 2026-10-07
 
 Proposto il 2026-10-07. Mockup: `proposta-monitor-pulizia.png`, costruito
 sulle immagini VERE del monitor.
@@ -97,11 +97,12 @@ sulle immagini VERE del monitor.
    "triggering on noise", "threshold inside the noise", "white-noise floor"
    nel sottotitolo, "hatched: no event above the cut" nella panoramica.
 
-NON cancellati ma dietro un interruttore `details`, spento di partenza. Il
+Fatto con l'interruttore `details`, spento di partenza, non cancellando. Il
 motivo: una carica senza il suo cancello non e' confrontabile con un'altra, e
 quelle righe sono l'unico posto dove sta scritto con quali numeri il grafico
 e' stato fatto. Durante la presa dati sono rumore; quando si confrontano due
-misure servono. Se preferisci cancellarle del tutto, si fa.
+misure servono. Misurato dopo: i due spettri sono 480x310 tutti e due, con e senza
+dettagli.
 
 ## Da guardare sullo schermo
 

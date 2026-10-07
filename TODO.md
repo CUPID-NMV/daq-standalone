@@ -64,9 +64,9 @@ Non serve: scegliere i canali da plottare c'e' gia', e' la casella `channels`
 La panoramica apposta non la rispetta: serve a vedere quali canali sono vivi.
 Da decidere se farla seguire comunque.
 
-## Pannelli richiudibili — PROPOSTO, da approvare
+## Pannelli richiudibili — APPROVATO, da fare appena possibile
 
-Proposto il 2026-10-07. Mockup: `proposta-pannelli-richiudibili.png`.
+Approvato il 2026-10-07. Mockup: `proposta-pannelli-richiudibili.png`.
 
 Il bersaglio vero sono le due tabelle per canale dentro *Configuration*:
 **32 righe** per il V1742 e **16** per il V812, contate nel codice
@@ -83,6 +83,25 @@ pagina, e quasi sempre non si guardano.
    ricordato nel browser come per le spiegazioni col "?".
 
 Stima: con le due tabelle e *Recent actions* chiusi, -56% di altezza.
+
+## Pulizia dei grafici del monitor — PROPOSTO, da approvare
+
+Proposto il 2026-10-07. Mockup: `proposta-monitor-pulizia.png`, costruito
+sulle immagini VERE del monitor.
+
+1. I due spettri alla STESSA dimensione: oggi sono 480x300 e 480x340.
+2. Via le didascalie in fondo, che durante una run normale non si leggono:
+   la calibrazione sotto lo spettro di ampiezza, e le righe con cancello,
+   impedenza, verso e finestra del piedistallo sotto quello di carica.
+3. Via gli avvertimenti da messa a punto: "not enough statistics",
+   "triggering on noise", "threshold inside the noise", "white-noise floor"
+   nel sottotitolo, "hatched: no event above the cut" nella panoramica.
+
+NON cancellati ma dietro un interruttore `details`, spento di partenza. Il
+motivo: una carica senza il suo cancello non e' confrontabile con un'altra, e
+quelle righe sono l'unico posto dove sta scritto con quali numeri il grafico
+e' stato fatto. Durante la presa dati sono rumore; quando si confrontano due
+misure servono. Se preferisci cancellarle del tutto, si fa.
 
 ## Da guardare sullo schermo
 

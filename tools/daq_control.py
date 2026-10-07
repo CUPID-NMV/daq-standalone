@@ -1527,6 +1527,23 @@ PAGINA = r"""<!doctype html>
  .aiuto{display:none;font-size:12px;color:#6b6a65;margin-top:8px;
         border-left:2px solid #e2e2de;padding-left:8px}
  .aiuto.apri{display:block}
+ /* Richiudere un pannello: si nasconde tutto tranne il titolo, che resta
+    cliccabile. Il triangolo e il riepilogo stanno nel titolo, cosi' chiuso il
+    pannello dice ancora cosa contiene invece di diventare una riga muta. */
+ .box>h2{cursor:pointer;user-select:none}
+ .box>h2::before{content:"\25be\00a0\00a0";color:#b5b5b0;font-size:11px}
+ .box.chiuso>h2::before{content:"\25b8\00a0\00a0"}
+ .box.chiuso>*:not(h2){display:none}
+ .riass{float:right;font-weight:400;text-transform:none;letter-spacing:0;
+        color:#9a9a94;font-size:11px}
+ /* Le due tabelle per canale: 32 righe il V1742 e 16 il V812, sono la cosa
+    piu' alta della pagina e quasi sempre non si guardano. */
+ .sezh{cursor:pointer;user-select:none;font-size:12px;text-transform:uppercase;
+       letter-spacing:.04em;color:#6b6a65;margin-bottom:4px}
+ .sezh::before{content:"\25be\00a0\00a0";color:#b5b5b0;font-size:11px}
+ .sez.chiuso .sezh::before{content:"\25b8\00a0\00a0"}
+ .sez.chiuso .sezc{display:none}
+ .sezr{text-transform:none;letter-spacing:0;color:#9a9a94;margin-left:8px}
  .box h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:#6b6a65;margin:0 0 6px}
  .stato{display:inline-block;padding:4px 12px;border-radius:999px;font-weight:600}
  .ferma{background:#ececea;color:#52514e}
@@ -1576,7 +1593,7 @@ PAGINA = r"""<!doctype html>
 </div>
 
 <div class="riga">
-  <div class="box" style="flex:2 1 560px"><h2>Configuration</h2>
+  <div class="box" id="b_cfg" style="flex:2 1 560px"><h2>Configuration<span class="riass"></span></h2>
     <div id="cfgfile" style="font-size:12px;color:#6b6a65;margin-bottom:8px"></div>
     <div id="cfg"></div>
     <div id="tabdig" style="margin-top:14px"></div>
@@ -1598,9 +1615,9 @@ PAGINA = r"""<!doctype html>
     </div>
   </div>
   <div class="colonna">
-  <div class="box"><h2>Current run</h2><table id="run"></table></div>
+  <div class="box" id="b_run"><h2>Current run<span class="riass"></span></h2><table id="run"></table></div>
 
-<div class="box"><h2>Run queue<span class="qm" data-aiuto="aiutocoda">?</span></h2>
+<div class="box" id="b_coda"><h2>Run queue<span class="qm" data-aiuto="aiutocoda">?</span><span class="riass"></span></h2>
   <div id="codastato" style="margin-bottom:10px"></div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <input id="cnome" placeholder="run name" style="width:190px">
@@ -1621,7 +1638,7 @@ PAGINA = r"""<!doctype html>
   <div id="codatab" style="margin-top:10px"></div>
 </div>
 
-<div class="box"><h2>Threshold scan</h2>
+<div class="box" id="b_scan"><h2>Threshold scan<span class="riass"></span></h2>
   <div id="scanstato" style="margin-bottom:10px"></div>
   <div style="display:flex;gap:22px;flex-wrap:wrap">
     <div>
@@ -1645,11 +1662,11 @@ PAGINA = r"""<!doctype html>
   <pre id="scanlog" style="margin-top:12px;display:none"></pre>
 </div>
 
-<div class="box"><h2>DAQ log</h2><pre id="log"></pre></div>
+<div class="box" id="b_log"><h2>DAQ log</h2><pre id="log"></pre></div>
   </div>
 </div>
 
-<div class="box" style="margin-top:12px"><h2>Scan plots<span class="qm" data-aiuto="aiutoplot">?</span></h2>
+<div class="box" id="b_plot" style="margin-top:12px"><h2>Scan plots<span class="qm" data-aiuto="aiutoplot">?</span><span class="riass"></span></h2>
   <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
     <select id="gsel" multiple size="5"
             style="font:inherit;padding:4px 8px;border:1px solid #d5d5d0;border-radius:6px;min-width:400px"></select>
@@ -1678,7 +1695,7 @@ PAGINA = r"""<!doctype html>
   <img id="gimg" style="margin-top:10px;max-width:100%;border:1px solid #e2e2de;border-radius:6px;display:none">
 </div>
 
-<div class="box" style="margin-top:12px"><h2>Recent actions</h2><div id="azioni" class="az"></div></div>
+<div class="box" id="b_azioni" style="margin-top:12px"><h2>Recent actions<span class="riass"></span></h2><div id="azioni" class="az"></div></div>
 <p style="color:#6b6a65;font-size:12px">Plots and DQM are in the monitor, linked at the top of this page.</p>
 
 <script>
@@ -1769,6 +1786,27 @@ async function azioneMonitor(che){
 $("monavvia").onclick = () => azioneMonitor("avvia");
 $("monferma").onclick = () => azioneMonitor("ferma");
 
+// Un clic sul titolo chiude il pannello. Lo stato resta fra un reload e
+// l'altro: chi lavora con la coda chiusa non deve richiuderla ogni volta.
+document.querySelectorAll(".box[id] > h2").forEach(h => {
+  const box = h.parentElement;
+  try { if(localStorage.getItem("box." + box.id) === "1") box.classList.add("chiuso"); }
+  catch(e){}
+  h.onclick = ev => {
+    // il "?" delle spiegazioni sta dentro al titolo: cliccarlo non deve
+    // richiudere anche il pannello
+    if(ev.target.classList.contains("qm")) return;
+    box.classList.toggle("chiuso");
+    try { localStorage.setItem("box." + box.id,
+                               box.classList.contains("chiuso") ? "1" : "0"); } catch(e){}
+  };
+});
+
+function riass(id, testo){
+  const e = $(id) && $(id).querySelector(".riass");
+  if(e) e.textContent = testo || "";
+}
+
 // Le spiegazioni lunghe si aprono col "?" e lo stato resta fra un reload e
 // l'altro: chi le vuole aperte non deve riaprirle ogni volta, chi non le vuole
 // non se le ritrova.
@@ -1802,6 +1840,24 @@ async function aggiorna(){
   $("avvia").disabled = s.in_corso || !!s.scan || (s.coda && s.coda.attiva);
   $("ferma").disabled = !s.in_corso || !!s.scan || (s.coda && s.coda.attiva);
   aggiornaMonitor(s);
+
+  // Riepiloghi nei titoli: chiuso, il pannello dice ancora la cosa per cui lo
+  // si sarebbe aperto.
+  riass("b_run", s.in_corso
+          ? (s.run || "") + (s.rate != null ? "  " + s.rate + " Hz" : "")
+          : "no run");
+  const nc = ((s.coda && s.coda.voci) || []).length;
+  riass("b_coda", (s.coda && s.coda.attiva) ? "running" :
+                  (nc ? nc + (nc === 1 ? " entry" : " entries") : "empty"));
+  // s.scan e non sc: const sc e' dichiarato piu' sotto, e leggerlo qui
+  // sarebbe un ReferenceError che spegne tutto l'aggiornamento della pagina.
+  riass("b_scan", s.scan
+          ? (s.scan.avanzamento
+               ? "point " + s.scan.avanzamento[0] + " of " + s.scan.avanzamento[1]
+               : "running")
+          : "idle");
+  riass("b_azioni", (s.azioni && s.azioni.length)
+          ? s.azioni[s.azioni.length - 1].quando : "");
 
   tabella($("run"), s.in_corso
     ? [["pid", s.pid],
@@ -1877,9 +1933,20 @@ function numeri(testo){
 
 function campoDi(ch, chiave){ return $("t_" + chiave + "_" + ch); }
 
-function tabellaCanali(dest, titolo, n, colonne, iniziale){
-  let h = `<div style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;
-           color:#6b6a65;margin-bottom:4px">${titolo}</div><div class="cantab"><table>
+function tabellaCanali(dest, titolo, n, colonne, iniziale, riassunto, chiusaSeIgnota){
+  // Richiudibile, con il riepilogo nel titolo: sono 32 righe per il V1742 e 16
+  // per il V812, la cosa piu' alta della pagina, e aperte servono solo quando
+  // si cambia il cablaggio. Chiusa, la riga di riepilogo dice comunque quali
+  // canali sono accesi, che e' il motivo per cui la si aprirebbe.
+  let chiusa = chiusaSeIgnota;
+  try {
+    const v = localStorage.getItem("sez." + dest);
+    if(v !== null) chiusa = (v === "1");
+  } catch(e){}
+
+  let h = `<div class="sez${chiusa ? " chiuso" : ""}" id="sez_${dest}">
+           <div class="sezh">${titolo}<span class="sezr">${riassunto || ""}</span></div>
+           <div class="sezc"><div class="cantab"><table>
            <thead><tr><td>ch</td>` +
            colonne.map(c => `<td>${c.titolo}</td>`).join("") + "</tr></thead><tbody>";
   for(let ch = 0; ch < n; ch++){
@@ -1895,7 +1962,14 @@ function tabellaCanali(dest, titolo, n, colonne, iniziale){
     }
     h += "</tr>";
   }
-  $(dest).innerHTML = h + "</tbody></table></div>";
+  $(dest).innerHTML = h + "</tbody></table></div></div></div>";
+
+  const sez = $("sez_" + dest);
+  sez.querySelector(".sezh").onclick = () => {
+    sez.classList.toggle("chiuso");
+    try { localStorage.setItem("sez." + dest,
+                               sez.classList.contains("chiuso") ? "1" : "0"); } catch(e){}
+  };
 }
 
 function valoreDi(chiave){
@@ -1916,19 +1990,29 @@ function disegnaTabelle(){
   const reg  = numeri(valoreDi("ChannelList"));
   const self = numeri(valoreDi("SelfTriggerChannels"));
   const off  = numeri(valoreDi("SelfTriggerThresholdOffset"));
+  const rs = "record " + (reg.length ? reg.join(",") : "none") +
+             "  \u00b7  self-trigger " + (self.length ? self.join(",") : "none") +
+             (off.length ? ", offset " + off.join(",") : "");
   tabellaCanali("tabdig", "V1742 digitizer channels", 32, [
     {chiave: "reg",  titolo: "record",       tipo: "flag"},
     {chiave: "self", titolo: "self-trigger", tipo: "flag"},
     {chiave: "off",  titolo: "offset",       tipo: "testo"},
-  ], {reg: reg, self: self, off: srotola(self, off)});
+  ], {reg: reg, self: self, off: srotola(self, off)}, rs, false);
 
   const cch = numeri(valoreDi("Channels"));
   const cth = numeri(valoreDi("Threshold"));
+  // Col modulo spento sono sedici righe di peso morto: parte chiusa, finche'
+  // qualcuno non decide altrimenti e allora comanda la sua scelta.
+  const cfdOn = valoreDi("Enabled") === "true";
+  const cs = cfdOn
+    ? "inputs " + (cch.length ? cch.join(",") : "none") +
+      (cth.length ? "  \u00b7  " + cth.join(",") + " mV" : "")
+    : "module disabled";
   tabellaCanali("tabcfd", "V812 CFD inputs  (module numbering, not the digitizer's)",
     16, [
       {chiave: "cfd",  titolo: "enabled",     tipo: "flag"},
       {chiave: "cthr", titolo: "threshold [mV]", tipo: "testo"},
-    ], {cfd: cch, cthr: srotola(cch, cth)});
+    ], {cfd: cch, cthr: srotola(cch, cth)}, cs, !cfdOn);
 }
 
 function dalleTabelle(){

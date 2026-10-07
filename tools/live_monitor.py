@@ -743,7 +743,7 @@ class Monitor:
         idx = np.clip(idx, 0, len(t_ns) - 1)
         return t_ns[idx], sig[idx]
 
-    def _figura_panoramica(self, scala="M"):
+    def _figura_panoramica(self, scala="M", dettagli=False):
         """Rate, ampiezza e rumore per ogni canale, raggruppati per gruppo."""
         ov = self.overview()
         if ov is None:
@@ -819,7 +819,7 @@ class Monitor:
 
         # Sotto la figura, non dentro il pannello: con un canale solo la barra
         # occupa il centro e la scritta ci finiva sopra.
-        nota_sotto = any(sotto)
+        nota_sotto = any(sotto) and dettagli
         if nota_sotto:
             fig.text(0.5, 0.008,
                      "hatched: no event above the cut \u2014 median amplitude over all events",
@@ -850,12 +850,13 @@ class Monitor:
     SCALE = {"S": 0.78, "M": 1.0, "L": 1.3}
 
     def figure(self, kind, n_show=1, xlim=(None, None), ylim=(None, None),
-               hset=None, bw=None, qcut=None, qset=None, gate=None, scala="M"):
+               hset=None, bw=None, qcut=None, qset=None, gate=None, scala="M",
+               dettagli=False):
         if kind == "panoramica":
             # Non passa dall'analisi di dettaglio: quella riguarda i soli
             # canali selezionati e puo' mancare, mentre la panoramica deve
             # poter rispondere comunque.
-            return self._figura_panoramica(scala)
+            return self._figura_panoramica(scala, dettagli)
 
         res = self.analysis()
         if res is None:
@@ -959,9 +960,12 @@ class Monitor:
                                label=f"smallest amplitude seen {eff:.0f} ADC"
                                      f"  ({eff * self.mv_per_count():.1f} mV)"
                                      + (f"  offset {off}" if off is not None else ""))
-                elif note:
+                elif note and dettagli:
                     # Nessuna riga: disegnarne una qui vorrebbe dire inventarsi
-                    # un valore che i dati non sostengono.
+                    # un valore che i dati non sostengono. L'avvertimento dice
+                    # PERCHE' non c'e', ed e' roba da messa a punto: "not enough
+                    # statistics", "triggering on noise", "threshold inside the
+                    # noise". Durante la presa dati e' rumore sul grafico.
                     ax.text(0.99, 0.04, note + (f"  (offset {off})" if off is not None else ""),
                             transform=ax.transAxes, ha="right", va="bottom",
                             fontsize=8, color="#d62728")
@@ -990,7 +994,7 @@ class Monitor:
             axes[-1][0].set_xlabel(etichetta_tempo(
                 "bandwidth model hidden: it describes the self-trigger path, "
                 "not used in this run"
-                if (bw and not self.self_trigger_attivo()) else None))
+                if (bw and not self.self_trigger_attivo() and dettagli) else None))
 
         elif kind == "average":
             fig, ax = plt.subplots(figsize=(7 * k, 2.5 * k))
@@ -1053,7 +1057,7 @@ class Monitor:
             # etichetta, legenda e il pie' di pagina, e con 3.4 pollici il
             # grafico si sarebbe schiacciato a una striscia.
             fig, axes = plt.subplots(1, len(channels),
-                                     figsize=(4.8 * k * len(channels), 3.4 * k),
+                                     figsize=(4.8 * k * len(channels), 3.1 * k),
                                      squeeze=False)
             for i, ch in enumerate(channels):
                 ax = axes[0][i]
@@ -1117,8 +1121,9 @@ class Monitor:
                 ax.set_title("ch%s \u2014 median %.2f pC" % (ch, med),
                              fontsize=10, pad=16)
                 ax.text(0.5, 1.02,
-                        "spread %.2f pC   \u00b7   white-noise floor %.2f pC"
-                        % (sparso, bianco),
+                        ("spread %.2f pC   \u00b7   white-noise floor %.2f pC"
+                         % (sparso, bianco)) if dettagli
+                        else ("spread %.2f pC" % sparso),
                         transform=ax.transAxes, ha="center", va="bottom",
                         fontsize=9,
                         color="#1a6b1a" if abs(med) > 3 * sparso else "#d62728")
@@ -1159,12 +1164,20 @@ class Monitor:
             if da:
                 righe_pie.append("   \u00b7   ".join(da))
 
-            for n_riga, testo in enumerate(reversed(righe_pie)):
-                fig.text(0.5, 0.012 + 0.042 * n_riga, testo, ha="center",
-                         fontsize=8.5,
-                         color=("#d62728" if (dep_q["persi"] and n_riga == 0
-                                              and len(righe_pie) > 1) else "#555"))
-            rect_finale = (0, 0.09 + 0.040 * len(righe_pie), 1, 1)
+            # Il piede dice con quali numeri e' stato fatto il grafico --
+            # cancello, impedenza, verso, finestra del piedistallo. Durante una
+            # run e' rumore: i numeri li hai appena messi tu. Quando si
+            # confrontano due misure invece serve, perche' una carica senza il
+            # suo cancello non e' confrontabile con un'altra: lo stesso segnale
+            # da' 32 o 45 pC a seconda di dove si integra, misurato. Quindi non
+            # sparisce, si accende con "details".
+            if dettagli:
+                for n_riga, testo in enumerate(reversed(righe_pie)):
+                    fig.text(0.5, 0.012 + 0.042 * n_riga, testo, ha="center",
+                             fontsize=8.5,
+                             color=("#d62728" if (dep_q["persi"] and n_riga == 0
+                                                  and len(righe_pie) > 1) else "#555"))
+                rect_finale = (0, 0.09 + 0.040 * len(righe_pie), 1, 1)
 
         else:   # amplitudes
             # Cumulato su tutta la run, come lo spettro di carica: gli eventi
@@ -1177,7 +1190,7 @@ class Monitor:
             dep_a = self.accumula("ampiezze", q, channels, self.gen)
 
             fig, axes = plt.subplots(1, len(channels),
-                                     figsize=(4.8 * k * len(channels), 3.0 * k),
+                                     figsize=(4.8 * k * len(channels), 3.1 * k),
                                      squeeze=False)
             for i, ch in enumerate(channels):
                 ax = axes[0][i]
@@ -1297,7 +1310,7 @@ class Monitor:
                             % (sopra, etichetta, taglio * mv_off),
                             transform=ax.transAxes, ha="center", va="bottom",
                             fontsize=9, color="#1a6b1a" if e_soglia else "#d62728")
-                    if not dentro:
+                    if not dentro and dettagli:
                         ax.text(0.01, 0.97, "cut out of range", transform=ax.transAxes,
                                 ha="left", va="top", fontsize=8, color="#888")
 
@@ -1315,9 +1328,10 @@ class Monitor:
                 # l'avvertimento sulla calibrazione.
                 nota_cal = ("" if self.attenuazione_misurata()
                             else "  \u2014  NOT CALIBRATED here")
-                ax.set_xlabel("amplitude [offset units]\n"
-                              "1 offset = %.2f mV, pulses ~1.8 ns%s"
-                              % (mv_off, nota_cal), fontsize=8.5)
+                ax.set_xlabel("amplitude [offset units]" +
+                              ("\n1 offset = %.2f mV, pulses ~1.8 ns%s"
+                               % (mv_off, nota_cal) if dettagli else ""),
+                              fontsize=8.5)
                 ax.set_ylabel("events" + (" (log)" if logy else ""))
                 ax.set_title(f"ch{ch}", fontsize=10, pad=18)
                 ax.grid(alpha=0.25)
@@ -1427,6 +1441,9 @@ PAGE = """<!DOCTYPE html>
   <label>threshold [offset]<input id="qcut" value="" placeholder="whole spectrum" style="width:110px"></label>
   <label>plot size<select id="scala" style="font:13px inherit;padding:5px 7px">
     <option>S</option><option selected>M</option><option>L</option></select></label>
+  <label class="chk" title="gate, baseline window, calibration, noise floor and the
+set-up warnings. Off during a run, on when you need to know with which numbers a plot was made.">
+    <input type="checkbox" id="det"> details</label>
   <button id="reset">Autoscale</button>
   <button id="azzera" title="discards the events already acquired and starts from now">Reset data</button>
   <span class="hint">x/y limits are the waveform zoom only &middot;
@@ -1576,6 +1593,11 @@ function aggiornaFinestre() {
 
 function params() {
   const p = new URLSearchParams();
+  // Fuori da FIELDS perche' e' una casella di spunta: FIELDS legge .value, e
+  // su una checkbox .value e' sempre "on".
+  const det = document.getElementById('det').checked;
+  try { localStorage.setItem('daqmon.det', det ? '1' : '0'); } catch (e) {}
+  p.set('det', det ? '1' : '0');
   for (const f of FIELDS) {
     const v = document.getElementById(f).value.trim();
     try { localStorage.setItem('daqmon.' + f, v); } catch (e) {}
@@ -1691,6 +1713,12 @@ async function tick() {
     document.getElementById('err').textContent = '';
   }
 }
+try {
+  if (localStorage.getItem('daqmon.det') === '1')
+    document.getElementById('det').checked = true;
+} catch (e) {}
+document.getElementById('det').addEventListener('change', tick);
+
 tick(); setInterval(tick, REFRESH);
 </script></body></html>"""
 
@@ -1866,7 +1894,8 @@ def make_handler(monitor, refresh, defaults):
                                                      self._num(qs, "bw", defaults["bw"]),
                                                      self._num(qs, "qcut", defaults["qcut"]),
                                                      qset, gate,
-                                                     qs.get("scala", ["M"])[0]))
+                                                     qs.get("scala", ["M"])[0],
+                                                     qs.get("det", ["0"])[0] == "1"))
 
             self._send(404, "text/plain", b"not found")
 

@@ -1553,7 +1553,7 @@ function apriFinestra(id, titolo) {
     "font:12px system-ui,sans-serif}" +
     "img{max-width:100%;display:block}" +
     "p{margin:6px 10px}</style></head><body>" +
-    "<img id=p src='" + img.src + "'>" +
+    "<img src='" + img.src + "'>" +
     "<p>" + titolo + " &middot; aggiornato dalla pagina principale: se la chiudi, questa si ferma.</p>" +
     "</body></html>");
   w.document.close();
@@ -1565,7 +1565,10 @@ function aggiornaFinestre() {
     const f = finestre[i];
     if (f.w.closed) { finestre.splice(i, 1); continue; }
     try {
-      const dentro = f.w.document.getElementById("p");
+      // images[0] e non getElementById: l'elemento sta nella finestra
+      // FIGLIA, e un getElementById qui dentro fa credere a check_page.py che
+      // questa pagina abbia un id che non ha.
+      const dentro = f.w.document.images[0];
       if (dentro) dentro.src = document.getElementById(f.id).src;
     } catch (e) { finestre.splice(i, 1); }
   }

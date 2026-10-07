@@ -25,8 +25,38 @@ sta solo sul Mac). Stima: ~1446 px -> ~811 px di altezza, -44%.
 Varianti offerte e non ancora decise: sciogliere *Current run* dentro la barra
 in alto; riquadri richiudibili con lo stato ricordato nel browser.
 
-## Restyling del monitor — PROPOSTO, da approvare
+## Restyling del monitor — APPROVATO, in attesa
 
-Vedi la proposta del 2026-10-07. In sintesi: ridurre la panoramica e la media,
-affiancare i due spettri, ingrandire le forme d'onda, aggiungere una scala
-S/M/L e i grafici in finestra separata.
+Approvato il 2026-10-07, con la riserva esplicita che va verificato sul campo:
+le proporzioni si giudicano sullo schermo vero, non su un mockup.
+
+Mockup del prima/dopo: `proposta-layout-monitor.png` (ignorato da git).
+Le dimensioni di "ora" sono MISURATE scaricando le immagini dal monitor in
+esecuzione, con un canale acquisito.
+
+```
+                        ora            proposta
+panoramica          900 x 250        450 x 170
+waveforms           900 x 290       1100 x 330   <- l'unica che cresce
+average             900 x 400        700 x 250
+amplitude spectrum  500 x 340        480 x 300   affiancati
+charge spectrum     500 x 430        480 x 340
+                      1804 px         1165 px    -35%
+```
+
+1. Panoramica e media piu' basse, i due spettri affiancati.
+2. Forme d'onda piu' GRANDI, e in larghezza: l'asse dei tempi e' quello che
+   si legge.
+3. Scala S / M / L che moltiplica tutte le figure, cosi' la dimensione giusta
+   la sceglie chi guarda invece di indovinarla nel codice.
+4. Un `↗` per grafico che lo apre in una finestra separata che continua ad
+   aggiornarsi: serve il secondo schermo in laboratorio. Ogni grafico e' gia'
+   una URL sua, serve una rotta nuova e poche righe.
+
+Non serve: scegliere i canali da plottare c'e' gia', e' la casella `channels`
+(accetta `8,9,12-15`) e limita anche la lettura dal file, non solo il disegno.
+La panoramica apposta non la rispetta: serve a vedere quali canali sono vivi.
+Da decidere se farla seguire comunque.
+
+Riavviare il monitor NON tocca la presa dati: si fa da *Stop monitor* /
+*Start monitor* nella pagina di controllo.

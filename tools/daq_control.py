@@ -1644,6 +1644,8 @@ PAGINA = r"""<!doctype html>
   </div>
   <pre id="scanlog" style="margin-top:12px;display:none"></pre>
 </div>
+
+<div class="box"><h2>DAQ log</h2><pre id="log"></pre></div>
   </div>
 </div>
 
@@ -1676,10 +1678,7 @@ PAGINA = r"""<!doctype html>
   <img id="gimg" style="margin-top:10px;max-width:100%;border:1px solid #e2e2de;border-radius:6px;display:none">
 </div>
 
-<div class="riga" style="margin-top:12px">
-  <div class="box" style="flex:1 1 440px"><h2>DAQ log</h2><pre id="log"></pre></div>
-  <div class="box" style="flex:1 1 360px"><h2>Recent actions</h2><div id="azioni" class="az"></div></div>
-</div>
+<div class="box" style="margin-top:12px"><h2>Recent actions</h2><div id="azioni" class="az"></div></div>
 <p style="color:#6b6a65;font-size:12px">Plots and DQM are in the monitor, linked at the top of this page.</p>
 
 <script>

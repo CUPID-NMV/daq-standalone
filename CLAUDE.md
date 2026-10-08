@@ -133,7 +133,7 @@ aggiorna. Le chiavi nuove vanno aggiunte lì a parte, con un backup, dicendolo.
 | `tools/run_check.py` | riepilogo di una run: ampiezza, larghezza, purezza, rumore, deriva, rate |
 | `tools/noise_scan.py` | scan in soglia a run in corso; scrive i confini in eventi di ogni passo |
 | `tools/live_monitor.py` | monitor HTTP; `-b 0.0.0.0` per evitare inoltri di porta |
-| `tools/check_page.py` | verifica che ogni `getElementById` abbia il suo elemento |
+| `tools/check_page.py` | sulla pagina viva: ogni `getElementById` ha il suo elemento, ogni funzione chiamata e' definita, il JS compila |
 | `tools/probe_link.py` | determina i parametri di apertura di un collegamento |
 | `tools/daqio.py` | I/O condiviso; `channels=` legge solo alcuni canali |
 | `tools/daq_control.py` | pagina di controllo (8766): configurazione, run, coda, scan |

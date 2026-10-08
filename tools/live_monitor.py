@@ -1813,6 +1813,177 @@ document.getElementById('atutti').onclick = () => {
   tick();
 };
 
+// Finestre separate, una per grafico. Non hanno uno script loro: e' questa
+// pagina che, a ogni giro, gli riscrive la src dell'immagine. Cosi' non serve
+// una rotta nuova sul server, e una finestra rimasta aperta mentre la pagina
+// madre e' chiusa smette semplicemente di aggiornarsi invece di mostrare dati
+// vecchi fingendo di essere viva.
+const finestre = [];
+
+// Cosa mostra il dettaglio di un canale. Quello delle forme d'onda porta DUE
+// grafici: l'ultimo evento e la media dello stesso canale, affiancati -- sono
+// due domande diverse e si leggono bene vicine.
+function sorgentiDi(muro) {
+  return {
+    wf:  [["waveforms", "last event"], ["average", "average"]],
+    amp: [["amplitudes", "amplitude spectrum"]],
+    car: [["integrals", "charge spectrum"]],
+  }[muro];
+}
+
+function nomeDi(muro, ch) {
+  return "ch" + ch + " \u00b7 " + (muro === "wf" ? "waveform" :
+         muro === "amp" ? "amplitude" : "charge");
+}
+
+// La lente: il dettaglio sopra la pagina. E' questa l'azione del clic, perche'
+// funziona sempre -- anche con Safari a schermo intero, dove una finestra
+// nuova finisce a tutto schermo e non c'e' modo di impedirlo da qui.
+let lente = null;
+
+function apriLente(muro, ch) {
+  lente = {muro: muro, ch: ch, sorgenti: sorgentiDi(muro)};
+  document.getElementById("lentetit").textContent = nomeDi(muro, ch);
+  document.getElementById("lenteimg").innerHTML =
+    lente.sorgenti.map(() => "<img>").join("");
+  document.getElementById("lente").classList.add("apri");
+  aggiornaLente();
+}
+
+function chiudiLente() {
+  lente = null;
+  document.getElementById("lente").classList.remove("apri");
+}
+
+function aggiornaLente() {
+  if (!lente) return;
+  const q = new URLSearchParams(params());
+  q.set("solo", lente.ch);
+  q.set("t", Date.now());
+  const imgs = document.getElementById("lenteimg").getElementsByTagName("img");
+  lente.sorgenti.forEach((sg, k) => {
+    if (imgs[k]) imgs[k].src = sg[0] + ".png?" + q.toString();
+  });
+}
+
+document.getElementById("lentechiudi").onclick = chiudiLente;
+document.getElementById("lente").onclick = ev => {
+  if (ev.target.id === "lente") chiudiLente();
+};
+document.addEventListener("keydown", ev => {
+  if (ev.key === "Escape") chiudiLente();
+});
+document.getElementById("lenteapri").onclick = () => {
+  if (lente) { const l = lente; chiudiLente(); apriCanale(l.muro, l.ch); }
+};
+
+function apriCanale(muro, ch) {
+  const sorgenti = sorgentiDi(muro);
+  const nome = nomeDi(muro, ch);
+  const w = window.open("", "daqmon_" + muro + "_" + ch,
+                        "width=" + (sorgenti.length > 1 ? 1040 : 560) + ",height=420,scrollbars=yes");
+  if (!w) { setAlert("The browser blocked the pop-up window. Allow pop-ups for this page."); return; }
+  w.document.open();
+  w.document.write(
+    "<!DOCTYPE html><html><head><meta charset=utf-8><title>" + nome + "</title>" +
+    "<style>html,body{margin:0;background:#16181d;color:#999;" +
+    "font:12px system-ui,sans-serif}" +
+    "div{display:flex;gap:6px;align-items:flex-start}" +
+    "img{max-width:100%;display:block}p{margin:6px 10px}</style></head><body><div>" +
+    sorgenti.map(() => "<img>").join("") +
+    "</div><p>" + nome + " &middot; aggiornata dalla pagina principale</p></body></html>");
+  w.document.close();
+  finestre.push({w: w, muro: muro, ch: ch, sorgenti: sorgenti, dim: false});
+  aggiornaFinestre();
+}
+
+function apriFinestra(id, titolo) {
+  const img = document.getElementById(id);
+  const w = window.open("", "daqmon_" + id, "width=1020,height=620,scrollbars=yes");
+  if (!w) { setAlert("The browser blocked the pop-up window. Allow pop-ups for this page."); return; }
+  w.document.open();
+  w.document.write(
+    "<!DOCTYPE html><html><head><meta charset=utf-8><title>" + titolo + "</title>" +
+    "<style>html,body{margin:0;background:#16181d;color:#999;" +
+    "font:12px system-ui,sans-serif}" +
+    "img{max-width:100%;display:block}" +
+    "p{margin:6px 10px}</style></head><body>" +
+    "<img src='" + img.src + "'>" +
+    "<p>" + titolo + " &middot; aggiornato dalla pagina principale: se la chiudi, questa si ferma.</p>" +
+    "</body></html>");
+  w.document.close();
+  finestre.push({w: w, id: id, dim: false});
+}
+
+function aggiornaFinestre() {
+  const p = params();
+  for (let i = finestre.length - 1; i >= 0; i--) {
+    const f = finestre[i];
+    if (f.w.closed) { finestre.splice(i, 1); continue; }
+    try {
+      // images[] e non getElementById: gli elementi stanno nella finestra
+      // FIGLIA, e un getElementById qui dentro fa credere a check_page.py che
+      // questa pagina abbia un id che non ha.
+      const dentro = f.w.document.images;
+      if (f.sorgenti) {
+        // finestra di un canale: si chiedono le immagini con "solo", che
+        // disegna quel canale senza toccare i canali LETTI, che sono
+        // condivisi con chi guarda la stessa pagina da un'altra macchina
+        const q = new URLSearchParams(p);
+        q.set("solo", f.ch);
+        q.set("t", Date.now());
+        f.sorgenti.forEach((sg, k) => {
+          if (dentro[k]) dentro[k].src = sg[0] + ".png?" + q.toString();
+        });
+        // La finestra si ridimensiona sulla misura VERA delle immagini, una
+        // volta sola. Le width/height passate a window.open sono un
+        // suggerimento che Safari ignora: si apriva grande quanto lo schermo
+        // con dentro un grafico da 330 px in un angolo.
+        if (!f.dim && dentro.length &&
+            Array.prototype.every.call(dentro, im => im.naturalWidth > 0)) {
+          let lw = 0, lh = 0;
+          Array.prototype.forEach.call(dentro, im => {
+            lw += im.naturalWidth + 8;
+            lh = Math.max(lh, im.naturalHeight);
+          });
+          const bx = Math.max(0, f.w.outerWidth - f.w.innerWidth);
+          const by = Math.max(0, f.w.outerHeight - f.w.innerHeight);
+          try { f.w.resizeTo(lw + bx + 16, lh + by + 54); } catch (e) {}
+          f.dim = true;
+        }
+      } else if (dentro[0]) {
+        dentro[0].src = document.getElementById(f.id).src;
+        if (!f.dim && dentro[0].naturalWidth > 0) {
+          const bx = Math.max(0, f.w.outerWidth - f.w.innerWidth);
+          const by = Math.max(0, f.w.outerHeight - f.w.innerHeight);
+          try {
+            f.w.resizeTo(dentro[0].naturalWidth + bx + 16,
+                         dentro[0].naturalHeight + by + 54);
+          } catch (e) {}
+          f.dim = true;
+        }
+      }
+    } catch (e) { finestre.splice(i, 1); }
+  }
+}
+
+// Le zone cliccabili sopra i muri: posizioni e canali arrivano da stats.json,
+// calcolati dallo stesso codice che disegna le celle.
+function costruisciCelle(muro) {
+  if (!muro || !muro.celle) return;
+  const firma = muro.celle.map(c => c.ch).join(",") + "|" + muro.ncol;
+  document.querySelectorAll(".celle").forEach(box => {
+    if (box.dataset.firma === firma) return;
+    box.dataset.firma = firma;
+    box.innerHTML = muro.celle.map(c =>
+      `<a title="ch${c.ch}" data-ch="${c.ch}" style="left:${c.x * 100}%;` +
+      `bottom:${c.y * 100}%;width:${c.w * 100}%;height:${c.h * 100}%"></a>`).join("");
+    box.querySelectorAll("a").forEach(a => {
+      a.onclick = () => apriLente(box.dataset.muro, a.dataset.ch);
+    });
+  });
+}
+
 function params() {
   const p = new URLSearchParams();
   // Fuori da FIELDS perche' e' una casella di spunta: FIELDS legge .value, e
@@ -1856,12 +2027,18 @@ function show(id, v) {
   document.getElementById(id).textContent = (v === null || v === undefined) ? '-' : v;
 }
 async function tick() {
+  // Vero appena i dati sono arrivati: serve a distinguere una rete caduta da
+  // un errore di QUESTA pagina. Un richiamo a una funzione inesistente finiva
+  // nello stesso catch e si annunciava come "server unreachable", mandando a
+  // cercare il guasto sulla macchina DAQ invece che nel codice.
+  let arrivati = false;
   try {
     const r = await fetch('stats.json?det=' +
                           (document.getElementById('det').checked ? '1' : '0'),
                           {cache:'no-store'});
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const s = await r.json();
+    arrivati = true;
     lastOk = new Date();
 
     // Un file che non cresce non e' una run in corso. Quando una run finisce
@@ -1923,7 +2100,11 @@ async function tick() {
     // Le immagini restano quelle di prima: senza un avviso vistoso la pagina
     // sembrerebbe viva mentre mostra dati fermi.
     const why = (e && e.message) ? e.message : String(e);
-    const msg = lastOk
+    const msg = arrivati
+      ? `Monitor page error (${why}). The data arrived, the page failed to `
+        + `display them: this is a bug in the monitor, not a DAQ fault. `
+        + `The numbers above are from ${lastOk.toLocaleTimeString()}.`
+      : lastOk
       ? `Server unreachable (${why}). Data frozen at the last successful `
         + `update: ${lastOk.toLocaleTimeString()}, `
         + `${Math.round((Date.now() - lastOk.getTime()) / 1000)} s ago. `

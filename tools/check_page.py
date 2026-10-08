@@ -81,3 +81,56 @@ if esito.returncode != 0:
     print(esito.stderr.strip()[:800])
     sys.exit(1)
 print("OK: il JavaScript e' sintatticamente valido.")
+
+def senza_testo(js):
+    """Il JS senza commenti e senza stringhe.
+
+    Senza questo, una parola seguita da una parentesi dentro un commento
+    italiano -- "puo' essere inaccessibile (finestra privata)" -- passa per una
+    chiamata a funzione e il controllo si riempie di falsi allarmi.
+    """
+    out, i, n = [], 0, len(js)
+    while i < n:
+        c = js[i]
+        if c == "/" and i + 1 < n and js[i + 1] == "/":
+            i = js.find("\n", i)
+            if i < 0:
+                break
+        elif c == "/" and i + 1 < n and js[i + 1] == "*":
+            i = js.find("*/", i)
+            i = n if i < 0 else i + 2
+        elif c in "\"'`":
+            i += 1
+            while i < n and js[i] != c:
+                i += 2 if js[i] == "\\" else 1
+            i += 1
+            out.append('""')     # al posto della stringa, qualcosa di inerte
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+# --- funzioni chiamate ma mai definite -------------------------------------
+# node --check non se ne accorge: una funzione inesistente e' un errore solo
+# quando la riga viene eseguita. Succede a meta' del giro di aggiornamento,
+# con le immagini gia' rinfrescate, quindi la pagina sembra viva e si limita a
+# mostrare l'avviso del catch. E' costato un pomeriggio: il blocco della lente
+# era sparito riscrivendo i controlli per canale, e la pagina accusava la rete.
+definite = set(re.findall(r"function\s+([A-Za-z_$][\w$]*)", script))
+definite |= set(re.findall(r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=", script))
+# Un nome preceduto da punto e' un metodo di qualcun altro, non roba nostra.
+chiamate = set(re.findall(r"(?<![.\w$])([a-z][A-Za-z0-9_$]*)\s*\(",
+                          senza_testo(script)))
+GLOBALI = {"if", "for", "while", "switch", "catch", "return", "function",
+           "typeof", "new", "await", "async", "fetch", "parseInt",
+           "parseFloat", "isNaN", "setInterval", "setTimeout", "alert",
+           "confirm", "encodeURIComponent", "decodeURIComponent", "require"}
+ignote = sorted(chiamate - definite - GLOBALI)
+print(f"funzioni definite : {len(definite)}")
+if ignote:
+    print("\nERRORE: il JS chiama funzioni che non definisce:")
+    for f in ignote:
+        print("  -", f)
+    sys.exit(1)
+print("OK: ogni funzione chiamata e' definita.")

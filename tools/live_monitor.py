@@ -756,38 +756,34 @@ class Monitor:
         if ov is None:
             return self._placeholder()
         righe = ov["canali"]
-        x = np.arange(len(righe))
-        etich = [r["ch"] for r in righe]
-        gruppi = [r["gruppo"] for r in righe]
         mv = self.mv_per_count()
-
-        # La larghezza cresce coi canali ma si ferma: a 200 canali una
-        # figura proporzionale sarebbe da seimila pixel, scomoda da
-        # guardare e pesante da rigenerare ogni cinque secondi.
-        larg = min(20.0, max(7.0, 0.22 * len(righe) + 3))
         k = self.SCALE.get(str(scala).upper(), 1.0)
 
-        # Con pochi canali questi tre pannelli sono quasi vuoti e rubavano
-        # mezzo schermo in cima alla pagina: la panoramica risponde a "quali
-        # canali sono vivi", che e' una domanda da un'occhiata, non da
-        # studiare. Sotto gli otto canali si stringe; sopra torna alta, perche'
-        # li' le barre da confrontare sono tante.
-        stretta = len(righe) <= 8
-        fig, axes = plt.subplots(3, 1, sharex=True, figsize=(
-            (larg * 0.55 if stretta else larg) * k,
-            (3.2 if stretta else 5.0) * k))
-        # Con pochi canali le barre a larghezza piena sembrano blocchi.
-        wbar = 0.8 if len(righe) > 8 else 0.35
-        # Bande alternate per gruppo del V1742: con molti canali si perde
-        # subito il conto di dove finisce uno e comincia l'altro.
-        for g in sorted(set(gruppi)):
-            idx = [k for k, gg in enumerate(gruppi) if gg == g]
+        # L'asse x porta SEMPRE tutti i canali della board, non solo quelli
+        # registrati. E' una vista sinottica: serve a dire in un colpo d'occhio
+        # quali canali sono vivi, e per farlo il posto di ogni canale deve
+        # restare lo stesso fra una run e l'altra. Con le sole barre presenti,
+        # registrandone uno il grafico mostrava una barra al centro e basta,
+        # e non si sapeva nemmeno quale fosse senza leggere l'etichetta.
+        x = [int(r["ch"]) for r in righe]
+
+        larg = 0.28 * N_CANALI_HW + 2.6
+        # Bassi: tre strisce da leggere a colpo d'occhio, non tre grafici da
+        # studiare.
+        fig, axes = plt.subplots(3, 1, sharex=True,
+                                 figsize=(larg * k, 2.9 * k))
+        wbar = 0.72
+
+        # Bande alternate per gruppo del V1742: sono quattro da otto canali, e
+        # con l'asse sempre completo si vedono tutte, anche quelle senza barre.
+        for g in range(N_CANALI_HW // 8):
+            a, b = g * 8 - 0.5, g * 8 + 7.5
             if g % 2 == 0:
                 for ax in axes:
-                    ax.axvspan(idx[0] - .5, idx[-1] + .5, color="#000", alpha=.04)
-            axes[0].annotate("gr%d" % g, xy=((idx[0] + idx[-1]) / 2, 1.02),
+                    ax.axvspan(a, b, color="#000", alpha=.04)
+            axes[0].annotate("gr%d" % g, xy=((a + b) / 2, 1.04),
                              xycoords=("data", "axes fraction"),
-                             ha="center", fontsize=8, color="#666")
+                             ha="center", fontsize=7.5, color="#888")
 
         # Il rate per canale non si misura: si ricava dall'occupazione
         # moltiplicata per il rate totale, perche' il trigger e' l'OR dei
@@ -797,24 +793,23 @@ class Monitor:
         if rtot:
             axes[0].bar(x, [r["occupazione"] * rtot for r in righe],
                         width=wbar, color="#1f77b4")
-            axes[0].set_ylabel("rate [Hz]\nabove 8 rms")
+            axes[0].set_ylabel("rate [Hz]")
         else:
             axes[0].bar(x, [100 * r["occupazione"] for r in righe],
                         width=wbar, color="#1f77b4")
-            axes[0].set_ylabel("occupancy [%]\nabove 8 rms")
+            axes[0].set_ylabel("occupancy [%]")
             axes[0].set_ylim(0, 105)
 
         # Dove il taglio non lo passa nessuno si disegna l'ampiezza mediana di
         # TUTTI gli eventi, tratteggiata: dice "c'e' qualcosa, ma sotto il
-        # taglio", che e' un'informazione diversa da "non c'e' niente" e che
-        # prima andava persa.
+        # taglio", che e' un'informazione diversa da "non c'e' niente".
         sotto = [r["ampiezza"] == 0.0 for r in righe]
-        alt = [abs(r["ampiezza"] if not giu else r["ampiezza_tutti"]) * mv
+        alt = [abs(r["ampiezza"] if giu is False else r["ampiezza_tutti"]) * mv
                for r, giu in zip(righe, sotto)]
-        axes[1].bar([k for k, g in enumerate(sotto) if not g],
+        axes[1].bar([c for c, g in zip(x, sotto) if not g],
                     [v for v, g in zip(alt, sotto) if not g],
                     width=wbar, color="#2ca02c")
-        axes[1].bar([k for k, g in enumerate(sotto) if g],
+        axes[1].bar([c for c, g in zip(x, sotto) if g],
                     [v for v, g in zip(alt, sotto) if g],
                     width=wbar, color="white", edgecolor="#2ca02c",
                     hatch="///", linewidth=1.0)
@@ -824,8 +819,6 @@ class Monitor:
         axes[2].set_ylabel("noise [mV]")
         axes[2].set_xlabel("channel")
 
-        # Sotto la figura, non dentro il pannello: con un canale solo la barra
-        # occupa il centro e la scritta ci finiva sopra.
         nota_sotto = any(sotto) and dettagli
         if nota_sotto:
             fig.text(0.5, 0.008,
@@ -836,13 +829,15 @@ class Monitor:
             ax.grid(alpha=.25, axis="y")
             ax.tick_params(labelsize=7)
             ax.yaxis.label.set_size(8)
-        # Con molti canali le etichette si diradano invece di sovrapporsi.
-        passo = 1 if len(righe) <= 40 else (2 if len(righe) <= 80 else 8)
-        axes[2].set_xticks(x[::passo])
-        axes[2].set_xticklabels(etich[::passo], fontsize=6.5,
-                                rotation=90 if len(righe) > 24 else 0)
-        fig.suptitle("Overview of %d channels  (last %d events)"
-                     % (len(righe), ov["eventi"]), fontsize=10)
+            ax.set_xlim(-0.8, N_CANALI_HW - 0.2)
+        axes[2].set_xticks(range(N_CANALI_HW))
+        axes[2].set_xticklabels([str(c) for c in range(N_CANALI_HW)], fontsize=6)
+
+        # Il taglio sta nel titolo e non sull'asse y: due righe di etichetta si
+        # accavallavano con quella del pannello sotto.
+        fig.suptitle("Overview \u00b7 %d of %d channels recorded \u00b7 "
+                     "last %d events \u00b7 bars above 8 rms"
+                     % (len(righe), N_CANALI_HW, ov["eventi"]), fontsize=9.5)
 
         fig.tight_layout(rect=(0, 0.035, 1, 1) if nota_sotto else None)
         buf = io.BytesIO()
@@ -1733,6 +1728,12 @@ document.getElementById('det').addEventListener('change', tick);
 
 tick(); setInterval(tick, REFRESH);
 </script></body></html>"""
+
+
+# Canali della board. Il V1742 ne ha 32, quattro gruppi da otto: l'asse della
+# panoramica li porta tutti, sempre, perche' il posto di un canale non deve
+# dipendere da quanti se ne registrano quel giorno.
+N_CANALI_HW = 32
 
 
 def _bin(valore):

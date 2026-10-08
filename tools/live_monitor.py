@@ -773,6 +773,11 @@ class Monitor:
         fig, axes = plt.subplots(3, 1, sharex=True,
                                  figsize=(larg * k, 2.9 * k))
         wbar = 0.72
+        # Le etichette vanno ORIZZONTALI sopra ogni striscia, non ruotate a
+        # sinistra: una striscia alta un pollice scarso e' piu' bassa della
+        # parola "amplitude [mV]" scritta in verticale, e l'etichetta di un
+        # pannello finiva addosso a quella di sotto.
+        etichette = ["", "", ""]
 
         # Bande alternate per gruppo del V1742: sono quattro da otto canali, e
         # con l'asse sempre completo si vedono tutte, anche quelle senza barre.
@@ -781,7 +786,7 @@ class Monitor:
             if g % 2 == 0:
                 for ax in axes:
                     ax.axvspan(a, b, color="#000", alpha=.04)
-            axes[0].annotate("gr%d" % g, xy=((a + b) / 2, 1.04),
+            axes[0].annotate("gr%d" % g, xy=((a + b) / 2, 1.06),
                              xycoords=("data", "axes fraction"),
                              ha="center", fontsize=7.5, color="#888")
 
@@ -793,11 +798,11 @@ class Monitor:
         if rtot:
             axes[0].bar(x, [r["occupazione"] * rtot for r in righe],
                         width=wbar, color="#1f77b4")
-            axes[0].set_ylabel("rate [Hz]")
+            etichette[0] = "rate [Hz]"
         else:
             axes[0].bar(x, [100 * r["occupazione"] for r in righe],
                         width=wbar, color="#1f77b4")
-            axes[0].set_ylabel("occupancy [%]")
+            etichette[0] = "occupancy [%]"
             axes[0].set_ylim(0, 105)
 
         # Dove il taglio non lo passa nessuno si disegna l'ampiezza mediana di
@@ -813,10 +818,10 @@ class Monitor:
                     [v for v, g in zip(alt, sotto) if g],
                     width=wbar, color="white", edgecolor="#2ca02c",
                     hatch="///", linewidth=1.0)
-        axes[1].set_ylabel("amplitude [mV]")
+        etichette[1] = "amplitude [mV]"
 
         axes[2].bar(x, [r["rms"] * mv for r in righe], width=wbar, color="#d62728")
-        axes[2].set_ylabel("noise [mV]")
+        etichette[2] = "noise [mV]"
         axes[2].set_xlabel("channel")
 
         nota_sotto = any(sotto) and dettagli
@@ -825,14 +830,12 @@ class Monitor:
                      "hatched: no event above the cut \u2014 median amplitude over all events",
                      ha="center", fontsize=8, color="#2ca02c")
 
-        for ax in axes:
+        for i_ax, ax in enumerate(axes):
             ax.grid(alpha=.25, axis="y")
             ax.tick_params(labelsize=7)
-            # 7 e non 8: con tre pannelli dentro 2.9 pollici l'etichetta di
-            # uno arrivava a toccare quella di sotto.
-            ax.yaxis.label.set_size(7)
-            ax.yaxis.labelpad = 2
             ax.set_xlim(-0.8, N_CANALI_HW - 0.2)
+            ax.set_title(etichette[i_ax], loc="left", fontsize=7.5,
+                         color="#52514e", pad=3)
         axes[2].set_xticks(range(N_CANALI_HW))
         axes[2].set_xticklabels([str(c) for c in range(N_CANALI_HW)], fontsize=6)
 

@@ -1085,7 +1085,12 @@ class Monitor:
                 if (bw and not self.self_trigger_attivo() and dettagli) else None))
 
         elif kind == "average":
-            fig, ax = plt.subplots(figsize=(LARG_PX * k / DPI_FIG, 2.5 * k))
+            # Nella finestra di un canale la media sta accanto alla forma
+            # d'onda, e due riquadri affiancati di altezza diversa si vedono
+            # subito: li' usa la stessa altezza della forma d'onda. Sulla
+            # pagina resta bassa, dove serve compatta e sta da sola.
+            alt = 3.3 if solo is not None else 2.5
+            fig, ax = plt.subplots(figsize=(LARG_PX * k / DPI_FIG, alt * k))
             for i, ch in zip(idx_dis, canali_dis):
                 line, = ax.plot(t_ns, corr[:, i].mean(axis=0), lw=1.4, label=f"ch{ch}")
 

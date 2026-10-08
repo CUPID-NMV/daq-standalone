@@ -1630,7 +1630,28 @@ set-up warnings. Off during a run, on when you need to know with which numbers a
   <span class="hint">x/y limits are the waveform zoom only &middot;
     baseline and charge gate are independent of it</span>
 </div>
-<div id="hctl"></div>
+<!-- Un solo gruppo di controlli, non uno per canale: con 32 canali erano 64
+     righe di caselle. Il canale si sceglie dalla tendina e le modifiche
+     valgono per quello; i valori degli altri restano, in memoria e nel
+     browser, e vengono mandati tutti a ogni giro. -->
+<div class="ctl">
+  <span class="grp">per channel</span>
+  <label>channel<select id="chsel" style="font:13px inherit;padding:5px 7px"></select></label>
+  <label>amplitude x min [offset]<input id="hxmin" placeholder="auto"></label>
+  <label>amplitude x max [offset]<input id="hxmax" placeholder="auto"></label>
+  <label>bins<input id="hbin" placeholder="auto" style="width:60px"></label>
+  <label class="chk"><input type="checkbox" id="hlog"> log y</label>
+  <button id="hreset">Autoscale</button>
+</div>
+<div class="ctl">
+  <span class="grp"></span>
+  <label>charge x min [pC]<input id="qxmin" placeholder="auto"></label>
+  <label>charge x max [pC]<input id="qxmax" placeholder="auto"></label>
+  <label>bins<input id="qbin" placeholder="auto" style="width:60px"></label>
+  <label class="chk"><input type="checkbox" id="qlog"> log y</label>
+  <button id="qreset">Autoscale</button>
+  <button id="atutti" title="copy what you see here to every recorded channel">apply to all</button>
+</div>
 <table id="tab"><thead><tr><th>channel</th><th>baseline</th><th>rms</th>
 <th>mean amplitude</th><th>median</th><th>median [mV]</th><th>max</th><th>offset</th><th>threshold</th>
 <th>min amp. [mV]</th><th>min amp. [ADC]</th></tr></thead><tbody></tbody></table>
@@ -1696,230 +1717,89 @@ let builtChannels = null;
 function store(k, v) { try { localStorage.setItem('daqmon.' + k, v); } catch (e) {} }
 function recall(k)   { try { return localStorage.getItem('daqmon.' + k); } catch (e) { return null; } }
 
+// --- controlli per canale -------------------------------------------------
+// I valori stanno in memoria per TUTTI i canali; le caselle ne mostrano uno
+// solo, quello scelto nella tendina. A ogni giro si mandano al server quelli
+// di tutti, come prima: cambia come si scrivono, non cosa arriva.
+const CAMPI_CH = ['hxmin', 'hxmax', 'hbin', 'qxmin', 'qxmax', 'qbin'];
+const FLAG_CH = ['hlog', 'qlog'];
+let valCh = {};              // {ch: {hxmin: "...", hlog: true, ...}}
+
+function vuotoCh() {
+  const v = {};
+  CAMPI_CH.forEach(k => v[k] = '');
+  FLAG_CH.forEach(k => v[k] = false);
+  return v;
+}
+
+function caricaCh(ch) {
+  const v = vuotoCh();
+  CAMPI_CH.forEach(k => { const x = recall(k + '_' + ch); if (x !== null) v[k] = x; });
+  FLAG_CH.forEach(k => { const x = recall(k + '_' + ch); if (x !== null) v[k] = (x === '1'); });
+  return v;
+}
+
+function salvaCh(ch) {
+  const v = valCh[ch]; if (!v) return;
+  CAMPI_CH.forEach(k => store(k + '_' + ch, v[k]));
+  FLAG_CH.forEach(k => store(k + '_' + ch, v[k] ? '1' : '0'));
+}
+
+function mostraCh() {
+  const ch = document.getElementById('chsel').value;
+  const v = valCh[ch] || vuotoCh();
+  CAMPI_CH.forEach(k => document.getElementById(k).value = v[k]);
+  FLAG_CH.forEach(k => document.getElementById(k).checked = v[k]);
+}
+
+function leggiCh() {
+  const ch = document.getElementById('chsel').value;
+  if (!(ch in valCh)) valCh[ch] = vuotoCh();
+  CAMPI_CH.forEach(k => valCh[ch][k] = document.getElementById(k).value.trim());
+  FLAG_CH.forEach(k => valCh[ch][k] = document.getElementById(k).checked);
+  salvaCh(ch);
+}
+
 function buildHistControls(channels) {
   const key = channels.join(',');
   if (key === builtChannels) return;
   builtChannels = key;
-
-  document.getElementById('hctl').innerHTML = channels.map(ch => `
-    <div class="ctl">
-      <span class="grp">ch${ch}</span>
-      <label>amplitude x min [offset]<input id="hxmin_${ch}" placeholder="auto"></label>
-      <label>amplitude x max [offset]<input id="hxmax_${ch}" placeholder="auto"></label>
-      <label>bins<input id="hbin_${ch}" placeholder="auto" style="width:60px"></label>
-      <label class="chk"><input type="checkbox" id="hlog_${ch}"> log y</label>
-      <button class="hreset" data-ch="${ch}">Autoscale</button>
-    </div>
-    <div class="ctl">
-      <span class="grp">ch${ch}</span>
-      <label>charge x min [pC]<input id="qxmin_${ch}" placeholder="auto"></label>
-      <label>charge x max [pC]<input id="qxmax_${ch}" placeholder="auto"></label>
-      <label>bins<input id="qbin_${ch}" placeholder="auto" style="width:60px"></label>
-      <label class="chk"><input type="checkbox" id="qlog_${ch}"> log y</label>
-      <button class="qreset" data-ch="${ch}">Autoscale</button>
-    </div>`).join('');
-
-  for (const ch of channels) {
-    for (const k of ['hxmin_' + ch, 'hxmax_' + ch, 'hbin_' + ch,
-                     'qxmin_' + ch, 'qxmax_' + ch, 'qbin_' + ch]) {
-      const v = recall(k);
-      if (v !== null) document.getElementById(k).value = v;
-      document.getElementById(k).addEventListener('change', tick);
-    }
-    for (const k of ['hlog_' + ch, 'qlog_' + ch]) {
-      const lg = document.getElementById(k);
-      if (recall(k) !== null) lg.checked = (recall(k) === '1');
-      lg.addEventListener('change', tick);
-    }
-  }
-
-  // Due pulsanti Autoscale distinti, uno per riga: azzerare la scala delle
-  // ampiezze mentre si sta guardando la carica, o viceversa, farebbe perdere
-  // una vista buona mentre se ne sistema un'altra.
-  const azzeraRiga = (pre, b) => {
-    const ch = b.dataset.ch;
-    document.getElementById(pre + 'xmin_' + ch).value = '';
-    document.getElementById(pre + 'xmax_' + ch).value = '';
-    document.getElementById(pre + 'bin_' + ch).value = '';
-    document.getElementById(pre + 'log_' + ch).checked = false;
-    tick();
-  };
-  document.querySelectorAll('#hctl button.hreset')
-          .forEach(b => b.onclick = () => azzeraRiga('h', b));
-  document.querySelectorAll('#hctl button.qreset')
-          .forEach(b => b.onclick = () => azzeraRiga('q', b));
+  const sel = document.getElementById('chsel');
+  const prima = sel.value;
+  sel.innerHTML = channels.map(ch => `<option value="${ch}">ch${ch}</option>`).join('');
+  valCh = {};
+  channels.forEach(ch => valCh[ch] = caricaCh(ch));
+  if (channels.map(String).includes(prima)) sel.value = prima;
+  mostraCh();
 }
 
-// Finestre separate, una per grafico. Non hanno uno script loro: e' questa
-// pagina che, a ogni giro, gli riscrive la src dell'immagine. Cosi' non serve
-// una rotta nuova sul server, e una finestra rimasta aperta mentre la pagina
-// madre e' chiusa smette semplicemente di aggiornarsi invece di mostrare dati
-// vecchi fingendo di essere viva.
-const finestre = [];
+document.getElementById('chsel').addEventListener('change', mostraCh);
+CAMPI_CH.concat(FLAG_CH).forEach(k =>
+  document.getElementById(k).addEventListener('change', () => { leggiCh(); tick(); }));
 
-// Cosa mostra il dettaglio di un canale. Quello delle forme d'onda porta DUE
-// grafici: l'ultimo evento e la media dello stesso canale, affiancati -- sono
-// due domande diverse e si leggono bene vicine.
-function sorgentiDi(muro) {
-  return {
-    wf:  [["waveforms", "last event"], ["average", "average"]],
-    amp: [["amplitudes", "amplitude spectrum"]],
-    car: [["integrals", "charge spectrum"]],
-  }[muro];
+// Due Autoscale distinti: azzerare la scala delle ampiezze mentre si sta
+// sistemando quella della carica farebbe perdere una vista buona.
+function azzera(pre) {
+  const ch = document.getElementById('chsel').value;
+  [pre + 'xmin', pre + 'xmax', pre + 'bin'].forEach(k =>
+    document.getElementById(k).value = '');
+  document.getElementById(pre + 'log').checked = false;
+  leggiCh(); tick();
 }
+document.getElementById('hreset').onclick = () => azzera('h');
+document.getElementById('qreset').onclick = () => azzera('q');
 
-function nomeDi(muro, ch) {
-  return "ch" + ch + " \u00b7 " + (muro === "wf" ? "waveform" :
-         muro === "amp" ? "amplitude" : "charge");
-}
-
-// La lente: il dettaglio sopra la pagina. E' questa l'azione del clic, perche'
-// funziona sempre -- anche con Safari a schermo intero, dove una finestra
-// nuova finisce a tutto schermo e non c'e' modo di impedirlo da qui.
-let lente = null;
-
-function apriLente(muro, ch) {
-  lente = {muro: muro, ch: ch, sorgenti: sorgentiDi(muro)};
-  document.getElementById("lentetit").textContent = nomeDi(muro, ch);
-  document.getElementById("lenteimg").innerHTML =
-    lente.sorgenti.map(() => "<img>").join("");
-  document.getElementById("lente").classList.add("apri");
-  aggiornaLente();
-}
-
-function chiudiLente() {
-  lente = null;
-  document.getElementById("lente").classList.remove("apri");
-}
-
-function aggiornaLente() {
-  if (!lente) return;
-  const q = new URLSearchParams(params());
-  q.set("solo", lente.ch);
-  q.set("t", Date.now());
-  const imgs = document.getElementById("lenteimg").getElementsByTagName("img");
-  lente.sorgenti.forEach((sg, k) => {
-    if (imgs[k]) imgs[k].src = sg[0] + ".png?" + q.toString();
+// Con molti canali rifare la stessa scala trentadue volte non e' lavoro da
+// fare a mano.
+document.getElementById('atutti').onclick = () => {
+  leggiCh();
+  const ch = document.getElementById('chsel').value;
+  Object.keys(valCh).forEach(altro => {
+    valCh[altro] = Object.assign({}, valCh[ch]);
+    salvaCh(altro);
   });
-}
-
-document.getElementById("lentechiudi").onclick = chiudiLente;
-document.getElementById("lente").onclick = ev => {
-  if (ev.target.id === "lente") chiudiLente();
+  tick();
 };
-document.addEventListener("keydown", ev => {
-  if (ev.key === "Escape") chiudiLente();
-});
-document.getElementById("lenteapri").onclick = () => {
-  if (lente) { const l = lente; chiudiLente(); apriCanale(l.muro, l.ch); }
-};
-
-function apriCanale(muro, ch) {
-  const sorgenti = sorgentiDi(muro);
-  const nome = nomeDi(muro, ch);
-  const w = window.open("", "daqmon_" + muro + "_" + ch,
-                        "width=" + (sorgenti.length > 1 ? 1040 : 560) + ",height=420,scrollbars=yes");
-  if (!w) { setAlert("The browser blocked the pop-up window. Allow pop-ups for this page."); return; }
-  w.document.open();
-  w.document.write(
-    "<!DOCTYPE html><html><head><meta charset=utf-8><title>" + nome + "</title>" +
-    "<style>html,body{margin:0;background:#16181d;color:#999;" +
-    "font:12px system-ui,sans-serif}" +
-    "div{display:flex;gap:6px;align-items:flex-start}" +
-    "img{max-width:100%;display:block}p{margin:6px 10px}</style></head><body><div>" +
-    sorgenti.map(() => "<img>").join("") +
-    "</div><p>" + nome + " &middot; aggiornata dalla pagina principale</p></body></html>");
-  w.document.close();
-  finestre.push({w: w, muro: muro, ch: ch, sorgenti: sorgenti, dim: false});
-  aggiornaFinestre();
-}
-
-function apriFinestra(id, titolo) {
-  const img = document.getElementById(id);
-  const w = window.open("", "daqmon_" + id, "width=1020,height=620,scrollbars=yes");
-  if (!w) { setAlert("The browser blocked the pop-up window. Allow pop-ups for this page."); return; }
-  w.document.open();
-  w.document.write(
-    "<!DOCTYPE html><html><head><meta charset=utf-8><title>" + titolo + "</title>" +
-    "<style>html,body{margin:0;background:#16181d;color:#999;" +
-    "font:12px system-ui,sans-serif}" +
-    "img{max-width:100%;display:block}" +
-    "p{margin:6px 10px}</style></head><body>" +
-    "<img src='" + img.src + "'>" +
-    "<p>" + titolo + " &middot; aggiornato dalla pagina principale: se la chiudi, questa si ferma.</p>" +
-    "</body></html>");
-  w.document.close();
-  finestre.push({w: w, id: id, dim: false});
-}
-
-function aggiornaFinestre() {
-  const p = params();
-  for (let i = finestre.length - 1; i >= 0; i--) {
-    const f = finestre[i];
-    if (f.w.closed) { finestre.splice(i, 1); continue; }
-    try {
-      // images[] e non getElementById: gli elementi stanno nella finestra
-      // FIGLIA, e un getElementById qui dentro fa credere a check_page.py che
-      // questa pagina abbia un id che non ha.
-      const dentro = f.w.document.images;
-      if (f.sorgenti) {
-        // finestra di un canale: si chiedono le immagini con "solo", che
-        // disegna quel canale senza toccare i canali LETTI, che sono
-        // condivisi con chi guarda la stessa pagina da un'altra macchina
-        const q = new URLSearchParams(p);
-        q.set("solo", f.ch);
-        q.set("t", Date.now());
-        f.sorgenti.forEach((sg, k) => {
-          if (dentro[k]) dentro[k].src = sg[0] + ".png?" + q.toString();
-        });
-        // La finestra si ridimensiona sulla misura VERA delle immagini, una
-        // volta sola. Le width/height passate a window.open sono un
-        // suggerimento che Safari ignora: si apriva grande quanto lo schermo
-        // con dentro un grafico da 330 px in un angolo.
-        if (!f.dim && dentro.length &&
-            Array.prototype.every.call(dentro, im => im.naturalWidth > 0)) {
-          let lw = 0, lh = 0;
-          Array.prototype.forEach.call(dentro, im => {
-            lw += im.naturalWidth + 8;
-            lh = Math.max(lh, im.naturalHeight);
-          });
-          const bx = Math.max(0, f.w.outerWidth - f.w.innerWidth);
-          const by = Math.max(0, f.w.outerHeight - f.w.innerHeight);
-          try { f.w.resizeTo(lw + bx + 16, lh + by + 54); } catch (e) {}
-          f.dim = true;
-        }
-      } else if (dentro[0]) {
-        dentro[0].src = document.getElementById(f.id).src;
-        if (!f.dim && dentro[0].naturalWidth > 0) {
-          const bx = Math.max(0, f.w.outerWidth - f.w.innerWidth);
-          const by = Math.max(0, f.w.outerHeight - f.w.innerHeight);
-          try {
-            f.w.resizeTo(dentro[0].naturalWidth + bx + 16,
-                         dentro[0].naturalHeight + by + 54);
-          } catch (e) {}
-          f.dim = true;
-        }
-      }
-    } catch (e) { finestre.splice(i, 1); }
-  }
-}
-
-// Le zone cliccabili sopra i muri: posizioni e canali arrivano da stats.json,
-// calcolati dallo stesso codice che disegna le celle.
-function costruisciCelle(muro) {
-  if (!muro || !muro.celle) return;
-  const firma = muro.celle.map(c => c.ch).join(",") + "|" + muro.ncol;
-  document.querySelectorAll(".celle").forEach(box => {
-    if (box.dataset.firma === firma) return;
-    box.dataset.firma = firma;
-    box.innerHTML = muro.celle.map(c =>
-      `<a title="ch${c.ch}" data-ch="${c.ch}" style="left:${c.x * 100}%;` +
-      `bottom:${c.y * 100}%;width:${c.w * 100}%;height:${c.h * 100}%"></a>`).join("");
-    box.querySelectorAll("a").forEach(a => {
-      a.onclick = () => apriLente(box.dataset.muro, a.dataset.ch);
-    });
-  });
-}
 
 function params() {
   const p = new URLSearchParams();
@@ -1933,18 +1813,10 @@ function params() {
     try { localStorage.setItem('daqmon.' + f, v); } catch (e) {}
     if (v !== '') p.set(f === 'nev' ? 'n' : f, v);
   }
-  if (builtChannels) for (const ch of builtChannels.split(',')) {
-    for (const k of ['hxmin_' + ch, 'hxmax_' + ch, 'hbin_' + ch,
-                     'qxmin_' + ch, 'qxmax_' + ch, 'qbin_' + ch]) {
-      const v = document.getElementById(k).value.trim();
-      store(k, v);
-      if (v !== '') p.set(k, v);
-    }
-    for (const k of ['hlog_' + ch, 'qlog_' + ch]) {
-      const on = document.getElementById(k).checked;
-      store(k, on ? '1' : '0');
-      p.set(k, on ? '1' : '0');
-    }
+  for (const ch of Object.keys(valCh)) {
+    const v = valCh[ch];
+    CAMPI_CH.forEach(k => { if (v[k] !== '') p.set(k + '_' + ch, v[k]); });
+    FLAG_CH.forEach(k => p.set(k + '_' + ch, v[k] ? '1' : '0'));
   }
   return p;
 }

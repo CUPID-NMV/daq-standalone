@@ -101,6 +101,30 @@ aggiorna. Le chiavi nuove vanno aggiunte lì a parte, con un backup, dicendolo.
   attraversa le celle di memoria.
 - **Il pavimento di rumore va rimisurato con la sorgente collegata**: il
   generatore contribuiva più della board.
+- **Il piedistallo si misura senza trigger esterno.** `MeasureBaseline` manda
+  trigger software e legge quello che arriva: con TRG-IN attivo un LED a
+  qualche centinaio di hertz riempie il buffer di eventi veri. Misurato: media
+  380.7 conteggi e rms 183.5 con gli eventi LED dentro, 270.6 e 8.9 sulle sole
+  istantanee pulite. La DAQ si rifiutava di partire con "rms = 176.65", e
+  l'rms all'avvio ballava fra 6 e 177 da una run all'altra. Ora il trigger
+  esterno si spegne per la durata della misura e si rimette su ogni uscita.
+- **La mediana dell'intera traccia non è il piedistallo, se l'impulso è
+  lungo.** Vale per i PMT (pochi ns su mille campioni), non per un SiPM col
+  LED che ne occupa 400 su 1321: misurato 275.0 conteggi sulla traccia intera
+  contro 271.0 sul solo pre-impulso e 272.0 sulla coda. Quei 4 conteggi
+  integrati su 992 campioni valgono 26 pC su una carica di 21: l'errore era
+  più grande del segnale. Il monitor lo prende da una finestra dichiarata
+  (10-180 ns di serie), evento per evento.
+- **La prova che una sottrazione di piedistallo è giusta è che l'integrale
+  SATURA** allargando il cancello: 37.5, 41.5, 44.0, 45.1, 45.1 pC. Senza
+  correzione calava — 32.0, 33.8, 33.3, 30.6, 24.5 — che per un impulso
+  positivo è impossibile. Il piedistallo va preso PRIMA del segnale e non
+  "fuori dal cancello": dopo l'impulso la coda contamina la stima del 6%.
+- **`TriggerPolarity`, `DCOffset` e il segno dell'impulso sono una cosa
+  sola.** Piedistallo in basso (DCOffset alto) significa impulsi positivi e
+  quindi fronte di salita. Sbagliare uno dei tre non dà errori: la soglia si
+  posa dove il segnale non va mai e la run acquisisce zero eventi. Costato una
+  run di 52 s a vuoto passando dai PMT al SiPM.
 
 ## Strumenti
 
@@ -112,9 +136,30 @@ aggiorna. Le chiavi nuove vanno aggiunte lì a parte, con un backup, dicendolo.
 | `tools/check_page.py` | verifica che ogni `getElementById` abbia il suo elemento |
 | `tools/probe_link.py` | determina i parametri di apertura di un collegamento |
 | `tools/daqio.py` | I/O condiviso; `channels=` legge solo alcuni canali |
+| `tools/daq_control.py` | pagina di controllo (8766): configurazione, run, coda, scan |
+| `tools/WCFastCheck.ipynb` | analisi offline; legge i due formati e i `.gz` via `daqio` |
 
 Le misure stanno in `measurements/*.json` con i dati grezzi, e gli script di
 plot li rileggono da lì: i grafici si rifanno, i numeri no.
+
+Le due pagine web girano sul PC DAQ e sopravvivono alla caduta della rete:
+
+```
+python3 tools/daq_control.py -b 0.0.0.0        # controllo, porta 8766
+```
+
+Il monitor conviene accenderlo **da dentro la pagina** (*Start monitor*): così
+si aggancia da solo a `OutputDir`, che si cambia dalla pagina e che altrimenti
+resterebbe disallineato. `localhost:8766/monitor/` inoltra al monitor sulla
+stessa porta del controllore: da VPN o da inoltro di porta quasi sempre è
+inoltrata solo quella.
+
+Nel monitor l'interruttore **`details`** accende cancello, finestra del
+piedistallo, calibrazione e avvertimenti da messa a punto. Spento di serie:
+durante la presa dati sono rumore sul grafico, quando si confrontano due
+misure servono — una carica senza il suo cancello non è confrontabile.
+
+Le cose decise e non ancora fatte stanno in `TODO.md`.
 
 ---
 

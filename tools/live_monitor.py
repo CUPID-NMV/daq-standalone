@@ -22,6 +22,7 @@ import json
 import os
 import sys
 import collections
+import math
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -599,6 +600,44 @@ class Monitor:
         """
         return self.status is not None
 
+    def _carica(self, corr, t_ns, gate, channels):
+        """Carica per evento e canale, in pC, piu' il deposito cumulato.
+
+        Sta in un metodo e non dentro al disegno perche' la usano in due -- lo
+        spettro grande e la miniatura nel muro -- e due copie di questo conto
+        scivolerebbero via una dall'altra al primo ritocco. E' il conto che e'
+        costato di piu' da far tornare.
+        """
+        dt_ns = float(t_ns[1] - t_ns[0]) if len(t_ns) > 1 else 1.0
+
+        # Il cancello ha caselle sue e non viene dallo zoom delle forme d'onda:
+        # la forma d'onda si guarda intera, la carica si integra dove c'e'
+        # l'impulso, e legarle costringeva a ritagliare il grafico per fissare
+        # il cancello.
+        g0, g1 = gate if gate else (None, None)
+        a_i = 0 if g0 is None else int(np.searchsorted(t_ns, g0, "left"))
+        b_i = len(t_ns) if g1 is None else int(np.searchsorted(t_ns, g1, "right"))
+        a_i = max(0, min(a_i, len(t_ns) - 1))
+        b_i = max(a_i + 1, min(b_i, len(t_ns)))
+        nscamp = b_i - a_i
+
+        # In picocoulomb: l'integrale della tensione diviso l'impedenza
+        # d'ingresso. 1 mV x 1 ns / 50 ohm = 0.02 pC. E' la carica all'INGRESSO
+        # del digitizer: per risalire a quella del rivelatore servirebbero
+        # guadagno e partitori della catena, che il software non conosce.
+        k_pc = dt_ns * self.mv_per_count() / 50.0
+
+        # Il piedistallo e' gia' stato tolto in analysis(), nella finestra
+        # dichiarata ed evento per evento, quindi qui si somma e basta. La
+        # prova che la sottrazione e' quella giusta: allargando il cancello
+        # dalla stessa partenza l'integrale SATURA (37.5, 41.5, 44.0, 45.1,
+        # 45.1 pC) invece di calare (32.0, 33.8, 33.3, 30.6, 24.5), e un
+        # integrale che cala allargando la finestra su un impulso positivo e'
+        # impossibile.
+        carica = self.segno * corr[:, :, a_i:b_i].sum(axis=2) * k_pc
+        dep = self.accumula("cariche", carica, channels, (a_i, b_i))
+        return carica, a_i, b_i, nscamp, k_pc, dep
+
     def _verso(self, corr):
         """+1 se gli impulsi vanno in su, -1 se vanno in giu'.
 
@@ -676,6 +715,11 @@ class Monitor:
             # Da quanto il file non cresce, e di quando e'. Servono a dire
             # "questa non e' una run in corso": senza, un file fermo di giorni
             # prima si presenta identico a una run viva.
+            # Dove cade ogni canale nei muri, in frazioni dell'immagine: la
+            # pagina ci mette sopra le zone cliccabili. Calcolata qui e non
+            # indovinata di la', cosi' se cambia il numero di colonne cambia
+            # in un posto solo.
+            "muro": None,
             "ferma_da": (round(time.time() - self._cresciuto, 1)
                          if self._cresciuto else None),
             "file_quando": (os.path.getmtime(self.path)
@@ -691,6 +735,13 @@ class Monitor:
         out["shown"] = int(self.data.shape[0])
         out["sampling"] = str(hdr.get("SamplingRate", "?"))
         by_ch = {int(c["ch"]): c for c in (self.status or {}).get("channels", [])}
+        canali = [int(c) for c in hdr["ChannelList"]]
+        ncol, nrig, celle = geometria_muro(len(canali))
+        out["muro"] = {"ncol": ncol, "nrig": nrig,
+                       "celle": [{"ch": c, "x": r[0], "y": r[1],
+                                  "w": r[2], "h": r[3]}
+                                 for c, r in zip(canali, celle)]}
+
         st_on = self.self_trigger_attivo()
         for i, ch in enumerate(hdr["ChannelList"]):
             rms = float(np.median(noise[:, i]))
@@ -870,7 +921,7 @@ class Monitor:
 
     def figure(self, kind, n_show=1, xlim=(None, None), ylim=(None, None),
                hset=None, bw=None, qcut=None, qset=None, gate=None, scala="M",
-               dettagli=False):
+               dettagli=False, solo=None):
         if kind == "panoramica":
             # Non passa dall'analisi di dettaglio: quella riguarda i soli
             # canali selezionati e puo' mancare, mentre la panoramica deve
@@ -884,6 +935,23 @@ class Monitor:
         channels = hdr["ChannelList"]
         rect_finale = None
         k = self.SCALE.get(str(scala).upper(), 1.0)
+
+        # "solo" e' un parametro di DISEGNO, non di lettura: dice quale canale
+        # mettere nella figura, e non tocca niente di condiviso. La casella
+        # "channels" invece e' stato del monitor e cambia i canali LETTI per
+        # tutti: usarla per le finestre per canale avrebbe cambiato sotto il
+        # naso quello che vede chi guarda la stessa pagina da un'altra
+        # macchina, e azzerato i suoi spettri cumulati.
+        #
+        # I canali si restringono solo per il disegno; gli accumuli e le
+        # statistiche continuano a vedere tutto, se no una finestra aperta su
+        # un canale farebbe saltare gli eventi agli altri.
+        canali_dis = list(channels)
+        if solo is not None:
+            interi = [int(c) for c in channels]
+            if int(solo) in interi:
+                canali_dis = [channels[interi.index(int(solo))]]
+        idx_dis = [list(channels).index(c) for c in canali_dis]
 
         def apply_limits(ax):
             """Limiti espliciti dove indicati, autoscale dove no."""
@@ -922,11 +990,11 @@ class Monitor:
             # figura che CRESCE in questo riassetto.
             fig, axes = plt.subplots(len(channels), 1,
                                      figsize=(LARG_PX * k / DPI_FIG,
-                                              3.3 * k * len(channels)),
+                                              3.3 * k * len(canali_dis)),
                                      squeeze=False, sharex=True)
             n = max(1, min(n_show, corr.shape[0]))
-            for i, ch in enumerate(channels):
-                ax = axes[i][0]
+            for j, (i, ch) in enumerate(zip(idx_dis, canali_dis)):
+                ax = axes[j][0]
                 for e in range(corr.shape[0] - n, corr.shape[0]):
                     ax.plot(t_ns, corr[e, i], lw=0.9 if n == 1 else 0.6,
                             alpha=1.0 if n == 1 else 0.5)
@@ -1018,7 +1086,7 @@ class Monitor:
 
         elif kind == "average":
             fig, ax = plt.subplots(figsize=(LARG_PX * k / DPI_FIG, 2.5 * k))
-            for i, ch in enumerate(channels):
+            for i, ch in zip(idx_dis, canali_dis):
                 line, = ax.plot(t_ns, corr[:, i].mean(axis=0), lw=1.4, label=f"ch{ch}")
 
                 # Anche qui la riga vale solo col self-trigger: e' l'ampiezza
@@ -1040,38 +1108,78 @@ class Monitor:
             ax.grid(alpha=0.25)
             apply_limits(ax)
 
+        elif kind in ("muro_wf", "muro_amp", "muro_car"):
+            # Un muro: una miniatura per canale, in griglia. Serve a vedere
+            # TUTTI i canali in un colpo d'occhio invece di scorrere N grafici
+            # grandi; il dettaglio si apre in una finestra cliccando la cella.
+            # Le celle si posizionano a mano con geometria_muro(), cosi' la
+            # pagina sa dove cadono e puo' metterci sopra le zone cliccabili.
+            ncol, nrig, celle = geometria_muro(len(canali_dis))
+            alt = {"muro_wf": 0.95}.get(kind, 0.80)
+            fig = plt.figure(figsize=(LARG_PX * k / DPI_FIG,
+                                      (alt * nrig + 0.30) * k))
+
+            if kind == "muro_wf":
+                # Scala y comune: i canali si confrontano a occhio. Percentili
+                # e non min/max, se no un canale con l'impulso grande schiaccia
+                # tutti gli altri a una riga piatta.
+                lo = float(np.percentile(corr[-1], 0.2))
+                hi = float(np.percentile(corr[-1], 99.8))
+                titolo = "waveforms \u00b7 last event, same scale \u00b7 click \u2192 window"
+            else:
+                if kind == "muro_car":
+                    carica, a_i, b_i, nscamp, k_pc, dep = self._carica(
+                        corr, t_ns, gate, channels)
+                    etich = "charge [pC]"
+                else:
+                    dep = self.accumula("ampiezze", q, channels, self.gen)
+                    etich = "amplitude [offset units]"
+                dati = {int(c): dep["val"].get(int(c)) for c in canali_dis}
+                tutti = np.concatenate([v for v in dati.values()
+                                        if v is not None and v.size]) \
+                    if any(v is not None and v.size for v in dati.values()) \
+                    else np.zeros(1)
+                lo = float(np.percentile(tutti, 0.5))
+                hi = float(np.percentile(tutti, 99.5))
+                if not hi > lo:
+                    hi = lo + 1.0
+                bordi = np.linspace(lo, hi, 44)
+                titolo = "%s \u00b7 same bins \u00b7 click \u2192 window" % etich
+
+            for j, (i, ch) in enumerate(zip(idx_dis, canali_dis)):
+                ax = fig.add_axes(celle[j])
+                col = PALETTE[j % len(PALETTE)]
+                if kind == "muro_wf":
+                    ax.plot(t_ns, corr[-1, i], lw=0.7, color=col)
+                    ax.axhline(0, color="#bbb", lw=0.5, ls=":")
+                    ax.set_ylim(lo, hi)
+                    # il fondo scala di QUESTO canale: la scala comune serve a
+                    # confrontare, ma da sola nasconde che uno arriva a -120 e
+                    # un altro a -9
+                    ax.text(0.97, 0.78, "%.0f" % (self.segno * corr[-1, i]).max(),
+                            transform=ax.transAxes, fontsize=6.5, color="#888",
+                            ha="right")
+                else:
+                    v = dati.get(int(ch))
+                    if v is not None and v.size:
+                        ax.hist(v, bins=bordi, color=col, alpha=.85)
+                        ax.set_yscale("log")
+                    ax.set_xlim(lo, hi)
+                ax.text(0.04, 0.78, "ch%d" % int(ch), transform=ax.transAxes,
+                        fontsize=7.5, color=col, fontweight="bold")
+                ax.set_xticks([]); ax.set_yticks([])
+                for sp in ax.spines.values():
+                    sp.set_edgecolor("#ddd")
+
+            fig.suptitle(titolo, fontsize=7.5, color="#52514e", y=0.985)
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png", dpi=DPI_FIG)
+            plt.close(fig)
+            return buf.getvalue()
+
         elif kind == "integrals":
-            dt_ns = float(t_ns[1] - t_ns[0]) if len(t_ns) > 1 else 1.0
-
-            # Il cancello ha caselle sue e non viene piu' dallo zoom delle
-            # forme d'onda. Legarlo alla vista sembrava elegante -- si integra
-            # quello che si guarda -- ma costringe a ritagliare il grafico per
-            # fissare il cancello, e le due cose si vogliono indipendenti: la
-            # forma d'onda si guarda intera, la carica si integra dove c'e'
-            # l'impulso.
-            g0, g1 = gate if gate else (None, None)
-            a_i = 0 if g0 is None else int(np.searchsorted(t_ns, g0, "left"))
-            b_i = len(t_ns) if g1 is None else int(np.searchsorted(t_ns, g1, "right"))
-            a_i = max(0, min(a_i, len(t_ns) - 1))
-            b_i = max(a_i + 1, min(b_i, len(t_ns)))
-            nscamp = b_i - a_i
-
-            # In picocoulomb: l'integrale della tensione diviso l'impedenza
-            # d'ingresso. 1 mV x 1 ns / 50 ohm = 0.02 pC. E' la carica
-            # all'INGRESSO del digitizer: per risalire a quella del rivelatore
-            # servirebbero guadagno e partitori della catena, che il software
-            # non conosce.
-            k_pc = dt_ns * self.mv_per_count() / 50.0
-
-            # Il piedistallo e' gia' stato tolto in analysis(), nella
-            # finestra dichiarata ed evento per evento, quindi qui si somma e
-            # basta. La prova che la sottrazione e' quella giusta: allargando
-            # il cancello dalla stessa partenza l'integrale SATURA (37.5,
-            # 41.5, 44.0, 45.1, 45.1 pC) invece di calare (32.0, 33.8, 33.3,
-            # 30.6, 24.5), e un integrale che cala allargando la finestra su
-            # un impulso positivo e' impossibile.
-            carica = self.segno * corr[:, :, a_i:b_i].sum(axis=2) * k_pc
-            dep_q = self.accumula("cariche", carica, channels, (a_i, b_i))
+            carica, a_i, b_i, nscamp, k_pc, dep_q = self._carica(corr, t_ns, gate,
+                                                                 channels)
 
             # Piu' alto degli altri pannelli: sotto gli assi ci vanno
             # etichetta, legenda e il pie' di pagina, e con 3.4 pollici il
@@ -1081,12 +1189,12 @@ class Monitor:
             # non si puo' tenere la promessa senza ridurre ogni pannello a una
             # fetta: oltre i due canali la figura cresce e la riga va a capo,
             # che il CSS gia' fa.
-            larg_px = max(LARG_PX / 2, 230 * len(channels))
-            fig, axes = plt.subplots(1, len(channels),
+            larg_px = max(LARG_PX / 2, 230 * len(canali_dis))
+            fig, axes = plt.subplots(1, len(canali_dis),
                                      figsize=(larg_px * k / DPI_FIG, 3.1 * k),
                                      squeeze=False)
-            for i, ch in enumerate(channels):
-                ax = axes[0][i]
+            for j, (i, ch) in enumerate(zip(idx_dis, canali_dis)):
+                ax = axes[0][j]
                 val = dep_q["val"].get(int(ch))
                 if val is None or val.size == 0:
                     val = carica[:, i]
@@ -1218,12 +1326,12 @@ class Monitor:
             # la distribuzione di prima resta accanto in grigio.
             dep_a = self.accumula("ampiezze", q, channels, self.gen)
 
-            larg_px = max(LARG_PX / 2, 230 * len(channels))
-            fig, axes = plt.subplots(1, len(channels),
+            larg_px = max(LARG_PX / 2, 230 * len(canali_dis))
+            fig, axes = plt.subplots(1, len(canali_dis),
                                      figsize=(larg_px * k / DPI_FIG, 3.1 * k),
                                      squeeze=False)
-            for i, ch in enumerate(channels):
-                ax = axes[0][i]
+            for j, (i, ch) in enumerate(zip(idx_dis, canali_dis)):
+                ax = axes[0][j]
                 values = dep_a["val"].get(int(ch))
                 if values is None or values.size == 0:
                     values = q[:, i]
@@ -1424,6 +1532,16 @@ PAGE = """<!DOCTYPE html>
               text-decoration:none; }
   .gr:hover .apri { opacity:1; }
   .affianca { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start; }
+  .muro { position:relative; display:inline-block; margin-bottom:10px;
+          vertical-align:top; }
+  .muro img { margin-bottom:0; display:block; }
+  .celle { position:absolute; inset:0; }
+  .celle a { position:absolute; border-radius:4px; cursor:pointer;
+             border:1px solid transparent; }
+  .celle a:hover { border-color:var(--acc); background:rgba(0,170,119,.07); }
+  details#interi { margin:4px 0 14px; }
+  details#interi summary { cursor:pointer; color:var(--mut); font-size:12px;
+                           padding:4px 0; }
   img { max-width:100%; border:1px solid var(--line); border-radius:8px; margin-bottom:16px;
         background:#fff; }
   .err { color:#c33; }
@@ -1489,12 +1607,22 @@ Open the browser console to see the error.</div>
      col secondo schermo: le forme d'onda di la', i controlli di qua. I due
      spettri stanno affiancati, sono due distribuzioni della stessa cosa. -->
 <div class="gr"><a class="apri" data-img="pano">&#8599;</a><img id="pano" alt="per-channel overview"></div>
-<div class="gr"><a class="apri" data-img="w">&#8599;</a><img id="w" alt="waveforms"></div>
+<!-- I tre muri: una miniatura per canale, e sopra una griglia di zone
+     trasparenti che aprono la finestra del canale. Le posizioni arrivano da
+     stats.json, calcolate dallo stesso codice che disegna. -->
+<div class="muro"><img id="mw" alt="waveform wall"><div class="celle" data-muro="wf"></div></div>
+<div class="muro"><img id="ma" alt="amplitude wall"><div class="celle" data-muro="amp"></div></div>
+<div class="muro"><img id="mc" alt="charge wall"><div class="celle" data-muro="car"></div></div>
+
 <div class="gr"><a class="apri" data-img="a">&#8599;</a><img id="a" alt="average"></div>
-<div class="affianca">
-  <div class="gr"><a class="apri" data-img="h">&#8599;</a><img id="h" alt="amplitudes"></div>
-  <div class="gr"><a class="apri" data-img="q">&#8599;</a><img id="q" alt="charge integrals"></div>
-</div>
+
+<details id="interi"><summary>full-size plots of every channel</summary>
+  <div class="gr"><a class="apri" data-img="w">&#8599;</a><img id="w" alt="waveforms"></div>
+  <div class="affianca">
+    <div class="gr"><a class="apri" data-img="h">&#8599;</a><img id="h" alt="amplitudes"></div>
+    <div class="gr"><a class="apri" data-img="q">&#8599;</a><img id="q" alt="charge integrals"></div>
+  </div>
+</details>
 <script>
 document.getElementById('boot').style.display = 'none';
 const REFRESH = __REFRESH__ * 1000;
@@ -1589,6 +1717,34 @@ function buildHistControls(channels) {
 // vecchi fingendo di essere viva.
 const finestre = [];
 
+// Una finestra per canale. Quella delle forme d'onda ne porta DUE: l'ultimo
+// evento e la media dello stesso canale, affiancati -- sono due domande
+// diverse e si leggono bene vicine.
+function apriCanale(muro, ch) {
+  const sorgenti = {
+    wf:  [["waveforms", "last event"], ["average", "average"]],
+    amp: [["amplitudes", "amplitude spectrum"]],
+    car: [["integrals", "charge spectrum"]],
+  }[muro];
+  const nome = "ch" + ch + " \u00b7 " + (muro === "wf" ? "waveform" :
+               muro === "amp" ? "amplitude" : "charge");
+  const w = window.open("", "daqmon_" + muro + "_" + ch,
+                        "width=" + (sorgenti.length > 1 ? 1040 : 560) + ",height=420,scrollbars=yes");
+  if (!w) { setAlert("The browser blocked the pop-up window. Allow pop-ups for this page."); return; }
+  w.document.open();
+  w.document.write(
+    "<!DOCTYPE html><html><head><meta charset=utf-8><title>" + nome + "</title>" +
+    "<style>html,body{margin:0;background:#16181d;color:#999;" +
+    "font:12px system-ui,sans-serif}" +
+    "div{display:flex;gap:6px;align-items:flex-start}" +
+    "img{max-width:100%;display:block}p{margin:6px 10px}</style></head><body><div>" +
+    sorgenti.map(() => "<img>").join("") +
+    "</div><p>" + nome + " &middot; aggiornata dalla pagina principale</p></body></html>");
+  w.document.close();
+  finestre.push({w: w, muro: muro, ch: ch, sorgenti: sorgenti});
+  aggiornaFinestre();
+}
+
 function apriFinestra(id, titolo) {
   const img = document.getElementById(id);
   const w = window.open("", "daqmon_" + id, "width=1020,height=620,scrollbars=yes");
@@ -1608,17 +1764,47 @@ function apriFinestra(id, titolo) {
 }
 
 function aggiornaFinestre() {
+  const p = params();
   for (let i = finestre.length - 1; i >= 0; i--) {
     const f = finestre[i];
     if (f.w.closed) { finestre.splice(i, 1); continue; }
     try {
-      // images[0] e non getElementById: l'elemento sta nella finestra
+      // images[] e non getElementById: gli elementi stanno nella finestra
       // FIGLIA, e un getElementById qui dentro fa credere a check_page.py che
       // questa pagina abbia un id che non ha.
-      const dentro = f.w.document.images[0];
-      if (dentro) dentro.src = document.getElementById(f.id).src;
+      const dentro = f.w.document.images;
+      if (f.sorgenti) {
+        // finestra di un canale: si chiedono le immagini con "solo", che
+        // disegna quel canale senza toccare i canali LETTI, che sono
+        // condivisi con chi guarda la stessa pagina da un'altra macchina
+        const q = new URLSearchParams(p);
+        q.set("solo", f.ch);
+        q.set("t", Date.now());
+        f.sorgenti.forEach((sg, k) => {
+          if (dentro[k]) dentro[k].src = sg[0] + ".png?" + q.toString();
+        });
+      } else if (dentro[0]) {
+        dentro[0].src = document.getElementById(f.id).src;
+      }
     } catch (e) { finestre.splice(i, 1); }
   }
+}
+
+// Le zone cliccabili sopra i muri: posizioni e canali arrivano da stats.json,
+// calcolati dallo stesso codice che disegna le celle.
+function costruisciCelle(muro) {
+  if (!muro || !muro.celle) return;
+  const firma = muro.celle.map(c => c.ch).join(",") + "|" + muro.ncol;
+  document.querySelectorAll(".celle").forEach(box => {
+    if (box.dataset.firma === firma) return;
+    box.dataset.firma = firma;
+    box.innerHTML = muro.celle.map(c =>
+      `<a title="ch${c.ch}" data-ch="${c.ch}" style="left:${c.x * 100}%;` +
+      `bottom:${c.y * 100}%;width:${c.w * 100}%;height:${c.h * 100}%"></a>`).join("");
+    box.querySelectorAll("a").forEach(a => {
+      a.onclick = () => apriCanale(box.dataset.muro, a.dataset.ch);
+    });
+  });
 }
 
 function params() {
@@ -1720,8 +1906,10 @@ async function tick() {
     const p = params();
     p.set('t', Date.now());
     for (const [id, name] of [['w','waveforms'],['a','average'],['h','amplitudes'],
-                             ['q','integrals']])
+                             ['q','integrals'],
+                             ['mw','muro_wf'],['ma','muro_amp'],['mc','muro_car']])
       document.getElementById(id).src = name + '.png?' + p.toString();
+    costruisciCelle(s.muro);
     // La panoramica copre tutti i canali e non risente della selezione, quindi
     // non serve rigenerarla a ogni giro: si aggiorna ogni 5 s per conto suo.
     const pano = document.getElementById('pano');
@@ -1770,12 +1958,45 @@ N_CANALI_HW = 32
 # tavolozza di plot_scan.py, scelta perche' le coppie restano distinguibili
 # anche con il daltonismo -- blu e arancio e' la coppia sicura, verde e
 # arancio no.
+# Ordine fisso, mai ciclato: oltre l'ottavo canale le curve non si
+# distinguono piu', ed e' la stessa regola che plot_scan.py applica da
+# settembre. E' la tavolozza di quel file.
+PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100",
+           "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+
 COLORE_AMPIEZZA = "#2a78d6"     # spettro delle ampiezze, in unita' di offset
 COLORE_CARICA = "#eb6834"       # spettro di carica, in pC
 
 LARG_PX = 660
 DPI_PAN = 110
 DPI_FIG = 100
+
+
+# --- geometria dei muri ------------------------------------------------
+# Le celle si posizionano A MANO, non con subplots: la pagina deve sapere
+# ESATTAMENTE dove cade ogni canale per mettere sopra l'immagine le zone
+# cliccabili. Con tight_layout le posizioni le decide matplotlib e dalla
+# pagina si potrebbero solo indovinare.
+MURO_COL = 4            # canali per riga
+MURO_MX, MURO_MY = 0.012, 0.030      # margini laterali e in basso
+MURO_TOP = 0.90         # sotto il titolo
+MURO_GX, MURO_GY = 0.012, 0.055      # spazio fra le celle
+
+
+def geometria_muro(n):
+    """(ncol, nrig, [(x, y, w, h) per canale]) in frazioni della figura."""
+    ncol = min(MURO_COL, max(1, n))
+    nrig = int(math.ceil(n / ncol)) if n else 1
+    w = (MURO_TOP - MURO_MX * 0 + 0)  # segnaposto, calcolato sotto
+    w = ((1.0 - 2 * MURO_MX) - (ncol - 1) * MURO_GX) / ncol
+    h = ((MURO_TOP - MURO_MY) - (nrig - 1) * MURO_GY) / nrig
+    celle = []
+    for i in range(n):
+        r, c = divmod(i, ncol)
+        x = MURO_MX + c * (w + MURO_GX)
+        y = MURO_TOP - (r + 1) * h - r * MURO_GY
+        celle.append((round(x, 5), round(y, 5), round(w, 5), round(h, 5)))
+    return ncol, nrig, celle
 
 
 def _bin(valore):
@@ -1918,7 +2139,10 @@ def make_handler(monitor, refresh, defaults):
                          "waveforms.png": "waveforms",
                          "average.png": "average",
                          "amplitudes.png": "amplitudes",
-                         "integrals.png": "integrals"}
+                         "integrals.png": "integrals",
+                         "muro_wf.png": "muro_wf",
+                         "muro_amp.png": "muro_amp",
+                         "muro_car.png": "muro_car"}
                 if route in kinds:
                     # I limiti dell'istogramma sono per canale: hxmin_8, hlog_9, ...
                     # I valori da riga di comando fanno da default per tutti.
@@ -1951,7 +2175,8 @@ def make_handler(monitor, refresh, defaults):
                                                      self._num(qs, "qcut", defaults["qcut"]),
                                                      qset, gate,
                                                      qs.get("scala", ["M"])[0],
-                                                     qs.get("det", ["0"])[0] == "1"))
+                                                     qs.get("det", ["0"])[0] == "1",
+                                                     self._num(qs, "solo", None)))
 
             self._send(404, "text/plain", b"not found")
 

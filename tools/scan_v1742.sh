@@ -51,23 +51,45 @@ fi
 # qui dentro vorrebbe dire guardare la cartella sbagliata e concludere che la
 # DAQ non sta pubblicando lo stato.
 TOML="${TOML:-$ROOT/config/run-local.toml}"
-DATI=$(python3 - "$TOML" <<'EOF'
+# Due righe: la cartella e SelfTrigger. Si leggono insieme perche' servono
+# insieme, e perche' un secondo tomllib.load sullo stesso file e' fiato sprecato.
+LETTO=$(python3 - "$TOML" <<'EOF'
 import sys
 try:
     import tomllib
     with open(sys.argv[1], "rb") as f:
-        v = tomllib.load(f).get("digitizer", {}).get("OutputDir")
-    print(v or "")
+        d = tomllib.load(f).get("digitizer", {})
+    print(d.get("OutputDir") or "")
+    st = d.get("SelfTrigger")
+    print("" if st is None else ("true" if st else "false"))
 except Exception:
-    print("")          # niente TOML, niente chiave: ci pensa il ripiego sotto
+    print(); print("")   # niente TOML, niente chiavi: ci pensano i ripieghi sotto
 EOF
 )
+DATI=$(sed -n 1p <<< "$LETTO")
+SELFTRIG=$(sed -n 2p <<< "$LETTO")
 [[ -z "$DATI" ]] && DATI="$ROOT/data"
+
+# SelfTrigger spento non e' "forse": e' la risposta. Questo scan muove la
+# soglia del self-trigger e misura il rate che ne esce; con il trigger esterno
+# il rate lo detta il LED e ogni punto darebbe lo stesso numero. Prima qui si
+# arrivava all'eta' di live-status.json e si proponevano DUE cause possibili,
+# lasciando a chi legge il lavoro di capire quale -- mentre il TOML ce l'ha
+# scritto sopra.
+if [[ "$SELFTRIG" == "false" ]]; then
+    echo "ERRORE: nel TOML SelfTrigger = false." >&2
+    echo "  $TOML" >&2
+    echo "La run in corso non usa il self-trigger, quindi non pubblica" >&2
+    echo "live-status.json e non c'e' nessuna soglia da far scorrere." >&2
+    echo "Per questo scan serve una run con SelfTrigger = true." >&2
+    exit 1
+fi
 
 STATO="$DATI/live-status.json"
 if [[ ! -f "$STATO" ]]; then
     echo "ERRORE: manca $STATO." >&2
-    echo "Lo pubblica la DAQ solo con SelfTrigger = true: controlla il TOML." >&2
+    echo "Con SelfTrigger = true la DAQ lo scrive dentro OutputDir: se non c'e'," >&2
+    echo "la run in corso sta scrivendo in un'altra cartella." >&2
     exit 1
 fi
 
@@ -76,7 +98,10 @@ fi
 ETA=$(( $(date +%s) - $(stat -c %Y "$STATO") ))
 if (( ETA > 600 )); then
     echo "ERRORE: live-status.json non viene aggiornato da $ETA secondi." >&2
-    echo "Probabilmente e' di una run precedente, oppure gira con SelfTrigger = false." >&2
+    echo "  $STATO" >&2
+    echo "Nel TOML SelfTrigger = ${SELFTRIG:-?}, quindi il file e' di una run" >&2
+    echo "precedente: quella in corso scrive altrove, o e' partita con un TOML" >&2
+    echo "diverso da questo. Controlla OutputDir." >&2
     exit 1
 fi
 

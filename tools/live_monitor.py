@@ -787,7 +787,10 @@ class Monitor:
             if g % 2 == 0:
                 for ax in axes:
                     ax.axvspan(a, b, color="#000", alpha=.04)
-            axes[0].annotate("gr%d" % g, xy=((a + b) / 2, 1.06),
+            # Sopra l'etichetta della striscia, non alla stessa altezza:
+            # stretta la figura, "occupancy [%]" a sinistra e "gr0" centrato
+            # sul primo gruppo finivano uno sull'altro.
+            axes[0].annotate("gr%d" % g, xy=((a + b) / 2, 1.34),
                              xycoords=("data", "axes fraction"),
                              ha="center", fontsize=7.5, color="#888")
 

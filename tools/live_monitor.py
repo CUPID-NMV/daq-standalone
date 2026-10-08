@@ -790,7 +790,7 @@ class Monitor:
             # Sopra l'etichetta della striscia, non alla stessa altezza:
             # stretta la figura, "occupancy [%]" a sinistra e "gr0" centrato
             # sul primo gruppo finivano uno sull'altro.
-            axes[0].annotate("gr%d" % g, xy=((a + b) / 2, 1.34),
+            axes[0].annotate("gr%d" % g, xy=((a + b) / 2, 1.06),
                              xycoords=("data", "axes fraction"),
                              ha="center", fontsize=7.5, color="#888")
 
@@ -838,7 +838,10 @@ class Monitor:
             ax.grid(alpha=.25, axis="y")
             ax.tick_params(labelsize=7)
             ax.set_xlim(-0.8, N_CANALI_HW - 0.2)
-            ax.set_title(etichette[i_ax], loc="left", fontsize=7.5,
+            # A DESTRA: a sinistra sbatteva contro "gr0", che sta al centro
+            # del primo gruppo e con la figura stretta cade proprio li'. A
+            # destra l'ultimo gruppo e' gr3, centrato all'86%, e resta spazio.
+            ax.set_title(etichette[i_ax], loc="right", fontsize=7.5,
                          color="#52514e", pad=3)
         axes[2].set_xticks(range(N_CANALI_HW))
         axes[2].set_xticklabels([str(c) for c in range(N_CANALI_HW)], fontsize=6)

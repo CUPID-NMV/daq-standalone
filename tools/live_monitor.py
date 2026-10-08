@@ -828,7 +828,10 @@ class Monitor:
         for ax in axes:
             ax.grid(alpha=.25, axis="y")
             ax.tick_params(labelsize=7)
-            ax.yaxis.label.set_size(8)
+            # 7 e non 8: con tre pannelli dentro 2.9 pollici l'etichetta di
+            # uno arrivava a toccare quella di sotto.
+            ax.yaxis.label.set_size(7)
+            ax.yaxis.labelpad = 2
             ax.set_xlim(-0.8, N_CANALI_HW - 0.2)
         axes[2].set_xticks(range(N_CANALI_HW))
         axes[2].set_xticklabels([str(c) for c in range(N_CANALI_HW)], fontsize=6)

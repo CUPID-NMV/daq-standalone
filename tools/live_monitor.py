@@ -767,12 +767,13 @@ class Monitor:
         # e non si sapeva nemmeno quale fosse senza leggere l'etichetta.
         x = [int(r["ch"]) for r in righe]
 
-        larg = 0.28 * N_CANALI_HW + 2.6
-        # Bassi: tre strisce da leggere a colpo d'occhio, non tre grafici da
-        # studiare.
+        # Bassi e stretti: tre strisce da leggere a colpo d'occhio, non tre
+        # grafici da studiare. Le colonne dei canali stanno in meno spazio di
+        # quanto sembri -- quello che conta e' dove sta la barra, non quanto e'
+        # larga.
         fig, axes = plt.subplots(3, 1, sharex=True,
-                                 figsize=(larg * k, 2.9 * k))
-        wbar = 0.72
+                                 figsize=(LARG_PX * k / DPI_PAN, 2.9 * k))
+        wbar = 0.78
         # Le etichette vanno ORIZZONTALI sopra ogni striscia, non ruotate a
         # sinistra: una striscia alta un pollice scarso e' piu' bassa della
         # parola "amplitude [mV]" scritta in verticale, e l'etichetta di un
@@ -847,7 +848,7 @@ class Monitor:
 
         fig.tight_layout(rect=(0, 0.035, 1, 1) if nota_sotto else None)
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=110)
+        fig.savefig(buf, format="png", dpi=DPI_PAN)
         plt.close(fig)
         return buf.getvalue()
 
@@ -910,7 +911,8 @@ class Monitor:
             # tempo, e 200 px in piu' sull'asse x si leggono. Sono l'unica
             # figura che CRESCE in questo riassetto.
             fig, axes = plt.subplots(len(channels), 1,
-                                     figsize=(11 * k, 3.3 * k * len(channels)),
+                                     figsize=(LARG_PX * k / DPI_FIG,
+                                              3.3 * k * len(channels)),
                                      squeeze=False, sharex=True)
             n = max(1, min(n_show, corr.shape[0]))
             for i, ch in enumerate(channels):
@@ -1005,7 +1007,7 @@ class Monitor:
                 if (bw and not self.self_trigger_attivo() and dettagli) else None))
 
         elif kind == "average":
-            fig, ax = plt.subplots(figsize=(7 * k, 2.5 * k))
+            fig, ax = plt.subplots(figsize=(LARG_PX * k / DPI_FIG, 2.5 * k))
             for i, ch in enumerate(channels):
                 line, = ax.plot(t_ns, corr[:, i].mean(axis=0), lw=1.4, label=f"ch{ch}")
 
@@ -1064,8 +1066,14 @@ class Monitor:
             # Piu' alto degli altri pannelli: sotto gli assi ci vanno
             # etichetta, legenda e il pie' di pagina, e con 3.4 pollici il
             # grafico si sarebbe schiacciato a una striscia.
+            # Meta' della larghezza comune: i due spettri stanno affiancati e
+            # insieme fanno la riga, come la panoramica sopra. Con molti canali
+            # non si puo' tenere la promessa senza ridurre ogni pannello a una
+            # fetta: oltre i due canali la figura cresce e la riga va a capo,
+            # che il CSS gia' fa.
+            larg_px = max(LARG_PX / 2, 230 * len(channels))
             fig, axes = plt.subplots(1, len(channels),
-                                     figsize=(4.8 * k * len(channels), 3.1 * k),
+                                     figsize=(larg_px * k / DPI_FIG, 3.1 * k),
                                      squeeze=False)
             for i, ch in enumerate(channels):
                 ax = axes[0][i]
@@ -1098,7 +1106,7 @@ class Monitor:
                 # due curve coincidono a meno del rumore di Poisson del
                 # campione piccolo, quindi aggiungeva disturbo e non
                 # informazione.
-                ax.hist(val, bins=bordi, color="#1f77b4", alpha=.85)
+                ax.hist(val, bins=bordi, color=COLORE_CARICA, alpha=.85)
                 ax.set_xlim(*est)
                 ax.text(0.99, 0.97, "%s events" % _mila(val.size),
                         transform=ax.transAxes, ha="right", va="top",
@@ -1200,8 +1208,9 @@ class Monitor:
             # la distribuzione di prima resta accanto in grigio.
             dep_a = self.accumula("ampiezze", q, channels, self.gen)
 
+            larg_px = max(LARG_PX / 2, 230 * len(channels))
             fig, axes = plt.subplots(1, len(channels),
-                                     figsize=(4.8 * k * len(channels), 3.1 * k),
+                                     figsize=(larg_px * k / DPI_FIG, 3.1 * k),
                                      squeeze=False)
             for i, ch in enumerate(channels):
                 ax = axes[0][i]
@@ -1246,7 +1255,7 @@ class Monitor:
                     ax.hist(old, bins=bins, color="#888888", alpha=.55,
                             label=f"before (offset {lo})" if lo is not None else "prima")
                 cn = self.offsets.get(int(ch))
-                ax.hist(cur, bins=bins, color="#1f77b4", alpha=.85,
+                ax.hist(cur, bins=bins, color=COLORE_AMPIEZZA, alpha=.85,
                         label=f"now (offset {cn})" if cn is not None else "ora")
                 if old is not None and old.size:
                     ax.legend(fontsize=8)
@@ -1740,6 +1749,23 @@ tick(); setInterval(tick, REFRESH);
 # panoramica li porta tutti, sempre, perche' il posto di un canale non deve
 # dipendere da quanti se ne registrano quel giorno.
 N_CANALI_HW = 32
+
+# Larghezza comune a tutte le figure, in PIXEL e non in pollici: la panoramica
+# si salva a 110 dpi e le altre a 100, quindi gli stessi pollici darebbero
+# larghezze diverse sullo schermo. E' il numero che tiene in colonna la
+# panoramica, le forme d'onda e la media, con i due spettri che si dividono la
+# stessa larghezza in due.
+# Due colori per due grandezze diverse: prima erano tutti e due blu e i due
+# spettri si somigliavano al punto da scambiarli. Sono i primi due della
+# tavolozza di plot_scan.py, scelta perche' le coppie restano distinguibili
+# anche con il daltonismo -- blu e arancio e' la coppia sicura, verde e
+# arancio no.
+COLORE_AMPIEZZA = "#2a78d6"     # spettro delle ampiezze, in unita' di offset
+COLORE_CARICA = "#eb6834"       # spettro di carica, in pC
+
+LARG_PX = 660
+DPI_PAN = 110
+DPI_FIG = 100
 
 
 def _bin(valore):

@@ -783,16 +783,12 @@ class Monitor:
         # Bande alternate per gruppo del V1742: sono quattro da otto canali, e
         # con l'asse sempre completo si vedono tutte, anche quelle senza barre.
         for g in range(N_CANALI_HW // 8):
-            a, b = g * 8 - 0.5, g * 8 + 7.5
             if g % 2 == 0:
                 for ax in axes:
-                    ax.axvspan(a, b, color="#000", alpha=.04)
+                    ax.axvspan(g * 8 - 0.5, g * 8 + 7.5, color="#000", alpha=.04)
             # Sopra l'etichetta della striscia, non alla stessa altezza:
             # stretta la figura, "occupancy [%]" a sinistra e "gr0" centrato
             # sul primo gruppo finivano uno sull'altro.
-            axes[0].annotate("gr%d" % g, xy=((a + b) / 2, 1.06),
-                             xycoords=("data", "axes fraction"),
-                             ha="center", fontsize=7.5, color="#888")
 
         # Il rate per canale non si misura: si ricava dall'occupazione
         # moltiplicata per il rate totale, perche' il trigger e' l'OR dei
@@ -826,7 +822,15 @@ class Monitor:
 
         axes[2].bar(x, [r["rms"] * mv for r in righe], width=wbar, color="#d62728")
         etichette[2] = "noise [mV]"
-        axes[2].set_xlabel("channel")
+        # I nomi dei gruppi stanno QUI e non sopra le bande. Provati tutti e
+        # due i lati sopra la prima striscia: a sinistra sbattevano contro
+        # l'etichetta della striscia, a destra pure, perche' le bande coprono
+        # tutta la larghezza e un angolo libero su quella riga non esiste.
+        # Nell'etichetta dell'asse non possono collidere con niente, e le
+        # bande alternate dicono gia' dove finisce un gruppo.
+        axes[2].set_xlabel("channel      (gr0: 0-7   \u00b7   gr1: 8-15   "
+                           "\u00b7   gr2: 16-23   \u00b7   gr3: 24-31)",
+                           fontsize=8.5)
 
         nota_sotto = any(sotto) and dettagli
         if nota_sotto:
@@ -841,7 +845,7 @@ class Monitor:
             # A DESTRA: a sinistra sbatteva contro "gr0", che sta al centro
             # del primo gruppo e con la figura stretta cade proprio li'. A
             # destra l'ultimo gruppo e' gr3, centrato all'86%, e resta spazio.
-            ax.set_title(etichette[i_ax], loc="right", fontsize=7.5,
+            ax.set_title(etichette[i_ax], loc="left", fontsize=7.5,
                          color="#52514e", pad=3)
         axes[2].set_xticks(range(N_CANALI_HW))
         axes[2].set_xticklabels([str(c) for c in range(N_CANALI_HW)], fontsize=6)

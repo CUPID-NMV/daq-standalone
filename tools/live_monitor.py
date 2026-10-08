@@ -95,6 +95,7 @@ class Monitor:
         self.start_time = None
 
         self.status = None        # live-status.json pubblicato dalla DAQ
+        self.nota = None          # avviso non fatale da mostrare nella pagina
         self.segno = -1.0         # verso dell'impulso, finche' non ci sono dati
         # Finestra in cui si misura il piedistallo, in ns. Prima dell'impulso
         # e non dal campione zero: i primi campioni dopo la cella di trigger
@@ -287,8 +288,12 @@ class Monitor:
             path = self._latest_file()
             # Solo la coda del file: il costo di un aggiornamento non deve
             # crescere con la durata della run.
+            # strict=False: la casella "channels" e' un FILTRO di vista, non
+            # una richiesta di analisi. Scrivere "1-16" su una run che
+            # registra il solo ch16 e' normale, e deve mostrare quell'uno
+            # invece di fermare tutto con "Canali non presenti nel file".
             hdr, data = load(path, last=self.max_events, live=True,
-                             channels=self.sel_channels)
+                             channels=self.sel_channels, strict=False)
         except DaqFileError as exc:
             self.error = str(exc).splitlines()[0]
             return
@@ -297,6 +302,11 @@ class Monitor:
             return
 
         self.error = None
+        # Quali canali chiesti non c'erano: non e' un errore, ma chi guarda
+        # deve sapere perche' ne vede meno di quanti ne ha chiesti.
+        mancanti = hdr.get("ChannelListMancanti")
+        self.nota = ("not recorded in this run: " +
+                     ", ".join("ch%d" % c for c in mancanti)) if mancanti else None
 
         # Cambio di file: si riparte da zero con tutto cio' che e' storia.
         #
@@ -712,6 +722,7 @@ class Monitor:
             "ratemed": (lambda t: round(t[0], 2) if t[0] else None)(self.rate_avg()),
             "ratemednota": self.rate_avg()[1],
             "error": self.error,
+            "nota": self.nota,
             # Da quanto il file non cresce, e di quando e'. Servono a dire
             # "questa non e' una run in corso": senza, un file fermo di giorni
             # prima si presenta identico a una run viva.
@@ -1605,7 +1616,8 @@ PAGE = """<!DOCTYPE html>
   <div><b id="ratemed">–</b> <span id="ratemednota">Hz · run average</span></div>
   <div><b id="events">–</b> <span>events</span></div>
   <div><b id="shown">–</b> <span>in the plots</span></div>
-  <div><span id="err" class="err"></span></div>
+  <div><span id="err" class="err"></span>
+       <span id="nota" style="color:var(--mut);font-size:12px"></span></div>
 </div>
 <div class="ctl">
   <label>x min [ns]<input id="xmin" value="__XMIN__" placeholder="auto"></label>
@@ -1876,7 +1888,9 @@ async function tick() {
     document.getElementById('ratemednota').textContent =
         'Hz · run average' + (s.ratemednota || '');
     show('events', s.events); show('shown', s.shown);
+    // La nota non e' un errore: grigia, accanto al nome del file
     document.getElementById('err').textContent    = s.error || '';
+    document.getElementById('nota').textContent   = s.nota || '';
     document.getElementById('file').textContent   =
       (s.file || 'no file') + (s.sampling ? ' · ' + s.sampling : '');
     buildHistControls((s.channels || []).map(c => c.ch));

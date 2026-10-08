@@ -153,7 +153,7 @@ def _read_v1(f, hdr, max_events, live, last=None):
     return flat, len(keys), total
 
 
-def load(path, max_events=None, live=False, last=None, channels=None):
+def load(path, max_events=None, live=False, last=None, channels=None, strict=True):
     """Carica un file di dati.
 
     Ritorna (header, data) con data di forma (n_eventi, n_canali, n_campioni).
@@ -166,6 +166,13 @@ def load(path, max_events=None, live=False, last=None, channels=None):
     qualche gigabyte. In quel caso hdr["ChannelList"] descrive i canali
     effettivamente letti, coerente con la forma dei dati, e la lista completa
     del file resta in hdr["ChannelListFile"].
+
+    `strict=False` ignora i canali chiesti che nel file non ci sono, invece di
+    sollevare. Serve a chi usa `channels` come FILTRO di una vista -- il
+    monitor -- dove chiedere "1-16" su un file che ne contiene uno solo e'
+    normale e deve mostrare quell'uno. Per un'analisi invece l'errore e'
+    giusto: un canale che manca cambia il risultato, e deve fermare.
+    I canali chiesti e non trovati finiscono in hdr["ChannelListMancanti"].
     """
     f, tmp = open_file(path, live=live)
     try:
@@ -175,11 +182,19 @@ def load(path, max_events=None, live=False, last=None, channels=None):
         if channels is not None:
             voluti = [int(c) for c in channels]
             mancanti = [c for c in voluti if c not in tutti]
-            if mancanti:
+            if mancanti and strict:
                 raise DaqFileError(
                     "Canali non presenti nel file: " +
                     ", ".join(str(c) for c in mancanti) +
                     ". Il file contiene " + ", ".join(str(c) for c in tutti) + ".")
+            if mancanti:
+                voluti = [c for c in voluti if c in tutti]
+                hdr["ChannelListMancanti"] = mancanti
+            if not voluti:
+                # Chiesti solo canali che non ci sono: mostrare niente
+                # sembrerebbe un guasto. Si mostra tutto il file, e chi chiama
+                # lo dice a chi guarda.
+                voluti = list(tutti)
             chan_idx = [tutti.index(c) for c in voluti]
             hdr["ChannelListFile"] = tutti
             hdr["ChannelList"] = voluti

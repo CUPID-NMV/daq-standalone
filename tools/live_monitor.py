@@ -1385,16 +1385,25 @@ class Monitor:
                 # Quanti eventi ci sono dentro, e da dove: lo spettro dice
                 # "tutta la run" e va detto quando non e' vero -- monitor
                 # acceso a run avviata, o eventi prodotti fra due letture.
+                # Quanti eventi ci sono dentro e che frazione sono della run.
+                # Prima la parte mancante era una riga ROSSA a parte -- "37 700
+                # missed between reads" -- che sembrava un guasto: non lo e',
+                # il monitor legge la coda del file ogni due secondi e a 500 Hz
+                # gli eventi in mezzo non li vede mai. Quello che conta per chi
+                # guarda e' che lo spettro e' un CAMPIONE, e lo dice la
+                # percentuale. Il conteggio dei persi resta, sotto "details".
                 conto = "%s events" % _mila(cur.size)
-                da_ev = self.da_evento(dep_a)
-                if da_ev > 0:
-                    conto += "   from %s" % _mila(da_ev)
+                persi = dep_a["persi"]
+                if persi:
+                    conto += "   (%.0f%% of the run)" % (
+                        100.0 * cur.size / max(1, cur.size + persi))
                 ax.text(0.99, 0.97, conto, transform=ax.transAxes,
                         ha="right", va="top", fontsize=8, color="#52514e")
-                if dep_a["persi"]:
-                    ax.text(0.99, 0.90, "%s missed between reads"
-                            % _mila(dep_a["persi"]), transform=ax.transAxes,
-                            ha="right", va="top", fontsize=8, color="#d62728")
+                if persi and dettagli:
+                    ax.text(0.99, 0.90, "from %s \u00b7 %s missed between reads"
+                            % (_mila(self.da_evento(dep_a)), _mila(persi)),
+                            transform=ax.transAxes,
+                            ha="right", va="top", fontsize=8, color="#888")
 
                 # Frazione di eventi sotto una soglia in ampiezza. Il default
                 # e' l'estremo superiore dell'istogramma, quindi conta tutto:
@@ -1741,7 +1750,7 @@ function apriCanale(muro, ch) {
     sorgenti.map(() => "<img>").join("") +
     "</div><p>" + nome + " &middot; aggiornata dalla pagina principale</p></body></html>");
   w.document.close();
-  finestre.push({w: w, muro: muro, ch: ch, sorgenti: sorgenti});
+  finestre.push({w: w, muro: muro, ch: ch, sorgenti: sorgenti, dim: false});
   aggiornaFinestre();
 }
 
@@ -1760,7 +1769,7 @@ function apriFinestra(id, titolo) {
     "<p>" + titolo + " &middot; aggiornato dalla pagina principale: se la chiudi, questa si ferma.</p>" +
     "</body></html>");
   w.document.close();
-  finestre.push({w: w, id: id});
+  finestre.push({w: w, id: id, dim: false});
 }
 
 function aggiornaFinestre() {
@@ -1783,8 +1792,33 @@ function aggiornaFinestre() {
         f.sorgenti.forEach((sg, k) => {
           if (dentro[k]) dentro[k].src = sg[0] + ".png?" + q.toString();
         });
+        // La finestra si ridimensiona sulla misura VERA delle immagini, una
+        // volta sola. Le width/height passate a window.open sono un
+        // suggerimento che Safari ignora: si apriva grande quanto lo schermo
+        // con dentro un grafico da 330 px in un angolo.
+        if (!f.dim && dentro.length &&
+            Array.prototype.every.call(dentro, im => im.naturalWidth > 0)) {
+          let lw = 0, lh = 0;
+          Array.prototype.forEach.call(dentro, im => {
+            lw += im.naturalWidth + 8;
+            lh = Math.max(lh, im.naturalHeight);
+          });
+          const bx = Math.max(0, f.w.outerWidth - f.w.innerWidth);
+          const by = Math.max(0, f.w.outerHeight - f.w.innerHeight);
+          try { f.w.resizeTo(lw + bx + 16, lh + by + 54); } catch (e) {}
+          f.dim = true;
+        }
       } else if (dentro[0]) {
         dentro[0].src = document.getElementById(f.id).src;
+        if (!f.dim && dentro[0].naturalWidth > 0) {
+          const bx = Math.max(0, f.w.outerWidth - f.w.innerWidth);
+          const by = Math.max(0, f.w.outerHeight - f.w.innerHeight);
+          try {
+            f.w.resizeTo(dentro[0].naturalWidth + bx + 16,
+                         dentro[0].naturalHeight + by + 54);
+          } catch (e) {}
+          f.dim = true;
+        }
       }
     } catch (e) { finestre.splice(i, 1); }
   }

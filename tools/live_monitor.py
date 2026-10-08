@@ -965,8 +965,10 @@ class Monitor:
             ax.plot(x, rate, "-o", ms=3, lw=1.2, color=PALETTE[2])
             # Lo zero sull'asse ci sta sempre: un rate caduto a zero e un rate
             # sceso del 10% sono la stessa immagine se l'asse si autoscala sui
-            # soli punti.
-            ax.set_ylim(bottom=0)
+            # soli punti. Sopra un quarto di aria, se no i punti strisciano
+            # contro la cornice e non si vede piu' se oscillano.
+            alto = float(np.nanmax(rate)) if rate.size else 0.0
+            ax.set_ylim(0, alto * 1.25 if alto > 0 else 1)
             ax.set_xlabel("time since start of run [%s]" % ("min" if minuti else "s")
                           + ("" if self.start_time else "  (since the monitor started:"
                              " the file does not declare StartTime)"))

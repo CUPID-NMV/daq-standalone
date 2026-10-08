@@ -1553,6 +1553,25 @@ PAGE = """<!DOCTYPE html>
   .celle a { position:absolute; border-radius:4px; cursor:pointer;
              border:1px solid transparent; }
   .celle a:hover { border-color:var(--acc); background:rgba(0,170,119,.07); }
+  /* La "lente": il dettaglio si apre SOPRA la pagina invece che in una
+     finestra del browser. Serve perche' con Safari a schermo intero una
+     finestra nuova finisce nello stesso spazio a tutto schermo, e da qui non
+     si puo' impedire: resizeTo su una finestra full screen non fa niente.
+     Il bottone per staccarla in una finestra vera resta, per chi ha il
+     secondo schermo e non e' a schermo intero. */
+  .lente { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none;
+           align-items:center; justify-content:center; z-index:50; }
+  .lente.apri { display:flex; }
+  .lentebox { background:var(--bg); border-radius:10px; padding:10px;
+              max-width:96vw; max-height:94vh; overflow:auto;
+              box-shadow:0 10px 40px rgba(0,0,0,.45); }
+  .lentetop { display:flex; align-items:center; gap:10px; margin-bottom:6px;
+              font-size:13px; color:var(--mut); }
+  .lentetop a { margin-left:auto; cursor:pointer; color:var(--mut);
+                text-decoration:none; font-size:15px; padding:0 4px; }
+  .lentetop a:hover { color:var(--fg); }
+  .lenteimg { display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap; }
+  .lenteimg img { margin-bottom:0; }
   details#interi { margin:4px 0 14px; }
   details#interi summary { cursor:pointer; color:var(--mut); font-size:12px;
                            padding:4px 0; }
@@ -1629,6 +1648,13 @@ Open the browser console to see the error.</div>
 <div class="muro"><img id="mc" alt="charge wall"><div class="celle" data-muro="car"></div></div>
 
 <div class="gr"><a class="apri" data-img="a">&#8599;</a><img id="a" alt="average"></div>
+
+<div id="lente" class="lente"><div class="lentebox">
+  <div class="lentetop"><span id="lentetit"></span>
+    <a id="lenteapri" title="detach into a separate window">&#8599;</a>
+    <a id="lentechiudi" title="close (Esc)">&#10005;</a></div>
+  <div id="lenteimg" class="lenteimg"></div>
+</div></div>
 
 <details id="interi"><summary>full-size plots of every channel</summary>
   <div class="gr"><a class="apri" data-img="w">&#8599;</a><img id="w" alt="waveforms"></div>
@@ -1731,17 +1757,66 @@ function buildHistControls(channels) {
 // vecchi fingendo di essere viva.
 const finestre = [];
 
-// Una finestra per canale. Quella delle forme d'onda ne porta DUE: l'ultimo
-// evento e la media dello stesso canale, affiancati -- sono due domande
-// diverse e si leggono bene vicine.
-function apriCanale(muro, ch) {
-  const sorgenti = {
+// Cosa mostra il dettaglio di un canale. Quello delle forme d'onda porta DUE
+// grafici: l'ultimo evento e la media dello stesso canale, affiancati -- sono
+// due domande diverse e si leggono bene vicine.
+function sorgentiDi(muro) {
+  return {
     wf:  [["waveforms", "last event"], ["average", "average"]],
     amp: [["amplitudes", "amplitude spectrum"]],
     car: [["integrals", "charge spectrum"]],
   }[muro];
-  const nome = "ch" + ch + " \u00b7 " + (muro === "wf" ? "waveform" :
-               muro === "amp" ? "amplitude" : "charge");
+}
+
+function nomeDi(muro, ch) {
+  return "ch" + ch + " \u00b7 " + (muro === "wf" ? "waveform" :
+         muro === "amp" ? "amplitude" : "charge");
+}
+
+// La lente: il dettaglio sopra la pagina. E' questa l'azione del clic, perche'
+// funziona sempre -- anche con Safari a schermo intero, dove una finestra
+// nuova finisce a tutto schermo e non c'e' modo di impedirlo da qui.
+let lente = null;
+
+function apriLente(muro, ch) {
+  lente = {muro: muro, ch: ch, sorgenti: sorgentiDi(muro)};
+  document.getElementById("lentetit").textContent = nomeDi(muro, ch);
+  document.getElementById("lenteimg").innerHTML =
+    lente.sorgenti.map(() => "<img>").join("");
+  document.getElementById("lente").classList.add("apri");
+  aggiornaLente();
+}
+
+function chiudiLente() {
+  lente = null;
+  document.getElementById("lente").classList.remove("apri");
+}
+
+function aggiornaLente() {
+  if (!lente) return;
+  const q = new URLSearchParams(params());
+  q.set("solo", lente.ch);
+  q.set("t", Date.now());
+  const imgs = document.getElementById("lenteimg").getElementsByTagName("img");
+  lente.sorgenti.forEach((sg, k) => {
+    if (imgs[k]) imgs[k].src = sg[0] + ".png?" + q.toString();
+  });
+}
+
+document.getElementById("lentechiudi").onclick = chiudiLente;
+document.getElementById("lente").onclick = ev => {
+  if (ev.target.id === "lente") chiudiLente();
+};
+document.addEventListener("keydown", ev => {
+  if (ev.key === "Escape") chiudiLente();
+});
+document.getElementById("lenteapri").onclick = () => {
+  if (lente) { const l = lente; chiudiLente(); apriCanale(l.muro, l.ch); }
+};
+
+function apriCanale(muro, ch) {
+  const sorgenti = sorgentiDi(muro);
+  const nome = nomeDi(muro, ch);
   const w = window.open("", "daqmon_" + muro + "_" + ch,
                         "width=" + (sorgenti.length > 1 ? 1040 : 560) + ",height=420,scrollbars=yes");
   if (!w) { setAlert("The browser blocked the pop-up window. Allow pop-ups for this page."); return; }
@@ -1841,7 +1916,7 @@ function costruisciCelle(muro) {
       `<a title="ch${c.ch}" data-ch="${c.ch}" style="left:${c.x * 100}%;` +
       `bottom:${c.y * 100}%;width:${c.w * 100}%;height:${c.h * 100}%"></a>`).join("");
     box.querySelectorAll("a").forEach(a => {
-      a.onclick = () => apriCanale(box.dataset.muro, a.dataset.ch);
+      a.onclick = () => apriLente(box.dataset.muro, a.dataset.ch);
     });
   });
 }
@@ -1949,6 +2024,7 @@ async function tick() {
                              ['mw','muro_wf'],['ma','muro_amp'],['mc','muro_car']])
       document.getElementById(id).src = name + '.png?' + p.toString();
     costruisciCelle(s.muro);
+    aggiornaLente();
     // La panoramica copre tutti i canali e non risente della selezione, quindi
     // non serve rigenerarla a ogni giro: si aggiorna ogni 5 s per conto suo.
     const pano = document.getElementById('pano');

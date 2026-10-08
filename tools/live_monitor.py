@@ -1680,7 +1680,6 @@ Open the browser console to see the error.</div>
 <div class="muro"><img id="ma" alt="amplitude wall"><div class="celle" data-muro="amp"></div></div>
 <div class="muro"><img id="mc" alt="charge wall"><div class="celle" data-muro="car"></div></div>
 
-<div class="gr"><a class="apri" data-img="a">&#8599;</a><img id="a" alt="average"></div>
 
 <div id="lente" class="lente"><div class="lentebox">
   <div class="lentetop"><span id="lentetit"></span>
@@ -2082,7 +2081,7 @@ async function tick() {
        <td>${na(c.eff)}</td></tr>`).join('');
     const p = params();
     p.set('t', Date.now());
-    for (const [id, name] of [['w','waveforms'],['a','average'],['h','amplitudes'],
+    for (const [id, name] of [['w','waveforms'],['h','amplitudes'],
                              ['q','integrals'],
                              ['mw','muro_wf'],['ma','muro_amp'],['mc','muro_car']])
       document.getElementById(id).src = name + '.png?' + p.toString();

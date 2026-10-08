@@ -311,14 +311,12 @@ def coerenza(d):
                       "fired, so any measured rate is the rate of the OR. "
                       "To measure one alone, switch the other off." % chi)
 
-    # TRG-OUT in modo "self" prende la maschera dai soli gruppi del
-    # self-trigger: col self-trigger spento il connettore resta muto, e uno
-    # scaler attaccato li' legge zero mentre la DAQ sta acquisendo.
-    tout = str(g.get("TriggerOut", "default"))
-    if tout == "self" and not self_on:
-        avvisi.append("TriggerOut = \"self\" but the self-trigger is off: nothing will "
-                      "come out of TRG-OUT. Use \"all\" to also see external and "
-                      "software triggers.")
+    # Con il self-trigger spento NON si avvisa di niente che lo riguardi --
+    # ne' TriggerOut = "self", ne' i canali, ne' gli offset rimasti scritti nel
+    # pannello. Quelle chiavi restano nel TOML da una run all'altra ed e'
+    # giusto che restino: avvisare ogni volta trasformerebbe il riquadro in
+    # rumore di fondo, e un riquadro che avvisa sempre non lo legge piu'
+    # nessuno. Quando il self-trigger e' acceso i controlli tornano, sotto.
 
     # TailCut scarta i campioni finali: se arriva a mangiarsi tutto l'evento,
     # la run scrive forme d'onda di lunghezza zero.

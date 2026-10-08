@@ -924,6 +924,62 @@ class Monitor:
         plt.close(fig)
         return buf.getvalue()
 
+    # Il rate nel tempo. Non passa dall'analisi delle forme d'onda: si disegna
+    # dalla sola storia (istante, eventi totali), quindi risponde anche quando
+    # non c'e' ancora un evento buono da analizzare -- ed e' proprio allora
+    # che serve sapere se sta arrivando qualcosa.
+    def _figura_rate(self, scala, binw):
+        k = self.SCALE.get(str(scala).upper(), 1.0)
+        # Bassa: e' un controllo rapido, non un grafico da studiare. Quello
+        # che si legge e' se il rate e' piatto o se e' caduto, non il valore.
+        fig, ax = plt.subplots(figsize=(LARG_PX * k / DPI_FIG, 1.8 * k))
+        h = list(self._hist)
+        t = np.array([x[0] for x in h], dtype=float)
+        n = np.array([x[1] for x in h], dtype=float)
+        nbin = int((t[-1] - t[0]) // binw) if len(h) >= 2 else 0
+
+        if nbin < 1:
+            manca = binw - (t[-1] - t[0]) if len(h) >= 2 else binw
+            ax.text(.5, .5, "collecting: first point in %.0f s" % max(0.0, manca),
+                    ha="center", va="center", transform=ax.transAxes,
+                    color="#888", fontsize=11)
+            ax.set_xticks([]); ax.set_yticks([])
+        else:
+            bordi = t[0] + binw * np.arange(nbin + 1)
+            # I bordi quasi mai cadono su un campione della storia, che arriva
+            # ogni paio di secondi: si interpola il CONTEGGIO, non il rate.
+            # Interpolare il rate pesa i campioni tutti uguali anche quando
+            # coprono intervalli diversi.
+            conteggi = np.interp(bordi, t, n)
+            rate = np.diff(conteggi) / np.diff(bordi)
+            centri = (bordi[:-1] + bordi[1:]) / 2
+
+            # Lo zero dell'asse e' l'inizio della RUN se il file lo dichiara:
+            # un monitor avviato a run in corso parte da un punto qualunque, e
+            # senza questo due grafici della stessa run non si sovrappongono.
+            t0 = self.start_time if self.start_time else t[0]
+            durata = centri[-1] - t0
+            minuti = durata > 900
+            x = (centri - t0) / (60.0 if minuti else 1.0)
+
+            ax.plot(x, rate, "-o", ms=3, lw=1.2, color=PALETTE[2])
+            # Lo zero sull'asse ci sta sempre: un rate caduto a zero e un rate
+            # sceso del 10% sono la stessa immagine se l'asse si autoscala sui
+            # soli punti.
+            ax.set_ylim(bottom=0)
+            ax.set_xlabel("time since start of run [%s]" % ("min" if minuti else "s")
+                          + ("" if self.start_time else "  (since the monitor started:"
+                             " the file does not declare StartTime)"))
+            ax.set_ylabel("rate [Hz]")
+            ax.grid(alpha=.3)
+            ax.set_title("Rate vs time \u00b7 %g s per point" % binw, fontsize=10)
+
+        fig.tight_layout()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=DPI_FIG)
+        plt.close(fig)
+        return buf.getvalue()
+
     # Moltiplicatore delle figure. La dimensione giusta dipende dallo schermo
     # di chi guarda -- un portatile in laboratorio e un monitor grande non
     # vogliono la stessa cosa -- quindi la sceglie la pagina invece di essere
@@ -932,7 +988,9 @@ class Monitor:
 
     def figure(self, kind, n_show=1, xlim=(None, None), ylim=(None, None),
                hset=None, bw=None, qcut=None, qset=None, gate=None, scala="M",
-               dettagli=False, solo=None):
+               dettagli=False, solo=None, rbin=10.0):
+        if kind == "rate":
+            return self._figura_rate(scala, max(1.0, float(rbin or 10.0)))
         if kind == "panoramica":
             # Non passa dall'analisi di dettaglio: quella riguarda i soli
             # canali selezionati e puo' mancare, mentre la panoramica deve
@@ -1632,6 +1690,7 @@ PAGE = """<!DOCTYPE html>
   <label>to [ns]<input id="gto" value="__GTO__" placeholder="default" style="width:70px"></label>
   <label>channels<input id="canali" value="" placeholder="all  e.g. 8,9,12-15" style="width:150px"></label>
   <label>threshold [offset]<input id="qcut" value="" placeholder="whole spectrum" style="width:110px"></label>
+  <label title="one point every N seconds, from the history of event counts">rate bin [s]<input id="rbin" value="10" style="width:60px"></label>
   <label>plot size<select id="scala" style="font:13px inherit;padding:5px 7px">
     <option>S</option><option selected>M</option><option>L</option></select></label>
   <label class="chk" title="gate, baseline window, calibration, noise floor and the
@@ -1680,6 +1739,10 @@ Open the browser console to see the error.</div>
 <div class="muro"><img id="ma" alt="amplitude wall"><div class="celle" data-muro="amp"></div></div>
 <div class="muro"><img id="mc" alt="charge wall"><div class="celle" data-muro="car"></div></div>
 
+<!-- Il rate nel tempo: basso, da leggere di sfuggita. Dice se la presa dati e'
+     stabile, cosa che i numeri in cima -- un istante solo -- non dicono. -->
+<div class="gr"><a class="apri" data-img="r">&#8599;</a><img id="r" alt="rate vs time"></div>
+
 
 <div id="lente" class="lente"><div class="lentebox">
   <div class="lentetop"><span id="lentetit"></span>
@@ -1708,7 +1771,7 @@ function setAlert(msg) {
   document.body.classList.toggle('stale', !!msg);
 }
 const FIELDS = ['xmin','xmax','ymin','ymax','nev','bw','bfrom','bto','gfrom','gto',
-                'canali','qcut','scala'];
+                'canali','qcut','scala','rbin'];
 
 // I limiti scelti sopravvivono a un reload della pagina. localStorage puo'
 // essere inaccessibile (finestra privata, cookie bloccati): mai fatale.
@@ -2081,7 +2144,7 @@ async function tick() {
        <td>${na(c.eff)}</td></tr>`).join('');
     const p = params();
     p.set('t', Date.now());
-    for (const [id, name] of [['w','waveforms'],['h','amplitudes'],
+    for (const [id, name] of [['w','waveforms'],['r','rate'],['h','amplitudes'],
                              ['q','integrals'],
                              ['mw','muro_wf'],['ma','muro_amp'],['mc','muro_car']])
       document.getElementById(id).src = name + '.png?' + p.toString();
@@ -2317,6 +2380,7 @@ def make_handler(monitor, refresh, defaults):
                                           qs.get("det", ["0"])[0] == "1")).encode())
 
                 kinds = {"panoramica.png": "panoramica",
+                         "rate.png": "rate",
                          "waveforms.png": "waveforms",
                          "average.png": "average",
                          "amplitudes.png": "amplitudes",
@@ -2357,7 +2421,8 @@ def make_handler(monitor, refresh, defaults):
                                                      qset, gate,
                                                      qs.get("scala", ["M"])[0],
                                                      qs.get("det", ["0"])[0] == "1",
-                                                     self._num(qs, "solo", None)))
+                                                     self._num(qs, "solo", None),
+                                                     self._num(qs, "rbin", 10.0)))
 
             self._send(404, "text/plain", b"not found")
 

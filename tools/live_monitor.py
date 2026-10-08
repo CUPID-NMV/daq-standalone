@@ -661,7 +661,7 @@ class Monitor:
         sign = -1.0 if neg > 0.5 else 1.0
         return sign * edge, None
 
-    def stats(self):
+    def stats(self, dettagli=False):
         out = {
             "file": os.path.basename(self.path) if self.path else None,
             # Dopo un azzeramento il conteggio riparte: mostrare il totale del
@@ -711,7 +711,14 @@ class Monitor:
                 "threshold": info.get("threshold"),
                 "eff": None if eff is None else round(eff, 1),
                 "eff_mv": None if eff is None else round(eff * self.mv_per_count(), 2),
-                "eff_note": note,
+                # L'avvertimento sul perche' non c'e' un'ampiezza minima --
+                # "threshold inside the noise", "not enough statistics",
+                # "triggering on noise" -- e' roba da messa a punto, come le
+                # scritte sui grafici: senza "details" la colonna mostra un
+                # trattino e basta. Era rimasto acceso qui perche' la tabella
+                # non passava dall'interruttore: stats.json veniva chiesto
+                # senza parametri.
+                "eff_note": note if dettagli else None,
             })
         return out
 
@@ -1646,7 +1653,9 @@ function show(id, v) {
 }
 async function tick() {
   try {
-    const r = await fetch('stats.json', {cache:'no-store'});
+    const r = await fetch('stats.json?det=' +
+                          (document.getElementById('det').checked ? '1' : '0'),
+                          {cache:'no-store'});
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const s = await r.json();
     lastOk = new Date();
@@ -1859,7 +1868,8 @@ def make_handler(monitor, refresh, defaults):
 
                 if route == "stats.json":
                     return self._send(200, "application/json",
-                                      json.dumps(monitor.stats()).encode())
+                                      json.dumps(monitor.stats(
+                                          qs.get("det", ["0"])[0] == "1")).encode())
 
                 kinds = {"panoramica.png": "panoramica",
                          "waveforms.png": "waveforms",

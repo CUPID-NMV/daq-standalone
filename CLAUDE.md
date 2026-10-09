@@ -120,6 +120,30 @@ aggiorna. Le chiavi nuove vanno aggiunte lì a parte, con un backup, dicendolo.
   correzione calava — 32.0, 33.8, 33.3, 30.6, 24.5 — che per un impulso
   positivo è impossibile. Il piedistallo va preso PRIMA del segnale e non
   "fuori dal cancello": dopo l'impulso la coda contamina la stima del 6%.
+- **La calibrazione della soglia per impulsi LARGHI e POSITIVI, cioe' quelli
+  dei SiPM, vale 0.436 mV per unita' di offset** (attenuazione 1.79),
+  misurata il 2026-10-09 a 750 MS/s su impulsi da 189.34 mV e 189 ns FWHM:
+  d50 = 434.4 unita', turn-off strettissimo (sigma 0.24 mV). Il 2.7 della
+  tabella di `plot_scan` vale per impulsi da 1.8 ns dei PMT e per i SiPM
+  **sovrastima la soglia di sei volte** -- il sintomo era un asse che arrivava
+  a 2400 mV su un ingresso da 1 Vpp.
+- **La tabella `MV_PER_OFFSET` e' indicizzata sulla sola frequenza di
+  campionamento, e quella chiave non basta.** Quello che conta davvero e' la
+  **larghezza**: un fattore 8 fra 1.6 e 96 ns, contro il 25% fra 2.5 e
+  1 GS/s. I punti misurati sono due larghezze, non tre frequenze: 1.6 ns
+  (negativi, PMT) e 46-189 ns (il punto a 96 ns non registra nemmeno a che
+  frequenza fu preso). Per gli impulsi al buio dei SiPM, **20 ns**, non c'e'
+  nessun punto applicabile.
+- **Gli impulsi dei SiPM hanno due larghezze a seconda di cosa li produce**:
+  col LED **165 ns** FWHM (428 ns al 10%), al buio in self-trigger **20 ns**
+  (255 ns al 10%). Misurati il 2026-10-09 su ch16 a 750 MS/s. In tutti e due
+  i casi si e' lontanissimi dagli 1.80 ns dei PMT.
+- **Il rate del generatore si prende dal plateau dello scan, non dallo
+  scaler.** Il 2026-10-09 lo scaler dava 88 Hz, il plateau 91.6, e durante la
+  messa a punto la DAQ ne ha visti 12.9 per un'ora: era il sync che precedeva
+  l'impulso di 75 us, cinquantacinque finestre di acquisizione, quindi
+  l'impulso non poteva essere dentro nessuna. Al plateau e' la DAQ stessa a
+  contare, con la soglia ben sotto l'impulso.
 - **`TriggerPolarity`, `DCOffset` e il segno dell'impulso sono una cosa
   sola.** Piedistallo in basso (DCOffset alto) significa impulsi positivi e
   quindi fronte di salita. Sbagliare uno dei tre non dà errori: la soglia si

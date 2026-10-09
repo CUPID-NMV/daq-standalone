@@ -4,6 +4,51 @@ Cose decise ma non ancora applicate, con il motivo per cui aspettano.
 Quando una e' fatta si toglie da qui: il posto della documentazione sono
 CLAUDE.md e i commenti nel codice, questa e' solo una lista di lavoro.
 
+## Calibrazione: il punto a 20 ns — da fare lunedi 2026-10-12
+
+Il banco e' pronto e il generatore e' gia' su ch16 (SiPM scollegato da quel
+canale, restano su ch17 e ch18). Serve **cambiare solo la larghezza**: da
+200 ns a ~20 ns, che e' quella degli impulsi del SiPM al buio. Tutto il resto
+e' gia' configurato e verificato.
+
+Perche' serve: fra 1.6 ns (3.93 mV/offset) e 189 ns (0.436) ci sono otto
+volte, e i 20 ns stanno in mezzo dove la dipendenza e' ripida e non ne
+conosciamo la forma. Senza quel punto, il self-trigger sui singoli impulsi
+— che e' la domanda del progetto — non ha una soglia in millivolt.
+
+Procedura, la stessa di venerdi:
+
+1. `SelfTrigger = true`, `ExternalTrigger = false`, `SelfTriggerChannels = [16]`,
+   `SelfTriggerThresholdOffset = [8]`, `DCOffset = 0x8000`, `NEvents = 200000`.
+   **`DCOffset` va lasciato a 0x8000**: con 0xC000 il generatore porta ch16
+   sotto zero e il 48% dei campioni finisce schiacciato a 0.
+2. Run breve a soglia bassa: da li' si misurano ampiezza e FWHM vere.
+3. `tools/scan_v1742.sh -o "..." -s 45`, centrato su `d50 ~ ampiezza / k`
+   atteso. Se k fosse ~1 mV/offset e l'ampiezza 190 mV, d50 ~ 190.
+4. Il denominatore dell'efficienza **si prende dal plateau**, non dallo
+   scaler: venerdi' lo scaler dava 88 Hz e il plateau 91.6.
+5. Salvare in `measurements/`, disegnare con `tools/plot_calibrazione.py`.
+
+Seconda ampiezza (meta') per la linearita', come a settembre: due punti che
+concordano entro il 3% sono quello che dice che non c'e' un errore grossolano.
+
+## Scelta automatica della calibrazione in plot_scan
+
+Oggi `MV_PER_OFFSET` e' indicizzata sulla sola frequenza di campionamento, e
+quella chiave non basta: conta la larghezza, che vale un fattore 8. Il
+conteggio per canale **rilegge gia' le forme d'onda**, quindi puo' misurare
+la FWHM degli impulsi che sta contando e scegliere da se' il punto giusto.
+
+1. La tabella diventa un elenco di punti misurati: frequenza, larghezza,
+   segno, valore, file della misura in `measurements/`.
+2. `plot_scan` misura la FWHM nella run e prende il punto piu' vicino in
+   larghezza, **solo se entro un fattore 2**; se no si rifiuta come adesso.
+3. L'asse dichiara quale punto ha usato e che larghezza ha misurato, come
+   fa gia' con `ASSUMED`.
+
+La casella `mV/offset` nella pagina resta come via d'uscita, ma vuota vuol
+dire "scegli tu" e nell'uso normale non si tocca.
+
 ## ~~Restyling della pagina di controllo~~ — FATTO il 2026-10-07
 
 Applicato e in servizio. Resta da guardarlo sullo schermo vero: la struttura

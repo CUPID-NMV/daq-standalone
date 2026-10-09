@@ -1,0 +1,116 @@
+{
+ "descrizione": "Calibrazione offset->mV del self-trigger V1742 per impulsi LARGHI e POSITIVI, nelle condizioni dei SiPM. Generatore su ch16, SiPM scollegato da quel canale e lasciato su ch17 e ch18. Le calibrazioni precedenti erano a 1.6 ns e con impulsi negativi (PMT): non si applicano.",
+ "data": "2026-10-09",
+ "canale": 16,
+ "frequenza_campionamento": "750MHz",
+ "run_ampiezza": "test_0025_750Ms_40PT.h5.gz",
+ "run_scan": "test_0027_750Ms_40PT.h5",
+ "polarita": "positiva",
+ "dc_offset": "0x8000",
+ "ampiezza_mv": 189.34,
+ "ampiezza_conteggi": 776.0,
+ "ampiezza_dispersione_rms_conteggi": 1.5,
+ "larghezza_fwhm_ns": 189.0,
+ "larghezza_al_10pc_ns": 197.0,
+ "rate_generatore_hz": 91.56,
+ "come_misurato_il_rate": "plateau dello scan, cioe la DAQ stessa a soglia bassa; lo scaler ne dava 88",
+ "punti": [
+  {
+   "distanza": 99.61,
+   "rate_hz": 92.22,
+   "efficienza": 1.0072
+  },
+  {
+   "distanza": 199.61,
+   "rate_hz": 91.56,
+   "efficienza": 1.0
+  },
+  {
+   "distanza": 299.61,
+   "rate_hz": 91.56,
+   "efficienza": 1.0
+  },
+  {
+   "distanza": 399.61,
+   "rate_hz": 91.56,
+   "efficienza": 1.0
+  },
+  {
+   "distanza": 404.61,
+   "rate_hz": 91.78,
+   "efficienza": 1.0024
+  },
+  {
+   "distanza": 419.61,
+   "rate_hz": 91.78,
+   "efficienza": 1.0024
+  },
+  {
+   "distanza": 424.61,
+   "rate_hz": 91.33,
+   "efficienza": 0.9975
+  },
+  {
+   "distanza": 429.61,
+   "rate_hz": 91.78,
+   "efficienza": 1.0024
+  },
+  {
+   "distanza": 434.61,
+   "rate_hz": 30.0,
+   "efficienza": 0.3277
+  },
+  {
+   "distanza": 439.61,
+   "rate_hz": 0.0,
+   "efficienza": 0.0
+  },
+  {
+   "distanza": 444.61,
+   "rate_hz": 0.0,
+   "efficienza": 0.0
+  },
+  {
+   "distanza": 449.61,
+   "rate_hz": 0.0,
+   "efficienza": 0.0
+  },
+  {
+   "distanza": 464.61,
+   "rate_hz": 0.0,
+   "efficienza": 0.0
+  },
+  {
+   "distanza": 479.61,
+   "rate_hz": 0.0,
+   "efficienza": 0.0
+  },
+  {
+   "distanza": 494.61,
+   "rate_hz": 0.0,
+   "efficienza": 0.0
+  },
+  {
+   "distanza": 499.61,
+   "rate_hz": 0.0,
+   "efficienza": 0.0
+  },
+  {
+   "distanza": 599.61,
+   "rate_hz": 0.0,
+   "efficienza": 0.0
+  },
+  {
+   "distanza": 699.61,
+   "rate_hz": 0.0,
+   "efficienza": 0.0
+  }
+ ],
+ "distanza_50pc": 434.4,
+ "sigma_turnoff_offset": 0.56,
+ "mv_per_offset": 0.4359,
+ "attenuazione": 1.79,
+ "nota_larghezza": "Vale per impulsi larghi ~190 ns FWHM. Gli impulsi del SiPM col LED sono 165 ns, quelli al buio 20 ns: a quella larghezza NON si applica.",
+ "nota_turnoff": "Il turn-off e larghe sigma 0.6 unita di offset = 0.24 mV, contro una dispersione dell ampiezza di 0.37 mV: stretto. A 1.6 ns era molto piu largo di quanto l ampiezza spiegasse.",
+ "da_fare": "Seconda ampiezza per verificare la linearita, come fatto a settembre."
+}

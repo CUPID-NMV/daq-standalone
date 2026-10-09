@@ -120,21 +120,38 @@ class Monitor:
         # numero mostrato sarebbe zero pur stando acquisendo.
         self._hist = collections.deque(maxlen=4000)
         self._ultimo_conteggio = -1       # per capire se il file cresce ancora
+        self.file_mtime = None            # ultimo mtime visto del file seguito
         self._cresciuto = 0.0             # ultimo istante in cui e' cresciuto
 
     # -- lettura -------------------------------------------------------
 
     def _latest_file(self):
+        """Il file da seguire, oppure None per restare su quello di adesso.
+
+        Si cercano solo i .h5 non compressi: a run finita il file diventa
+        .h5.gz e non e' piu' monitorabile dal vivo. Il guaio e' che il piu'
+        recente .h5 RIMASTO puo' essere di giorni prima, e il monitor ci
+        saltava sopra: finita una run si metteva a mostrarne un'altra, con i
+        suoi grafici e i suoi numeri. Il banner dichiarava la data giusta, ma
+        tutto il resto della pagina sembrava una presa dati.
+
+        Nel tempo si va avanti, mai indietro: un file diverso si prende solo
+        se e' PIU' RECENTE di quello che si sta seguendo. Se non ce n'e' uno,
+        si resta sulla run appena finita -- che e' quello che si vuole
+        guardare -- e la pagina dice che non sta crescendo piu'.
+        """
         if self.fixed_path:
             return self.fixed_path
         files = glob.glob(os.path.join(self.data_dir, "*.h5"))
         if not files:
             raise DaqFileError(f"Nessun file .h5 in {os.path.abspath(self.data_dir)}")
-        return max(files, key=os.path.getmtime)
-
-    # NOTA: si cercano solo i .h5 non compressi. A run finita il file diventa
-    # .h5.gz e non e' piu' monitorabile dal vivo: e' il comportamento voluto,
-    # il monitor segue la run in corso.
+        nuovo = max(files, key=os.path.getmtime)
+        if nuovo == self.path or self.path is None or not self.file_mtime:
+            return nuovo
+        # Il confronto e' con l'ultimo mtime VISTO e non con quello del file
+        # seguito: a run finita quel file non esiste piu' e getmtime
+        # solleverebbe, che e' esattamente il momento in cui serve il confronto.
+        return nuovo if os.path.getmtime(nuovo) > self.file_mtime else None
 
     def _read_status(self):
         """live-status.json, scritto dalla DAQ. Assente = nessuna informazione."""
@@ -286,6 +303,13 @@ class Monitor:
 
         try:
             path = self._latest_file()
+            if path is None:
+                # La run seguita e' finita e non ne e' partita un'altra: si
+                # tiene quello che c'e'. Non si aggiorna niente -- ne' la
+                # storia del rate ne' l'istante di ultima crescita -- cosi'
+                # la pagina si accorge da se' che il file e' fermo.
+                self.error = None
+                return
             # Solo la coda del file: il costo di un aggiornamento non deve
             # crescere con la durata della run.
             # strict=False: la casella "channels" e' un FILTRO di vista, non
@@ -325,6 +349,10 @@ class Monitor:
             self.status = None
 
         self.path = path
+        try:
+            self.file_mtime = os.path.getmtime(path)
+        except OSError:
+            pass
         total = int(hdr.get("NEventsInFile", data.shape[0]))
 
         # Il file cresce ancora? E' la differenza fra "sto guardando la run in
@@ -731,10 +759,15 @@ class Monitor:
             # indovinata di la', cosi' se cambia il numero di colonne cambia
             # in un posto solo.
             "muro": None,
-            "ferma_da": (round(time.time() - self._cresciuto, 1)
-                         if self._cresciuto else None),
-            "file_quando": (os.path.getmtime(self.path)
-                            if self.path and os.path.exists(self.path) else None),
+            # L'eta' e' la PIU' GRANDE fra "non lo vedo crescere da" e "non
+            # e' scritto da": un file compresso a run finita non si tocca piu',
+            # e misurare solo da quando l'ho visto io faceva annunciare "32 s"
+            # su un file di una settimana prima.
+            "ferma_da": (round(time.time() - min(x for x in
+                                                 (self._cresciuto, self.file_mtime)
+                                                 if x), 1)
+                         if (self._cresciuto or self.file_mtime) else None),
+            "file_quando": self.file_mtime,
             "shown": 0,
             "channels": [],
         }

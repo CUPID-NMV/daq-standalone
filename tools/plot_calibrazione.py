@@ -49,7 +49,7 @@ def main():
     d50, sigma = d["distanza_50pc"], max(d["sigma_turnoff_offset"], 1e-3)
     k = d["mv_per_offset"]
 
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(10.0, 4.3),
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(10.0, 4.6),
                                  gridspec_kw={"width_ratios": [1.45, 1]})
 
     for ax, (lo, hi) in ((a1, (0, max(x) * 1.05)), (a2, (d50 - 12, d50 + 12))):
@@ -86,7 +86,7 @@ def main():
                  % (d.get("polarita", "?"), d["larghezza_fwhm_ns"],
                     d["ampiezza_mv"], d["frequenza_campionamento"]),
                  fontsize=11)
-    fig.text(0.5, 0.015,
+    fig.text(0.5, 0.022,
              "%.4f mV per offset unit   ·   Transparent Mode attenuation "
              "%.2f   ·   turn-off σ = %.2f offset = %.2f mV   ·   "
              "generator %.1f Hz from the plateau, %d s per point"
@@ -94,7 +94,7 @@ def main():
                 d["rate_generatore_hz"], secondi),
              ha="center", fontsize=9, color=GRIGIO)
 
-    fig.tight_layout(rect=(0, 0.055, 1, 0.94))
+    fig.tight_layout(rect=(0, 0.075, 1, 0.94))
     os.makedirs(os.path.dirname(uscita) or ".", exist_ok=True)
     fig.savefig(uscita, dpi=110)
     print("grafico:", os.path.abspath(uscita))

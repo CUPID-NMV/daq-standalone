@@ -347,6 +347,11 @@ class Monitor:
             self.cumulati = {}
             self._ana = None
             self.status = None
+            # Anche l'istante di ultima crescita: e' riferito al file di
+            # prima. Senza azzerarlo una run nuova nasce gia' "ferma da 12 s"
+            # se per caso comincia con lo stesso numero di eventi dell'altra.
+            self._cresciuto = now
+            self._ultimo_conteggio = -1
 
         self.path = path
         try:

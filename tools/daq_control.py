@@ -1839,6 +1839,12 @@ PAGINA = r"""<!doctype html>
   <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     <button id="avvia">Start run</button>
     <button id="ferma">Stop run</button>
+    <!-- Qui in alto e non in fondo a Configuration: l'avviso delle modifiche
+         non salvate deve vedersi accanto a Start run, che e' dove si scopre
+         troppo tardi di aver lanciato la run col file vecchio. -->
+    <button id="salva" style="background:#2a78d6;color:#fff">Save to TOML</button>
+    <span id="nonsalvato" style="display:none;color:#a8321f;font-weight:600;font-size:12px">
+      &#9679; unsaved changes</span>
     <button id="monavvia">Start monitor</button>
     <button id="monferma">Stop monitor</button>
     <a id="mon" href="#" target="_blank" rel="noopener"
@@ -1861,9 +1867,6 @@ PAGINA = r"""<!doctype html>
     <div id="tabdig" style="margin-top:14px"></div>
     <div id="tabcfd" style="margin-top:14px"></div>
     <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <button id="salva" style="background:#2a78d6;color:#fff">Save to TOML</button>
-      <span id="nonsalvato" style="display:none;color:#a8321f;font-weight:600;font-size:12px">
-        &#9679; unsaved changes</span>
       <button id="ricarica" style="background:#ececea">Reload file</button>
       <span style="font-size:12px;color:#6b6a65">
         applies from the next run, except entries marked <b>live</b>

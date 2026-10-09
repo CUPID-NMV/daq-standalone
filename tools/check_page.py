@@ -133,7 +133,8 @@ chiamate = set(re.findall(r"(?<![.\w$])([a-z][A-Za-z0-9_$]*)\s*\(",
                           senza_testo(script)))
 GLOBALI = {"if", "for", "while", "switch", "catch", "return", "function",
            "typeof", "new", "await", "async", "fetch", "parseInt",
-           "parseFloat", "isNaN", "setInterval", "setTimeout", "alert",
+           "parseFloat", "isNaN", "isFinite", "setInterval", "setTimeout",
+           "clearInterval", "clearTimeout", "alert",
            "confirm", "encodeURIComponent", "decodeURIComponent", "require"}
 ignote = sorted(chiamate - definite - GLOBALI)
 print(f"funzioni definite : {len(definite)}")

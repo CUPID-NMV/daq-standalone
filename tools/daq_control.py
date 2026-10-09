@@ -54,6 +54,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tomledit
+import psu_control
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BINARIO = os.path.join(ROOT, "build", "main", "DAQ-WC")
@@ -707,17 +708,239 @@ def ultime_azioni(n=12):
 
 
 # ---------------------------------------------------------------------------
+#  Alimentatore dei SiPM (Aim-TTi PLH250-P)
+# ---------------------------------------------------------------------------
+#  Il controllore lo legge ogni PSU_PERIODO_S e scrive ogni lettura su
+#  data/psu-log.csv, run o non run: il guadagno di un SiPM dipende dalla
+#  tensione, e quando fra mesi un gruppo di run mostrera' un guadagno
+#  spostato bisognera' poter dire che tensione c'era. Il confronto con le run
+#  si fa per data e ora, senza toccare la DAQ.
+#
+#  La tensione la cambia SOLO l'operatore, con un pulsante. Qui dentro non c'e'
+#  niente che la muova da solo: ne' a fine run, ne' a fine coda.
+#
+#  Lo strumento accetta una connessione alla volta: ogni lettura apre, legge e
+#  chiude, cosi' tools/psu_control.py da terminale continua a funzionare.
+PSU_PERIODO_S = 3.0
+PSU_LOG = os.path.join(ROOT, "data", "psu-log.csv")
+PSU_STORIA_S = 24 * 3600
+PSU_PASSO_V = 5.0          # rampa: volt per passo
+PSU_ATTESA_S = 0.5         # rampa: secondi fra un passo e l'altro
+
+
+class Alimentatore:
+    def __init__(self, host):
+        self.host = host
+        self.lock = threading.Lock()      # una sola conversazione alla volta
+        self.ultima = None                # ultima lettura riuscita
+        self.errore = None
+        self.idn = None
+        self.rampa = None                 # {"da", "a", "v"} mentre sale/scende
+        self._ferma_rampa = False
+        self.storia = self._carica_storia()
+        threading.Thread(target=self._ciclo, daemon=True).start()
+
+    # -- lettura -----------------------------------------------------------
+    def _leggi(self, psu):
+        if self.idn is None:
+            self.idn = psu.idn()
+        return {"t": time.time(), "v_set": psu.vset(), "v_out": psu.vout(),
+                "i_out": psu.iout(), "i_lim": psu.iset(), "uscita": psu.output(),
+                "ovp": psu._num(psu.query("OVP1?")),
+                "ocp": psu._num(psu.query("OCP1?"))}
+
+    def _registra(self, l):
+        self.ultima, self.errore = l, None
+        self.storia.append((l["t"], l["v_out"], l["i_out"]))
+        limite = l["t"] - PSU_STORIA_S
+        if self.storia and self.storia[0][0] < limite:
+            self.storia = [x for x in self.storia if x[0] >= limite]
+        try:
+            nuovo = not os.path.exists(PSU_LOG)
+            with open(PSU_LOG, "a") as f:
+                if nuovo:
+                    f.write("unix_time,ora,v_set,v_out,i_out,i_lim,uscita\n")
+                f.write("%.1f,%s,%.3f,%.3f,%.8f,%.6f,%d\n" % (
+                    l["t"], time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(l["t"])),
+                    l["v_set"], l["v_out"], l["i_out"], l["i_lim"], l["uscita"]))
+        except OSError:
+            pass
+
+    def _carica_storia(self):
+        """Le ultime 24 ore dal CSV: riavviare il controllore non deve
+        svuotare il grafico proprio quando serve a vedere una deriva."""
+        storia, limite = [], time.time() - PSU_STORIA_S
+        try:
+            with open(PSU_LOG, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                # ~70 byte a riga, una riga ogni PSU_PERIODO_S: 24 ore ci stanno
+                f.seek(max(0, f.tell() - int(80 * PSU_STORIA_S / PSU_PERIODO_S)))
+                righe = f.read().decode("utf-8", "replace").splitlines()
+        except OSError:
+            return storia
+        for r in righe:
+            c = r.split(",")
+            try:
+                t = float(c[0])
+                if t >= limite:
+                    storia.append((t, float(c[3]), float(c[4])))
+            except (ValueError, IndexError):
+                pass
+        return storia
+
+    def _ciclo(self):
+        while True:
+            with self.lock:
+                try:
+                    psu = psu_control.PLH(self.host, timeout=2.0)
+                    try:
+                        self._registra(self._leggi(psu))
+                    finally:
+                        psu.close()
+                except Exception as e:
+                    self.errore = "%s: %s" % (self.host, e)
+            time.sleep(PSU_PERIODO_S)
+
+    # -- per la pagina -----------------------------------------------------
+    def stato(self):
+        return {"host": self.host, "idn": self.idn, "lettura": self.ultima,
+                "errore": self.errore, "rampa": self.rampa,
+                "vmax": psu_control.VMAX, "periodo": PSU_PERIODO_S}
+
+    def serie(self, ore):
+        """Storia ridotta a ~300 punti, media per intervallo. La media e non
+        il campione puntuale: e' la deriva che interessa, non il rumore della
+        singola lettura."""
+        da = time.time() - ore * 3600
+        punti = [x for x in self.storia if x[0] >= da]
+        n = max(1, len(punti) // 300)
+        fuori = []
+        for i in range(0, len(punti), n):
+            g = punti[i:i + n]
+            fuori.append([round(sum(x[0] for x in g) / len(g), 1),
+                          round(sum(x[1] for x in g) / len(g), 4),
+                          sum(x[2] for x in g) / len(g)])
+        return {"ore": ore, "punti": fuori}
+
+    def riassunto(self):
+        """Una riga per il registro delle azioni, all'avvio e all'arresto
+        delle run."""
+        l = self.ultima
+        if not l or time.time() - l["t"] > 3 * PSU_PERIODO_S:
+            return "HV not readable"
+        return "HV %.2f V %.2f uA %s" % (l["v_out"], l["i_out"] * 1e6,
+                                         "ON" if l["uscita"] else "OFF")
+
+    # -- comandi -----------------------------------------------------------
+    def _comando(self, fn):
+        if self.rampa:
+            return False, "A ramp is in progress: wait, or press Output OFF."
+        with self.lock:
+            try:
+                psu = psu_control.PLH(self.host, timeout=2.0)
+                try:
+                    msg = fn(psu)
+                    self._registra(self._leggi(psu))
+                finally:
+                    psu.close()
+                return True, msg
+            except (ValueError, RuntimeError) as e:
+                return False, str(e)
+            except OSError as e:
+                return False, "Supply not answering at %s: %s" % (self.host, e)
+
+    def uscita(self, accesa):
+        if not accesa:
+            # Spegnere deve funzionare SEMPRE, anche a meta' rampa: e' il
+            # pulsante che si preme quando qualcosa non va.
+            self._ferma_rampa = True
+            with self.lock:
+                try:
+                    psu = psu_control.PLH(self.host, timeout=2.0)
+                    try:
+                        psu.send("OP1 0")
+                        self._registra(self._leggi(psu))
+                    finally:
+                        psu.close()
+                    return True, "Output OFF."
+                except Exception as e:
+                    return False, "Could not switch off: %s" % e
+        def accendi(p):
+            p.send("OP1 1")
+            return "Output ON at %.2f V." % p.vset()
+        return self._comando(accendi)
+
+    def limite_corrente(self, ampere):
+        def imposta(p):
+            p.send("I1 %.6f" % ampere)
+            return "Current limit %.1f uA." % (ampere * 1e6)
+        return self._comando(imposta)
+
+    def ovp(self, volt):
+        def imposta(p):
+            p.send("OVP1 %.2f" % volt)
+            return "OVP set to %.2f V." % volt
+        return self._comando(imposta)
+
+    def tensione(self, volt):
+        """Avvia la rampa in un thread e torna subito: la pagina segue
+        l'avanzamento dallo stato."""
+        try:
+            psu_control.controlla_tensione(volt)
+        except ValueError:
+            return False, "%.2f V is outside 0-%.1f V." % (volt, psu_control.VMAX)
+        if self.rampa:
+            return False, "A ramp is already in progress."
+        self.rampa = {"a": volt, "v": None}
+        self._ferma_rampa = False
+        threading.Thread(target=self._esegui_rampa, args=(volt,), daemon=True).start()
+        return True, "Ramping to %.2f V." % volt
+
+    def _esegui_rampa(self, volt):
+        def passo(v):
+            self.rampa["v"] = v
+            self._registra(self._leggi(psu))
+        try:
+            with self.lock:
+                psu = psu_control.PLH(self.host, timeout=2.0)
+                try:
+                    self.rampa["da"] = psu.vset()
+                    finita = psu_control.ramp(psu, volt, PSU_PASSO_V, PSU_ATTESA_S,
+                                              passo=passo,
+                                              interrompi=lambda: self._ferma_rampa)
+                    if not finita:
+                        registra("controller", "", "psu/ramp",
+                                 "interrupted at %.2f V" % (self.rampa["v"] or 0))
+                finally:
+                    psu.close()
+        except Exception as e:
+            self.errore = "ramp: %s" % e
+            registra("controller", "", "psu/ramp", "FAILED: %s" % e)
+        finally:
+            self.rampa = None
+
+    def trova(self):
+        trovati = [(ip, idn) for ip, idn in psu_control.find(
+            self.host.rsplit(".", 1)[0] + ".0", stampa=False) if "PLH" in idn]
+        if not trovati:
+            return False, "No PLH supply found on %s.0/24." % self.host.rsplit(".", 1)[0]
+        self.host, self.idn = trovati[0][0], None
+        return True, "Supply found at %s." % self.host
+
+
+# ---------------------------------------------------------------------------
 #  Stato
 # ---------------------------------------------------------------------------
 class Controllo:
     def __init__(self, toml, log_path, porta_monitor=PORTA_MONITOR,
-                 args_monitor=None):
+                 args_monitor=None, psu_host=None):
         self.toml = os.path.abspath(toml)
         self.log_path = log_path
         self.lock = threading.Lock()
         self.storia = []          # (istante, eventi) per il rate recente
         self.porta_monitor = porta_monitor
         self.args_monitor = list(args_monitor or ARGS_MONITOR)
+        self.psu = Alimentatore(psu_host) if psu_host else None
 
     # -- configurazione ----------------------------------------------------
     def config(self):
@@ -949,7 +1172,8 @@ class Controllo:
              "monitor_pid": trova_monitor(),
              "monitor_porta": self.porta_monitor,
              "scan": None, "coda": self.leggi_coda(),
-             "scan_log": self.coda_scan(12) if not scan else None}
+             "scan_log": self.coda_scan(12) if not scan else None,
+             "psu": self.psu.stato() if self.psu else None}
         if scan:
             s["scan"] = {
                 "avanzamento": self.avanzamento_scan(),
@@ -1395,6 +1619,14 @@ class Controllo:
         with self.lock:
             return self._avvia(da_coda)
 
+    def _con_hv(self, esito, messaggio):
+        # La tensione dei SiPM accanto a ogni avvio e arresto, nel registro
+        # delle azioni: il CSV la ha comunque, ma qui la si legge senza
+        # andarla a cercare.
+        if esito and self.psu:
+            messaggio += "  [%s]" % self.psu.riassunto()
+        return esito, messaggio
+
     def _avvia(self, da_coda=False):
         if not da_coda and self.coda_attiva():
             return False, "A queue is running: it is the one driving the DAQ."
@@ -1605,6 +1837,14 @@ PAGINA = r"""<!doctype html>
  .ok{background:#dcefe4;color:#15603a}
  .ko{background:#f8e0da;color:#8a2a18}
  .az{font-size:12px;color:#52514e}
+ .hvnum{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+ .hvu{font-size:13px;font-weight:400;color:#6b6a65;margin-left:3px}
+ .hvc{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px}
+ .hvc input{width:70px}
+ .hvc .k{font-size:12px;color:#6b6a65;min-width:70px}
+ .hvg{display:block;width:100%;height:62px;cursor:crosshair}
+ .hvf button{padding:2px 8px;font-size:11px;background:#ececea}
+ .hvf button.sel{background:#1a1a19;color:#fff}
  input{font:inherit;padding:6px 9px;border:1px solid #d5d5d0;border-radius:6px}
  a{color:#2a78d6}
 </style></head><body>
@@ -1616,6 +1856,12 @@ PAGINA = r"""<!doctype html>
   <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     <button id="avvia">Start run</button>
     <button id="ferma">Stop run</button>
+    <!-- Qui in alto e non in fondo a Configuration: l'avviso delle modifiche
+         non salvate deve vedersi accanto a Start run, che e' dove si scopre
+         troppo tardi di aver lanciato la run col file vecchio. -->
+    <button id="salva" style="background:#2a78d6;color:#fff">Save to TOML</button>
+    <span id="nonsalvato" style="display:none;color:#a8321f;font-weight:600;font-size:12px">
+      &#9679; unsaved changes</span>
     <button id="monavvia">Start monitor</button>
     <button id="monferma">Stop monitor</button>
     <a id="mon" href="#" target="_blank" rel="noopener"
@@ -1638,9 +1884,6 @@ PAGINA = r"""<!doctype html>
     <div id="tabdig" style="margin-top:14px"></div>
     <div id="tabcfd" style="margin-top:14px"></div>
     <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <button id="salva" style="background:#2a78d6;color:#fff">Save to TOML</button>
-      <span id="nonsalvato" style="display:none;color:#a8321f;font-weight:600;font-size:12px">
-        &#9679; unsaved changes</span>
       <button id="ricarica" style="background:#ececea">Reload file</button>
       <span style="font-size:12px;color:#6b6a65">
         applies from the next run, except entries marked <b>live</b>
@@ -1655,6 +1898,51 @@ PAGINA = r"""<!doctype html>
   </div>
   <div class="colonna">
   <div class="box" id="b_run"><h2>Current run<span class="riass"></span></h2><table id="run"></table></div>
+
+<div class="box" id="b_psu"><h2>SiPM bias supply<span class="qm" data-aiuto="aiutopsu">?</span><span class="riass"></span></h2>
+  <div id="psuerr" class="msg ko" style="margin:0 0 8px"></div>
+  <div style="display:flex;gap:18px;align-items:baseline;flex-wrap:wrap">
+    <span id="psuout" class="stato ferma">&hellip;</span>
+    <span><span id="psuv" class="hvnum">&mdash;</span><span class="hvu">V</span></span>
+    <span><span id="psui" class="hvnum">&mdash;</span><span class="hvu">&micro;A</span></span>
+    <span id="psurampa" style="font-size:12px;color:#2a78d6"></span>
+  </div>
+  <div id="psuinfo" style="font-size:12px;color:#6b6a65;margin-top:4px"></div>
+  <div class="hvc">
+    <span class="k">voltage</span>
+    <input id="psuvset" placeholder="V"><button id="psuvgo" style="background:#2a78d6;color:#fff">Ramp to</button>
+    <span style="margin-left:auto;display:flex;gap:6px">
+      <button id="psuon" style="background:#15603a;color:#fff">Output ON</button>
+      <button id="psuoff" style="background:#a8321f;color:#fff">Output OFF</button>
+    </span>
+  </div>
+  <div class="hvc">
+    <span class="k">current limit</span>
+    <input id="psuilim" placeholder="&micro;A"><button id="psuigo" style="background:#ececea">Set</button>
+    <span class="k" style="margin-left:12px;min-width:0">OVP</span>
+    <input id="psuovp" placeholder="V"><button id="psuogo" style="background:#ececea">Set</button>
+    <button id="psufind" style="background:#ececea;display:none">Find supply</button>
+  </div>
+  <div id="aiutopsu" class="aiuto">
+    Aim-TTi PLH250-P biasing the SiPMs. The voltage changes only when someone presses
+    <b>Ramp to</b>: it moves in 5 V steps every 0.5 s and is refused above the limit
+    shown. <b>Output OFF</b> works at any time, also in the middle of a ramp. Every
+    reading is written to <code>data/psu-log.csv</code>, run or no run, and the bias
+    is noted in Recent actions at every start and stop of a run. The front panel
+    stays usable: the controller hands it back after each reading.
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+    <span style="font-size:12px;color:#6b6a65">stability</span>
+    <span class="hvf" id="psufin">
+      <button data-ore="1">1 h</button><button data-ore="6">6 h</button><button data-ore="24">24 h</button>
+    </span>
+    <span id="psuhover" style="margin-left:auto;font-size:12px;color:#52514e;font-variant-numeric:tabular-nums"></span>
+  </div>
+  <div style="font-size:11px;color:#6b6a65;margin-top:4px">output voltage [V]</div>
+  <canvas id="psugv" class="hvg"></canvas>
+  <div style="font-size:11px;color:#6b6a65;margin-top:2px">output current [&micro;A]</div>
+  <canvas id="psugi" class="hvg"></canvas>
+</div>
 
 <div class="box" id="b_coda"><h2>Run queue<span class="qm" data-aiuto="aiutocoda">?</span><span class="riass"></span></h2>
   <div id="codastato" style="margin-bottom:10px"></div>
@@ -1884,6 +2172,7 @@ async function aggiorna(){
   $("avvia").disabled = s.in_corso || !!s.scan || (s.coda && s.coda.attiva);
   $("ferma").disabled = !s.in_corso || !!s.scan || (s.coda && s.coda.attiva);
   aggiornaMonitor(s);
+  aggiornaPsu(s.psu);
 
   // Riepiloghi nei titoli: chiuso, il pannello dice ancora la cosa per cui lo
   // si sarebbe aperto.
@@ -2359,8 +2648,163 @@ $("cclr").onclick  = () => codaAzione("svuota", "Clear the queue?");
 
 caricaGrafici();
 caricaConfig();
+// -- alimentatore dei SiPM ------------------------------------------------
+let PSU = null;
+async function psuAzione(azione, valore, conferma){
+  if(conferma && !confirm(conferma)) return;
+  try{
+    const q = new URLSearchParams({chi: $("chi").value, token: TOKEN});
+    if(valore !== undefined) q.set("valore", valore);
+    const d = await (await fetch("/api/psu/" + azione + "?" + q, {method: "POST"})).json();
+    msg(d.messaggio, d.esito);
+  }catch(e){ msg("Request failed: " + e, false); }
+  aggiorna(); psuSerie();
+}
+function psuNum(id){
+  const v = parseFloat($(id).value.replace(",", "."));
+  if(!isFinite(v)){ msg("Write a number first.", false); return null; }
+  return v;
+}
+$("psuvgo").onclick = () => {
+  const v = psuNum("psuvset"); if(v === null || !PSU) return;
+  const da = PSU.lettura ? PSU.lettura.v_set.toFixed(2) : "?";
+  if(v > PSU.vmax){ msg(v + " V is above the " + PSU.vmax + " V limit.", false); return; }
+  psuAzione("tensione", v, "Ramp the SiPM bias from " + da + " V to " + v.toFixed(2) + " V?" +
+            (PSU.lettura && PSU.lettura.uscita ? "\n\nThe output is ON: the SiPMs will see it." : ""));
+};
+$("psuon").onclick = () => psuAzione("on", undefined,
+  "Switch the output ON at " + (PSU && PSU.lettura ? PSU.lettura.v_set.toFixed(2) : "?") + " V?");
+// Spegnere non chiede conferma: e' il pulsante di quando qualcosa va storto.
+$("psuoff").onclick = () => psuAzione("off");
+$("psuigo").onclick = () => {
+  const v = psuNum("psuilim"); if(v === null) return;
+  psuAzione("ilim", v * 1e-6, "Set the current limit to " + v + " \u00b5A?");
+};
+$("psuogo").onclick = () => {
+  const v = psuNum("psuovp"); if(v === null) return;
+  psuAzione("ovp", v, "Set the over-voltage protection to " + v + " V?");
+};
+$("psufind").onclick = () => psuAzione("trova");
+
+function aggiornaPsu(p){
+  PSU = p;
+  const box = $("b_psu");
+  box.style.display = p ? "" : "none";
+  if(!p) return;
+  const l = p.lettura;
+  // Una lettura vecchia non deve sembrare viva: lo strumento puo' aver
+  // cambiato indirizzo o essere stato spento, e i numeri restano li'.
+  const eta = l ? (Date.now() / 1000 - l.t) : Infinity;
+  const fresca = eta < 4 * p.periodo;
+  $("psuerr").style.display = p.errore ? "block" : "none";
+  $("psuerr").textContent = p.errore ? "Supply not answering \u2014 " + p.errore +
+      (l ? " (last reading " + Math.round(eta) + " s ago)" : "") : "";
+  $("psufind").style.display = p.errore ? "" : "none";
+  $("psuv").textContent = l ? l.v_out.toFixed(2) : "\u2014";
+  $("psui").textContent = l ? (l.i_out * 1e6).toFixed(2) : "\u2014";
+  $("psuv").style.color = $("psui").style.color = fresca ? "" : "#b5b5b0";
+  $("psuout").textContent = !l ? "\u2026" : (l.uscita ? "OUTPUT ON" : "output off");
+  $("psuout").className = "stato " + (l && l.uscita ? "corso" : "ferma");
+  $("psurampa").textContent = p.rampa
+      ? "ramping to " + p.rampa.a.toFixed(2) + " V" + (p.rampa.v != null ? " (now " + p.rampa.v.toFixed(1) + ")" : "")
+      : "";
+  if(l){
+    let info = "set " + l.v_set.toFixed(2) + " V \u00b7 limit " + (l.i_lim * 1e6).toFixed(1) +
+               " \u00b5A \u00b7 OVP " + l.ovp.toFixed(1) + " V \u00b7 allowed up to " + p.vmax + " V \u00b7 " + p.host;
+    // L'OVP e' l'unica protezione che vale anche per la manopola del
+    // pannello: il limite della pagina non la ferma.
+    if(l.ovp > p.vmax + 3) info += "  \u2014  OVP above the limit: the front panel can still go higher";
+    $("psuinfo").textContent = info;
+    if(!$("psuvset").value && document.activeElement !== $("psuvset")) $("psuvset").placeholder = l.v_set.toFixed(2);
+    if(document.activeElement !== $("psuilim")) $("psuilim").placeholder = (l.i_lim * 1e6).toFixed(1);
+    if(document.activeElement !== $("psuovp")) $("psuovp").placeholder = l.ovp.toFixed(1);
+  }
+  $("psuvgo").disabled = $("psuon").disabled = $("psuigo").disabled = $("psuogo").disabled = !!p.rampa;
+  riass("b_psu", l ? l.v_out.toFixed(2) + " V  " + (l.i_out * 1e6).toFixed(2) + " \u00b5A  " +
+                     (l.uscita ? "ON" : "off") : (p.errore ? "not answering" : ""));
+}
+
+let PSU_ORE = 6, PSU_DATI = [];
+try { PSU_ORE = parseFloat(localStorage.getItem("psu.ore")) || 6; } catch(e){}
+document.querySelectorAll("#psufin button").forEach(b => {
+  b.onclick = () => {
+    PSU_ORE = parseFloat(b.dataset.ore);
+    try { localStorage.setItem("psu.ore", PSU_ORE); } catch(e){}
+    psuSerie();
+  };
+});
+async function psuSerie(){
+  document.querySelectorAll("#psufin button").forEach(b =>
+    b.classList.toggle("sel", parseFloat(b.dataset.ore) === PSU_ORE));
+  if(!PSU || $("b_psu").classList.contains("chiuso")) return;
+  try{
+    const d = await (await fetch("/api/psu/serie?ore=" + PSU_ORE + "&token=" + TOKEN)).json();
+    PSU_DATI = d.punti || [];
+  }catch(e){ return; }
+  psuDisegna(null);
+}
+// Due grafici piccoli, uno per grandezza, ognuno con la sua scala: tensione
+// e corrente su due assi y dello stesso grafico si leggono male. La scala ha
+// un'escursione minima (50 mV, 0.05 uA), altrimenti il rumore dell'ultima
+// cifra riempirebbe il riquadro e sembrerebbe una deriva.
+function psuGrafico(cv, col, scala, minimo, dec, hover){
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const g = cv.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+  const L = 44, R = 4, T = 4, B = 4;
+  g.font = "10px system-ui"; g.fillStyle = "#6b6a65";
+  if(PSU_DATI.length < 2){ g.fillText("collecting readings\u2026", L, H / 2); return; }
+  const t1 = Date.now() / 1000, t0 = t1 - PSU_ORE * 3600;
+  const ys = PSU_DATI.map(p => p[col] * scala);
+  let lo = Math.min(...ys), hi = Math.max(...ys);
+  if(hi - lo < minimo){ const c = (hi + lo) / 2; lo = c - minimo / 2; hi = c + minimo / 2; }
+  const X = t => L + (t - t0) / (t1 - t0) * (W - L - R);
+  const Y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+  g.strokeStyle = "#ececea"; g.lineWidth = 1;
+  [lo, hi].forEach(v => { g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(W - R, Y(v)); g.stroke(); });
+  g.textBaseline = "top"; g.fillText(hi.toFixed(dec), 2, T);
+  g.textBaseline = "bottom"; g.fillText(lo.toFixed(dec), 2, H - B);
+  g.strokeStyle = "#2a78d6"; g.lineWidth = 2; g.lineJoin = "round";
+  g.beginPath();
+  PSU_DATI.forEach((p, i) => { const x = X(p[0]), y = Y(ys[i]); i ? g.lineTo(x, y) : g.moveTo(x, y); });
+  g.stroke();
+  if(hover !== null){
+    const p = PSU_DATI[hover];
+    g.strokeStyle = "#9a9a94"; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(X(p[0]), T); g.lineTo(X(p[0]), H - B); g.stroke();
+    g.fillStyle = "#2a78d6"; g.beginPath(); g.arc(X(p[0]), Y(ys[hover]), 4, 0, 7); g.fill();
+  }
+}
+function psuDisegna(hover){
+  psuGrafico($("psugv"), 1, 1, 0.05, 2, hover);
+  psuGrafico($("psugi"), 2, 1e6, 0.05, 2, hover);
+  if(hover === null){ $("psuhover").textContent = ""; return; }
+  const p = PSU_DATI[hover];
+  $("psuhover").textContent = new Date(p[0] * 1000).toLocaleTimeString() + "   " +
+      p[1].toFixed(3) + " V   " + (p[2] * 1e6).toFixed(3) + " \u00b5A";
+}
+["psugv", "psugi"].forEach(id => {
+  const cv = $(id);
+  cv.onmousemove = ev => {
+    if(PSU_DATI.length < 2) return;
+    const r = cv.getBoundingClientRect();
+    const t1 = Date.now() / 1000, t0 = t1 - PSU_ORE * 3600;
+    const t = t0 + (ev.clientX - r.left - 44) / (r.width - 48) * (t1 - t0);
+    let k = 0;
+    PSU_DATI.forEach((p, i) => { if(Math.abs(p[0] - t) < Math.abs(PSU_DATI[k][0] - t)) k = i; });
+    psuDisegna(k);
+  };
+  cv.onmouseleave = () => psuDisegna(null);
+});
+window.addEventListener("resize", () => psuDisegna(null));
+
 aggiorna();
 setInterval(aggiorna, 2000);
+setTimeout(psuSerie, 500);
+setInterval(psuSerie, 15000);
 </script></body></html>
 """
 
@@ -2488,6 +2932,17 @@ def crea_handler(ctrl, token):
                 self.end_headers()
                 return self.wfile.write(dati)
 
+            if parti.path == "/api/psu/serie":
+                if not self._autorizzato(qs):
+                    return self._json({"errore": "token mancante o sbagliato"}, 403)
+                if not ctrl.psu:
+                    return self._json({"punti": []})
+                try:
+                    ore = min(24.0, max(0.1, float(qs.get("ore", ["6"])[0])))
+                except ValueError:
+                    ore = 6.0
+                return self._json(ctrl.psu.serie(ore))
+
             if parti.path in ("/api/stato", "/api/config"):
                 if not self._autorizzato(qs):
                     return self._json({"errore": "token mancante o sbagliato"}, 403)
@@ -2506,11 +2961,11 @@ def crea_handler(ctrl, token):
             extra = {}
 
             if parti.path == "/api/avvia":
-                esito, messaggio = ctrl.avvia()
+                esito, messaggio = ctrl._con_hv(*ctrl.avvia())
                 registra(chi, da, "avvia", messaggio)
 
             elif parti.path == "/api/ferma":
-                esito, messaggio = ctrl.ferma()
+                esito, messaggio = ctrl._con_hv(*ctrl.ferma())
                 registra(chi, da, "ferma", messaggio)
 
             elif parti.path == "/api/monitor":
@@ -2583,6 +3038,31 @@ def crea_handler(ctrl, token):
                 esito, messaggio = ctrl.ferma_scan()
                 registra(chi, da, "ferma scan", messaggio)
 
+            elif parti.path.startswith("/api/psu/"):
+                if not ctrl.psu:
+                    return self._json({"esito": False,
+                                       "messaggio": "The controller runs without a supply (--psu-host '')."})
+                azione = parti.path.rsplit("/", 1)[1]
+                try:
+                    valore = float(qs.get("valore", ["nan"])[0])
+                except ValueError:
+                    valore = float("nan")
+                numerico = {"tensione": ctrl.psu.tensione,
+                            "ilim": ctrl.psu.limite_corrente, "ovp": ctrl.psu.ovp}
+                if azione in numerico:
+                    if valore != valore:
+                        return self._json({"esito": False, "messaggio": "Not a number."})
+                    esito, messaggio = numerico[azione](valore)
+                elif azione == "on":
+                    esito, messaggio = ctrl.psu.uscita(True)
+                elif azione == "off":
+                    esito, messaggio = ctrl.psu.uscita(False)
+                elif azione == "trova":
+                    esito, messaggio = ctrl.psu.trova()
+                else:
+                    return self._manda(404, "text/plain", b"not found")
+                registra(chi, da, "psu/" + azione, messaggio)
+
             elif parti.path == "/api/soglie":
                 esito, messaggio = ctrl.soglie_a_caldo(qs.get("offsets", [""])[0])
                 registra(chi, da, "soglie a caldo", messaggio)
@@ -2598,6 +3078,7 @@ def crea_handler(ctrl, token):
 
 
 def main():
+    global PSU_LOG
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-c", "--config", default=os.path.join(ROOT, "config", "run-local.toml"),
@@ -2619,6 +3100,11 @@ def main():
                          "(default: %(default)s)")
     ap.add_argument("--log", default=os.path.join(ROOT, "data", "daq-console.log"),
                     help="dove finisce l'uscita della DAQ")
+    ap.add_argument("--psu-host", default=psu_control.DEFAULT_HOST,
+                    help="alimentatore dei SiPM; '' per farne a meno")
+    ap.add_argument("--psu-log", default=PSU_LOG,
+                    help="CSV delle letture: una prova su un'altra porta deve "
+                         "scriverne uno suo, non mescolarsi a quello vero")
     args = ap.parse_args()
 
     args_mon = shlex.split(args.monitor_args)
@@ -2626,11 +3112,14 @@ def main():
     # controllore sonderebbe una porta e il monitor ne aprirebbe un'altra.
     if "-p" not in args_mon and "--port" not in args_mon:
         args_mon += ["-p", str(args.monitor_port)]
-    ctrl = Controllo(args.config, args.log, args.monitor_port, args_mon)
+    PSU_LOG = args.psu_log
+    ctrl = Controllo(args.config, args.log, args.monitor_port, args_mon, args.psu_host)
     stampa = lambda s: print(s, flush=True)
     stampa("Configurazione : %s" % ctrl.toml)
     stampa("Binario        : %s%s" % (BINARIO, "" if os.path.exists(BINARIO) else "   NON ESISTE"))
     stampa("Uscita DAQ     : %s" % args.log)
+    stampa("Alimentatore   : %s" % ("%s, letture in %s" % (args.psu_host, PSU_LOG)
+                                    if args.psu_host else "nessuno"))
     if args.token:
         stampa("Token          : attivo")
     pid = trova_daq()

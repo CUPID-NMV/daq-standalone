@@ -32,15 +32,39 @@ import time
 DEFAULT_HOST = os.environ.get("PSU_HOST", "192.168.99.106")
 PORT = 9221
 
+# Tetto di tensione per i SiPM collegati. Vale per questo script e per il
+# controllore, che lo importa da qui: un errore di battitura come "540" invece
+# di "54.0" va fermato prima di arrivare allo strumento, perche' l'OVP dello
+# strumento sta a 262.5 V e da solo non protegge niente.
+VMAX = 57.0
+
 
 class PLH:
-    def __init__(self, host, timeout=3.0):
+    def __init__(self, host, timeout=3.0, tentativi=10):
         self.host = host
-        self.sock = socket.create_connection((host, PORT), timeout)
+        # Lo strumento accetta UNA connessione alla volta e rifiuta la seconda
+        # (misurato). Il controllore lo interroga ogni pochi secondi: chi
+        # arriva in quel momento trova la porta occupata per qualche decina di
+        # ms, e riprovare e' la cosa giusta, non un errore.
+        for i in range(tentativi):
+            try:
+                self.sock = socket.create_connection((host, PORT), timeout)
+                break
+            except ConnectionRefusedError:
+                if i == tentativi - 1:
+                    raise
+                time.sleep(0.2)
         self.sock.settimeout(timeout)
         self.buf = b""
 
     def close(self):
+        # Ogni comando via rete mette lo strumento in remoto, e in remoto i
+        # tasti del pannello frontale non rispondono. Restituirlo al pannello
+        # a ogni chiusura lascia l'operatore libero di usare la manopola.
+        try:
+            self.write("LOCAL")
+        except OSError:
+            pass
         self.sock.close()
 
     def write(self, cmd):
@@ -92,25 +116,37 @@ class PLH:
         self.check_errors(cmd)
 
 
-def ramp(psu, target, step, dwell):
+def controlla_tensione(volt):
+    if not 0 <= volt <= VMAX:
+        raise ValueError("%.3f V fuori dall'intervallo ammesso 0-%.1f V (VMAX in "
+                         "tools/psu_control.py)" % (volt, VMAX))
+
+
+def ramp(psu, target, step, dwell, passo=None, interrompi=None):
     """Porta la tensione impostata a `target` a passi di `step` volt.
 
     Un salto di decine di volt su un fotorivelatore polarizzato da' un
     transitorio di corrente che puo' far scattare l'OCP o stressare il
     sensore: la rampa lo evita. Con step <= 0 imposta direttamente.
+    `passo(v)` si chiama a ogni passo; se `interrompi()` diventa vero la rampa
+    si ferma dov'e'. Torna False se e' stata interrotta.
     """
+    controlla_tensione(target)
     v = psu.vset()
-    if step <= 0 or abs(target - v) <= step:
-        psu.send("V1 %.3f" % target)
-        return
-    segno = 1 if target > v else -1
-    while abs(target - v) > step:
-        v += segno * step
-        psu.send("V1 %.3f" % v)
-        print("  V1 = %8.3f V   Vout = %8.3f V   Iout = %.6f A"
-              % (v, psu.vout(), psu.iout()))
-        time.sleep(dwell)
+    if step > 0:
+        segno = 1 if target > v else -1
+        while abs(target - v) > step:
+            if interrompi and interrompi():
+                return False
+            v += segno * step
+            psu.send("V1 %.3f" % v)
+            if passo:
+                passo(v)
+            time.sleep(dwell)
     psu.send("V1 %.3f" % target)
+    if passo:
+        passo(target)
+    return True
 
 
 def status(psu):
@@ -146,7 +182,7 @@ def monitor(psu, every, out_csv):
         pass
 
 
-def find(subnet):
+def find(subnet, stampa=True):
     def prova(ip):
         try:
             s = socket.create_connection((ip, PORT), 0.5)
@@ -162,8 +198,9 @@ def find(subnet):
     with concurrent.futures.ThreadPoolExecutor(64) as ex:
         trovati = [r for r in ex.map(prova, ips) if r]
     for ip, idn in trovati:
-        print("%-16s %s" % (ip, idn))
-    if not trovati:
+        if stampa:
+            print("%-16s %s" % (ip, idn))
+    if not trovati and stampa:
         print("nessuno strumento sulla porta %d in %s.0/24" % (PORT, base))
     return trovati
 
@@ -210,7 +247,9 @@ def main():
         if a.cmd == "status":
             status(psu)
         elif a.cmd == "set":
-            ramp(psu, a.volt, a.step, a.dwell)
+            ramp(psu, a.volt, a.step, a.dwell,
+                 passo=lambda v: print("  V1 = %8.3f V   Vout = %8.3f V   Iout = %.6f A"
+                                       % (v, psu.vout(), psu.iout())))
             status(psu)
         elif a.cmd == "ilim":
             psu.send("I1 %.6f" % a.amp)
@@ -239,7 +278,7 @@ def main():
                 print(psu.query(a.command))
             else:
                 psu.send(a.command)
-    except (RuntimeError, OSError) as e:
+    except (RuntimeError, ValueError, OSError) as e:
         sys.exit(str(e))
     finally:
         psu.close()

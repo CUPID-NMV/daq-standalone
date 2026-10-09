@@ -81,9 +81,13 @@ def main():
     a2.text(d50 + 0.6, 1.02, "d50 = %.1f" % d50, color="#eb6834", fontsize=9)
     a2.text(.03, .08, "zoom", transform=a2.transAxes, fontsize=9, color="#999")
 
+    # Il JSON della misura e' in italiano come il resto del codice, il grafico
+    # no: esce dal gruppo e finisce nelle presentazioni.
+    verso = {"positiva": "positive", "negativa": "negative"}.get(
+        d.get("polarita", ""), d.get("polarita", "?"))
     fig.suptitle("V1742 self-trigger: threshold calibration  ·  "
                  "%s pulses, %.0f ns FWHM, %.1f mV  ·  %s"
-                 % (d.get("polarita", "?"), d["larghezza_fwhm_ns"],
+                 % (verso, d["larghezza_fwhm_ns"],
                     d["ampiezza_mv"], d["frequenza_campionamento"]),
                  fontsize=11)
     fig.text(0.5, 0.022,

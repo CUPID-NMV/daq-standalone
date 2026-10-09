@@ -602,7 +602,24 @@ def disegna_misure(nomi, logy, per_canale=False, canali="", mv_per_offset=""):
     except OSError as e:
         return False, "Plot failed: %s" % e, None
     if r.returncode != 0:
-        return False, (r.stderr.strip() or r.stdout.strip() or "plot_scan failed")[-400:], None
+        detto = (r.stderr.strip() or r.stdout.strip() or "plot_scan failed")
+        # plot_scan.py parla a chi sta in un terminale, e il suo rifiuto dice
+        # "usa --mv-per-offset". Qui dentro quell'opzione e' una casella, e
+        # rimandare l'utente a un'opzione da riga di comando lo lascia fermo
+        # davanti a una pagina che AVEVA gia' quello che serviva. Succede
+        # solo per questo rifiuto, quindi si riscrive solo questo.
+        if "offset -> mV non e' misurata" in detto:
+            freq = re.search(r"\ba ([0-9.]+ [GM]S/s)\b", detto)
+            return False, (
+                "Per channel needs the mV per offset unit, and at %s it has "
+                "never been measured: the conversion changes by 29%% between "
+                "2.5 and 1 GS/s, so it is not interpolated. Type a number in "
+                "the mV/offset box above \u2014 2.7 is the value measured at "
+                "1 GS/s \u2014 and the plot will label the axis ASSUMED. "
+                "Or untick per channel: the trigger-rate plot is in offset "
+                "counts and needs no conversion."
+                % (freq.group(1) if freq else "this sampling rate")), None
+        return False, detto[-400:], None
     return True, "Plot drawn.", os.path.basename(uscita)
 
 
@@ -1999,7 +2016,10 @@ PAGINA = r"""<!doctype html>
   </div>
   <div id="aiutoplot" class="aiuto">
     Pick one or more measurements (ctrl-click) and draw them together. Up to 8:
-    beyond that the curves stop being distinguishable. With <b>per channel</b>,
+    beyond that the curves stop being distinguishable. <b>per channel</b> puts the
+    threshold in millivolts, so it needs the mV per offset unit: that is measured
+    at 2.5 GS/s and 1 GS/s only, and at any other rate you must type it in the
+    <b>mV/offset</b> box &mdash; the plot then labels the axis ASSUMED. With <b>per channel</b>,
     leaving the channel box empty draws every channel in the file &mdash; including
     the ones with nothing plugged in, which sit flat near zero.
   </div>

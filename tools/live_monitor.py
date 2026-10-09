@@ -1191,9 +1191,25 @@ class Monitor:
             # Le celle si posizionano a mano con geometria_muro(), cosi' la
             # pagina sa dove cadono e puo' metterci sopra le zone cliccabili.
             ncol, nrig, celle = geometria_muro(len(canali_dis))
-            alt = {"muro_wf": 0.95}.get(kind, 0.80)
-            fig = plt.figure(figsize=(LARG_PX * k / DPI_FIG,
-                                      (alt * nrig + 0.30) * k))
+            # Le celle delle DISTRIBUZIONI sono quadrate. Un istogramma lungo e
+            # basso non si legge: la coda sembra piatta e il picco sembra una
+            # parete, e la forma e' tutto quello che si cerca in un colpo
+            # d'occhio. Le forme d'onda invece restano larghe, perche' li' si
+            # guarda il tempo.
+            #
+            # Il lato lo decide la cella, non la figura: a un canale solo una
+            # cella larga quanto la pagina sarebbe un quadrato da 650 px. Da
+            # qui il tetto, e una figura che si stringe fin dove serve.
+            # Le FRAZIONI restano quelle di geometria_muro per tutti e tre i
+            # muri, cosi' le zone cliccabili che la pagina ci mette sopra --
+            # che sono in percentuale -- valgono comunque.
+            if kind == "muro_wf":
+                larg_px, alt_px = LARG_PX, (0.95 * nrig + 0.30) * DPI_FIG
+            else:
+                w_fr, h_fr = celle[0][2], celle[0][3]
+                larg_px = min(LARG_PX, MURO_CELLA_MAX / w_fr)
+                alt_px = larg_px * w_fr / h_fr
+            fig = plt.figure(figsize=(larg_px * k / DPI_FIG, alt_px * k / DPI_FIG))
 
             if kind == "muro_wf":
                 # Scala y comune: i canali si confrontano a occhio. Percentili
@@ -1733,17 +1749,24 @@ Open the browser console to see the error.</div>
 <!-- Ogni grafico ha il suo "apri" che lo stacca in una finestra a parte, utile
      col secondo schermo: le forme d'onda di la', i controlli di qua. I due
      spettri stanno affiancati, sono due distribuzioni della stessa cosa. -->
-<div class="gr"><a class="apri" data-img="pano">&#8599;</a><img id="pano" alt="per-channel overview"></div>
-<!-- I tre muri: una miniatura per canale, e sopra una griglia di zone
-     trasparenti che aprono la finestra del canale. Le posizioni arrivano da
-     stats.json, calcolate dallo stesso codice che disegna. -->
-<div class="muro"><img id="mw" alt="waveform wall"><div class="celle" data-muro="wf"></div></div>
-<div class="muro"><img id="ma" alt="amplitude wall"><div class="celle" data-muro="amp"></div></div>
-<div class="muro"><img id="mc" alt="charge wall"><div class="celle" data-muro="car"></div></div>
-
-<!-- Il rate nel tempo: basso, da leggere di sfuggita. Dice se la presa dati e'
-     stabile, cosa che i numeri in cima -- un istante solo -- non dicono. -->
-<div class="gr"><a class="apri" data-img="r">&#8599;</a><img id="r" alt="rate vs time"></div>
+<!-- La panoramica e' alta, il muro delle forme d'onda e' basso: accanto alla
+     prima restava una fascia bianca. Il rate nel tempo ci sta dentro, e il
+     posto e' anche quello giusto -- dice se la presa dati e' stabile, cosa
+     che i numeri in cima, un istante solo, non dicono.
+     I tre muri hanno una miniatura per canale e sopra una griglia di zone
+     trasparenti che aprono il dettaglio. Le posizioni arrivano da stats.json,
+     calcolate dallo stesso codice che disegna. -->
+<div class="affianca">
+  <div class="gr"><a class="apri" data-img="pano">&#8599;</a><img id="pano" alt="per-channel overview"></div>
+  <div>
+    <div class="gr"><a class="apri" data-img="r">&#8599;</a><img id="r" alt="rate vs time"></div>
+    <div class="muro"><img id="mw" alt="waveform wall"><div class="celle" data-muro="wf"></div></div>
+  </div>
+</div>
+<div class="affianca">
+  <div class="muro"><img id="ma" alt="amplitude wall"><div class="celle" data-muro="amp"></div></div>
+  <div class="muro"><img id="mc" alt="charge wall"><div class="celle" data-muro="car"></div></div>
+</div>
 
 
 <div id="lente" class="lente"><div class="lentebox">
@@ -2227,6 +2250,7 @@ MURO_COL = 4            # canali per riga
 MURO_MX, MURO_MY = 0.012, 0.030      # margini laterali e in basso
 MURO_TOP = 0.90         # sotto il titolo
 MURO_GX, MURO_GY = 0.012, 0.055      # spazio fra le celle
+MURO_CELLA_MAX = 300    # lato massimo di una cella quadrata, in pixel
 
 
 def geometria_muro(n):

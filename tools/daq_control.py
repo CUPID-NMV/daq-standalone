@@ -586,9 +586,19 @@ def disegna_misure(nomi, logy, per_canale=False, canali="", mv_per_offset=""):
             return False, "mV/offset fuori da ogni scala plausibile: %g" % k, None
         cmd += ["--mv-per-offset", repr(k)]
     cmd += scelti + ["-o", uscita]
+    # Dieci minuti e non due. Il conteggio per canale non si legge dal JSON
+    # dello scan: rilegge le forme d'onda dal file della run, e a run finita
+    # quel file e' COMPRESSO. Un .gz non si puo' leggere a pezzi, va
+    # decompresso tutto: misurato, 195 s per una run da 2.0 GB compressi, cioe'
+    # oltre il vecchio tetto di 120. Dalla pagina il disegno falliva sempre, e
+    # falliva in silenzio dopo due minuti di attesa.
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    except (OSError, subprocess.TimeoutExpired) as e:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    except subprocess.TimeoutExpired:
+        return False, ("Plot timed out after 10 minutes. With per channel the "
+                       "waveforms are reread from the run file, and a finished "
+                       "run is compressed: that costs minutes per gigabyte."), None
+    except OSError as e:
         return False, "Plot failed: %s" % e, None
     if r.returncode != 0:
         return False, (r.stderr.strip() or r.stdout.strip() or "plot_scan failed")[-400:], None
@@ -2234,6 +2244,13 @@ async function disegna(){
                                  mvoff: $("gmvoff").value.trim()});
   for(const s of scelti) q.append("misura", s);
   $("gdraw").disabled = true;
+  // Con "per channel" il disegno rilegge le forme d'onda dal file della run,
+  // che a run finita e' compresso: minuti, non secondi. Senza dirlo, la
+  // pagina sembra non aver fatto niente e si riclicca.
+  msg($("gperch").checked
+      ? "Drawing. Per channel rereads the waveforms from the run file: if the "
+        + "run is over the file is compressed, so this takes minutes."
+      : "Drawing.", true);
   try{
     const d = await (await fetch("/api/disegna?" + q, {method: "POST"})).json();
     if(d.esito && d.png) mostraGrafico(d.png); else msg(d.messaggio, false);

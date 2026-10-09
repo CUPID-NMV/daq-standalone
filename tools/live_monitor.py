@@ -1673,6 +1673,13 @@ PAGE = """<!DOCTYPE html>
               text-decoration:none; }
   .gr:hover .apri { opacity:1; }
   .affianca { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start; }
+  /* Una colonna dentro una riga. Serve ESPLICITAMENTE: .gr e .muro sono
+     inline-block, quindi dentro un div qualunque si affiancano invece di
+     impilarsi. La colonna diventava larga quanto i due grafici messi in fila,
+     non ci stava accanto alla panoramica e finiva sotto -- con il rate e le
+     forme d'onda uno a fianco all'altro, che e' l'opposto di quello che
+     deve fare. */
+  .colonna { display:flex; flex-direction:column; align-items:flex-start; }
   .muro { position:relative; display:inline-block; margin-bottom:10px;
           vertical-align:top; }
   .muro img { margin-bottom:0; display:block; }
@@ -1805,7 +1812,7 @@ Open the browser console to see the error.</div>
      calcolate dallo stesso codice che disegna. -->
 <div class="affianca">
   <div class="gr"><a class="apri" data-img="pano">&#8599;</a><img id="pano" alt="per-channel overview"></div>
-  <div>
+  <div class="colonna">
     <div class="gr"><a class="apri" data-img="r">&#8599;</a><img id="r" alt="rate vs time"></div>
     <div class="muro"><img id="mw" alt="waveform wall"><div class="celle" data-muro="wf"></div></div>
   </div>

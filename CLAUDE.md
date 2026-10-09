@@ -137,6 +137,7 @@ aggiorna. Le chiavi nuove vanno aggiunte lì a parte, con un backup, dicendolo.
 | `tools/probe_link.py` | determina i parametri di apertura di un collegamento |
 | `tools/daqio.py` | I/O condiviso; `channels=` legge solo alcuni canali |
 | `tools/daq_control.py` | pagina di controllo (8766): configurazione, run, coda, scan |
+| `tools/psu_control.py` | alimentatore Aim-TTi PLH250-P via LAN (porta 9221): stato, rampa in tensione, limiti, log su CSV. IP da DHCP: `find` lo ritrova |
 | `tools/WCFastCheck.ipynb` | analisi offline; legge i due formati e i `.gz` via `daqio` |
 
 Le misure stanno in `measurements/*.json` con i dati grezzi, e gli script di

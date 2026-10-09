@@ -17,6 +17,7 @@ Usa solo la libreria standard piu' numpy/h5py/matplotlib: niente Flask.
 import argparse
 import errno
 import glob
+import hashlib
 import io
 import json
 import os
@@ -775,6 +776,7 @@ class Monitor:
             "file_quando": self.file_mtime,
             "shown": 0,
             "channels": [],
+            "versione": VERSIONE_PAGINA,
         }
         res = self.analysis()
         if res is None:
@@ -1733,6 +1735,13 @@ PAGE = """<!DOCTYPE html>
   <div><span id="err" class="err"></span>
        <span id="nota" style="color:var(--mut);font-size:12px"></span></div>
 </div>
+<!-- Non ricarica da sola: chi guarda potrebbe star scrivendo in una casella,
+     o aver aperto il dettaglio di un canale. Si dice e si lascia decidere. -->
+<div id="vecchia" style="display:none;background:#8a6d1f;color:#fff;padding:8px 12px;
+     border-radius:8px;margin-bottom:10px;font-size:13px">
+  The monitor has been updated since this page was opened: the plots are fresh
+  but the layout is not. <a href="#" id="ricarica" style="color:#fff">Reload</a>
+</div>
 <div class="ctl">
   <label>x min [ns]<input id="xmin" value="__XMIN__" placeholder="auto"></label>
   <label>x max [ns]<input id="xmax" value="__XMAX__" placeholder="auto"></label>
@@ -1824,6 +1833,10 @@ Open the browser console to see the error.</div>
 <script>
 document.getElementById('boot').style.display = 'none';
 const REFRESH = __REFRESH__ * 1000;
+const VERSIONE = '__VERSIONE__';   // impronta della pagina servita
+document.getElementById('ricarica').onclick = ev => {
+  ev.preventDefault(); location.reload();
+};
 
 let lastOk = null;            // ultimo aggiornamento riuscito
 
@@ -2183,6 +2196,9 @@ async function tick() {
     } else {
       setAlert(null);
     }
+    // Il server ha una pagina diversa da questa: questa e' vecchia.
+    if (s.versione && s.versione !== VERSIONE)
+      document.getElementById('vecchia').style.display = 'block';
     document.getElementById('upd').textContent = ferma
       ? 'file not growing since ' + Math.round(s.ferma_da) + ' s'
       : 'updated at ' + lastOk.toLocaleTimeString();
@@ -2248,6 +2264,15 @@ document.getElementById('det').addEventListener('change', tick);
 
 tick(); setInterval(tick, REFRESH);
 </script></body></html>"""
+
+
+# L'impronta della pagina. Una scheda aperta ieri continua ad aggiornare le
+# immagini all'infinito -- e' la pagina che le ridisegna, non il server -- ma
+# l'HTML resta quello di quando e' stata aperta: dopo una modifica al monitor
+# si guardano grafici nuovi dentro una pagina vecchia, e non lo dice niente.
+# E' successo con lo spostamento del rate: due giri di "ricarica" senza che
+# cambiasse nulla, perche' la scheda era di prima.
+VERSIONE_PAGINA = hashlib.sha1(PAGE.encode()).hexdigest()[:8]
 
 
 # Canali della board. Il V1742 ne ha 32, quattro gruppi da otto: l'asse della
@@ -2410,6 +2435,7 @@ def make_handler(monitor, refresh, defaults):
                             .replace("__BTO__", _fmt(defaults["bto"]))
                             .replace("__GFROM__", _fmt(defaults["gfrom"]))
                             .replace("__GTO__", _fmt(defaults["gto"]))
+                            .replace("__VERSIONE__", VERSIONE_PAGINA)
 )
                 return self._send(200, "text/html; charset=utf-8", page.encode())
 

@@ -541,7 +541,7 @@ def elenco_misure(n=20):
     return fuori[:n]
 
 
-def disegna_misure(nomi, logy, per_canale=False, canali=""):
+def disegna_misure(nomi, logy, per_canale=False, canali="", mv_per_offset=""):
     """Lancia plot_scan.py sulle misure scelte. Torna (esito, messaggio, png)."""
     scelti = []
     for nome in nomi[:8]:
@@ -560,7 +560,8 @@ def disegna_misure(nomi, logy, per_canale=False, canali=""):
     # identiche. Cosi' lo stesso insieme con la stessa scala e' sempre lo
     # stesso file, e il browser lo rilegge grazie al parametro anti-cache.
     firma = hashlib.sha1(("|".join(sorted(nomi)) + ("|log" if logy else "|lin") +
-                          ("|ch:" + canali if per_canale else "|or"))
+                          ("|ch:" + canali if per_canale else "|or") +
+                          ("|mv:" + str(mv_per_offset or "")))
                          .encode()).hexdigest()[:8]
     uscita = os.path.join(GRAFICI, "view_%s.png" % firma)
     cmd = [sys.executable, os.path.join(ROOT, "tools", "plot_scan.py")]
@@ -571,6 +572,19 @@ def disegna_misure(nomi, logy, per_canale=False, canali=""):
         pulita = " ".join(x for x in canali.replace(",", " ").split() if x.isdigit())
         if pulita:
             cmd += ["--channels", pulita]
+    # La conversione forzata e' l'unica via per disegnare il conteggio per
+    # canale a una frequenza dove non e' stata misurata. plot_scan.py si
+    # rifiuta di inventarla, e fa bene; ma la via d'uscita esisteva solo da
+    # riga di comando, cosi' dalla pagina la funzione risultava "rotta".
+    # Il grafico scrive da se' che quel numero e' assunto.
+    if str(mv_per_offset or "").strip():
+        try:
+            k = float(str(mv_per_offset).replace(",", "."))
+        except ValueError:
+            return False, "mV/offset non e' un numero: %s" % mv_per_offset, None
+        if not 0 < k < 100:
+            return False, "mV/offset fuori da ogni scala plausibile: %g" % k, None
+        cmd += ["--mv-per-offset", repr(k)]
     cmd += scelti + ["-o", uscita]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
@@ -1678,6 +1692,8 @@ PAGINA = r"""<!doctype html>
       </label>
       <input id="gchan" placeholder="all channels" style="width:98px;font-size:12px"
              title="which channels to draw, e.g. 8,9 - empty means every channel in the file, including the unconnected ones">
+      <input id="gmvoff" placeholder="mV/offset" style="width:98px;font-size:12px"
+             title="mV per offset unit, to convert the threshold. Empty = the measured value for that sampling rate (2.5 GS/s and 1 GS/s only). At other rates the per-channel plot needs a number here, and the plot will say it is assumed.">
       <button id="gdraw" style="background:#2a78d6;color:#fff">Draw</button>
       <button id="ggo" style="background:#ececea">Refresh list</button>
       <a id="gapri" href="#" target="_blank" style="font-size:12px">open full size</a>
@@ -2214,7 +2230,8 @@ async function disegna(){
   const q = new URLSearchParams({token: TOKEN, chi: $("chi").value,
                                  logy: $("glog").checked ? "1" : "0",
                                  perch: $("gperch").checked ? "1" : "0",
-                                 canali: $("gchan").value.trim()});
+                                 canali: $("gchan").value.trim(),
+                                 mvoff: $("gmvoff").value.trim()});
   for(const s of scelti) q.append("misura", s);
   $("gdraw").disabled = true;
   try{
@@ -2488,7 +2505,8 @@ def crea_handler(ctrl, token):
             elif parti.path == "/api/disegna":
                 esito, messaggio, png = disegna_misure(
                     qs.get("misura", []), qs.get("logy", ["0"])[0] == "1",
-                    qs.get("perch", ["0"])[0] == "1", qs.get("canali", [""])[0])
+                    qs.get("perch", ["0"])[0] == "1", qs.get("canali", [""])[0],
+                    qs.get("mvoff", [""])[0])
                 extra["png"] = png
 
             elif parti.path.startswith("/api/coda/"):

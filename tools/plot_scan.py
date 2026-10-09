@@ -249,6 +249,9 @@ def main():
     # la stessa etichetta, e una legenda con due voci identiche non distingue
     # niente. Quando succede si aggiunge l'ora dello scan.
     serie = [leggi(path, args.mv_per_offset) for path in args.json]
+    # Copia stabile: piu' sotto, nel ramo per canale, `serie` viene
+    # svuotata, e in fondo serve ancora sapere di che frequenza erano.
+    tutte = list(serie)
 
     # Un asse, una unita'. Mescolare uno scan in millivolt con uno in conteggi
     # di offset significherebbe disegnare due grandezze diverse sulla stessa
@@ -351,7 +354,21 @@ def main():
         ax.set_ylim(bottom=0)
 
     if unita == "mV":
-        ax.set_xlabel("threshold  [mV at the detector input]")
+        # Una conversione forzata va DICHIARATA sul grafico, non solo nel
+        # comando che l'ha prodotto: il PNG gira da solo, finisce in una
+        # presentazione, e un asse in millivolt non lascia vedere che quei
+        # millivolt vengono da un numero assunto. A 750 MS/s la conversione
+        # non e' misurata e la dipendenza dalla frequenza vale il 29% fra
+        # 2.5 e 1 GS/s, per un meccanismo che non e' capito.
+        if args.mv_per_offset:
+            misurata = (MV_PER_OFFSET.get(frequenza(tutte[0][5].get("file", "")))
+                        if tutte else None)
+            come = "measured" if misurata == args.mv_per_offset else "ASSUMED"
+            ax.set_xlabel("threshold  [mV at the detector input]"
+                          "      (%.2f mV per offset unit, %s)"
+                          % (args.mv_per_offset, come))
+        else:
+            ax.set_xlabel("threshold  [mV at the detector input]")
     else:
         # Si dice "from baseline" perche' e' una distanza, non una soglia
         # assoluta: il piedistallo sta scritto nel JSON di ogni scan.

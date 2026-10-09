@@ -112,5 +112,6 @@
  "attenuazione": 1.79,
  "nota_larghezza": "Vale per impulsi larghi ~190 ns FWHM. Gli impulsi del SiPM col LED sono 165 ns, quelli al buio 20 ns: a quella larghezza NON si applica.",
  "nota_turnoff": "Il turn-off e larghe sigma 0.6 unita di offset = 0.24 mV, contro una dispersione dell ampiezza di 0.37 mV: stretto. A 1.6 ns era molto piu largo di quanto l ampiezza spiegasse.",
- "da_fare": "Seconda ampiezza per verificare la linearita, come fatto a settembre."
+ "da_fare": "Seconda ampiezza per verificare la linearita, come fatto a settembre.",
+ "secondi_per_punto": 45
 }

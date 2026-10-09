@@ -2171,7 +2171,26 @@ for (const f of FIELDS)
 function show(id, v) {
   document.getElementById(id).textContent = (v === null || v === undefined) ? '-' : v;
 }
+// Mette una immagine e torna quando e' arrivata (o quando e' fallita: un
+// errore non deve bloccare il giro, le altre immagini servono lo stesso).
+function carica(el, url) {
+  return new Promise(ok => {
+    el.onload = el.onerror = () => { el.onload = el.onerror = null; ok(); };
+    el.src = url;
+  });
+}
+
+// Un giro puo' durare piu' dell'intervallo: senza questa guardia i giri si
+// accavallano e ognuno aggiunge lavoro a un server che e' gia' in ritardo.
+let inCorso = false;
+
 async function tick() {
+  if (inCorso) return;
+  inCorso = true;
+  try { await giro(); } finally { inCorso = false; }
+}
+
+async function giro() {
   // Vero appena i dati sono arrivati: serve a distinguere una rete caduta da
   // un errore di QUESTA pagina. Un richiamo a una funzione inesistente finiva
   // nello stesso catch e si annunciava come "server unreachable", mandando a
@@ -2230,20 +2249,36 @@ async function tick() {
        <td>${na(c.eff)}</td></tr>`).join('');
     const p = params();
     p.set('t', Date.now());
-    for (const [id, name] of [['w','waveforms'],['r','rate'],['h','amplitudes'],
-                             ['q','integrals'],
-                             ['mw','muro_wf'],['ma','muro_amp'],['mc','muro_car']])
-      document.getElementById(id).src = name + '.png?' + p.toString();
     costruisciCelle(s.muro);
-    aggiornaLente();
-    // La panoramica copre tutti i canali e non risente della selezione, quindi
-    // non serve rigenerarla a ogni giro: si aggiorna ogni 5 s per conto suo.
-    const pano = document.getElementById('pano');
-    if (!pano.dataset.t || (Date.now() - pano.dataset.t) > 5000) {
-      pano.dataset.t = Date.now();
-      pano.src = 'panoramica.png?' + p.toString();
+
+    // Le immagini si chiedono UNA ALLA VOLTA, aspettando che ognuna arrivi.
+    // Il server ne disegna una per volta -- c'e' un lucchetto solo sui dati --
+    // quindi chiederle tutte insieme non le fa arrivare prima: le mette in
+    // coda. Con nove immagini e un rate alto la coda cresceva piu' in fretta
+    // di quanto si svuotasse e la pagina sembrava bloccata, con il monitor e
+    // la DAQ perfettamente vivi. In piu' il browser apre al massimo sei
+    // connessioni per origine: tenendole occupate tutte, la pagina di
+    // CONTROLLO -- che sta sulla stessa porta attraverso /monitor/ -- restava
+    // senza e sembrava ferma anche lei.
+    //
+    // I grafici che cambiano piano si rinfrescano ogni 5 s: la panoramica non
+    // risente nemmeno della selezione dei canali, e i muri e il rate si
+    // muovono lentamente per costruzione.
+    const LENTI = 5000;
+    const ora = Date.now();
+    for (const [id, name] of [['w','waveforms'],['h','amplitudes'],
+                              ['q','integrals'],
+                              ['r','rate'],['mw','muro_wf'],
+                              ['ma','muro_amp'],['mc','muro_car'],
+                              ['pano','panoramica']]) {
+      const el = document.getElementById(id);
+      const lento = (id === 'pano' || id === 'r' || id.startsWith('m'));
+      if (lento && el.dataset.t && (ora - el.dataset.t) < LENTI) continue;
+      el.dataset.t = ora;
+      await carica(el, name + '.png?' + p.toString());
+      aggiornaLente();
+      aggiornaFinestre();
     }
-    aggiornaFinestre();
   } catch (e) {
     // Le immagini restano quelle di prima: senza un avviso vistoso la pagina
     // sembrerebbe viva mentre mostra dati fermi.

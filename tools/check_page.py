@@ -119,6 +119,15 @@ def senza_testo(js):
 # era sparito riscrivendo i controlli per canale, e la pagina accusava la rete.
 definite = set(re.findall(r"function\s+([A-Za-z_$][\w$]*)", script))
 definite |= set(re.findall(r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=", script))
+# Anche i PARAMETRI: il callback di una Promise si chiama come una funzione
+# qualunque -- new Promise(ok => ... ok()) -- e senza questi risultava
+# "chiamata ma mai definita".
+_pulito = senza_testo(script)
+for lista in (re.findall(r"function\s*[A-Za-z_$\w]*\s*\(([^)]*)\)", _pulito)
+              + re.findall(r"\(([^()]*)\)\s*=>", _pulito)):
+    definite |= {x.strip().lstrip(".").split("=")[0].strip()
+                 for x in lista.split(",") if x.strip()}
+definite |= set(re.findall(r"([A-Za-z_$][\w$]*)\s*=>", _pulito))
 # Un nome preceduto da punto e' un metodo di qualcun altro, non roba nostra.
 chiamate = set(re.findall(r"(?<![.\w$])([a-z][A-Za-z0-9_$]*)\s*\(",
                           senza_testo(script)))

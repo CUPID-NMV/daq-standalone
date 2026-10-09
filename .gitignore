@@ -74,3 +74,8 @@ config/run-*.toml
 # Grafici generati da tools/plot_waveforms.py
 plots/
 *.png
+
+# Bytecode di Python: lo produce ogni esecuzione sul PC DAQ e sporcava
+# "git status" li, facendo sembrare divergente una copia allineata.
+__pycache__/
+*.pyc

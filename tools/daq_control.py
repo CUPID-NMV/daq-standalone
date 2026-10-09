@@ -2747,6 +2747,28 @@ async function psuSerie(){
 // e corrente su due assi y dello stesso grafico si leggono male. La scala ha
 // un'escursione minima (50 mV, 0.05 uA), altrimenti il rumore dell'ultima
 // cifra riempirebbe il riquadro e sembrerebbe una deriva.
+// La finestra davvero mostrata. Non si disegnano sei ore di bianco quando le
+// letture sono di tre minuti: il bordo sinistro si ferma al primo dato. Il
+// minuto di larghezza minima evita che due letture vicine diano una scala
+// senza senso. La usano il disegno E il puntamento del mouse: due copie di
+// questo conto scivolerebbero via una dall'altra al primo ritocco.
+function psuFinestra(){
+  const t1 = Date.now() / 1000;
+  const chiesto = t1 - PSU_ORE * 3600;
+  const primo = PSU_DATI.length ? PSU_DATI[0][0] : chiesto;
+  return [Math.min(Math.max(chiesto, primo), t1 - 60), t1];
+}
+
+// Un passo di griglia leggibile: 1, 2, 2.5 o 5 per una potenza di dieci.
+// Senza, i limiti erano il minimo e il massimo grezzi e sull'asse comparivano
+// numeri come 54.07 e 52.02, che non dicono niente a colpo d'occhio.
+function psuPasso(intervallo, quanti){
+  if(!(intervallo > 0)) return 1;
+  const g = Math.pow(10, Math.floor(Math.log10(intervallo / quanti)));
+  for(const m of [1, 2, 2.5, 5, 10]) if(intervallo / (m * g) <= quanti) return m * g;
+  return 10 * g;
+}
+
 function psuGrafico(cv, col, scala, minimo, dec, hover){
   const dpr = window.devicePixelRatio || 1;
   const W = cv.clientWidth, H = cv.clientHeight;
@@ -2754,23 +2776,54 @@ function psuGrafico(cv, col, scala, minimo, dec, hover){
   const g = cv.getContext("2d");
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, W, H);
-  const L = 44, R = 4, T = 4, B = 4;
+  const L = 44, R = 4, T = 4, B = 14;   // in basso ci vanno le etichette del tempo
   g.font = "10px system-ui"; g.fillStyle = "#6b6a65";
   if(PSU_DATI.length < 2){ g.fillText("collecting readings\u2026", L, H / 2); return; }
-  const t1 = Date.now() / 1000, t0 = t1 - PSU_ORE * 3600;
+  const [t0, t1] = psuFinestra();
   const ys = PSU_DATI.map(p => p[col] * scala);
   let lo = Math.min(...ys), hi = Math.max(...ys);
   if(hi - lo < minimo){ const c = (hi + lo) / 2; lo = c - minimo / 2; hi = c + minimo / 2; }
+  // Un margine del 12% sopra e sotto: con i limiti incollati al minimo e al
+  // massimo la traccia striscia sulla cornice e non si vede piu' dove
+  // oscilla. Poi i limiti si arrotondano al passo.
+  const aria = (hi - lo) * 0.12; lo -= aria; hi += aria;
+  // TRE righe, non una di piu': il riquadro e' alto 62 px e con cinque
+  // etichette i numeri si sovrappongono fra loro. L'arrotondamento verso
+  // l'esterno puo' aggiungere una riga, quindi si raddoppia il passo finche'
+  // non ne restano due intervalli.
+  let passo = psuPasso(hi - lo, 2), lo0 = lo, hi0 = hi;
+  for(let k = 0; k < 8; k++){
+    lo = Math.floor(lo0 / passo) * passo;
+    hi = Math.ceil(hi0 / passo) * passo;
+    if((hi - lo) / passo <= 2.001) break;
+    passo *= 2;
+  }
+  const nd = Math.max(dec === 0 ? 0 : 1, Math.min(4, -Math.floor(Math.log10(passo))));
   const X = t => L + (t - t0) / (t1 - t0) * (W - L - R);
   const Y = v => T + (hi - v) / (hi - lo) * (H - T - B);
   g.strokeStyle = "#ececea"; g.lineWidth = 1;
-  [lo, hi].forEach(v => { g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(W - R, Y(v)); g.stroke(); });
-  g.textBaseline = "top"; g.fillText(hi.toFixed(dec), 2, T);
-  g.textBaseline = "bottom"; g.fillText(lo.toFixed(dec), 2, H - B);
+  g.textBaseline = "middle"; g.textAlign = "left";
+  for(let v = lo; v <= hi + passo / 2; v += passo){
+    g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(W - R, Y(v)); g.stroke();
+    const y = Math.min(H - B - 5, Math.max(T + 5, Y(v)));
+    g.fillText(v.toFixed(nd), 2, y);
+  }
   g.strokeStyle = "#2a78d6"; g.lineWidth = 2; g.lineJoin = "round";
   g.beginPath();
   PSU_DATI.forEach((p, i) => { const x = X(p[0]), y = Y(ys[i]); i ? g.lineTo(x, y) : g.moveTo(x, y); });
   g.stroke();
+  // Quanto tempo copre l'asse, con l'unita' scritta: senza, un grafico di tre
+  // minuti e uno di sei ore sono identici.
+  const dur = t1 - t0;
+  const [u, nome] = dur < 180 ? [1, "s"] : dur < 10800 ? [60, "min"] : [3600, "h"];
+  const fmt = x => (x < 10 ? x.toFixed(1) : x.toFixed(0));
+  g.fillStyle = "#6b6a65"; g.textBaseline = "bottom";
+  g.textAlign = "left";   g.fillText("\u2212" + fmt(dur / u) + " " + nome, L, H);
+  g.textAlign = "center"; g.fillText("\u2212" + fmt(dur / 2 / u) + " " + nome,
+                                     (L + W - R) / 2, H);
+  g.textAlign = "right";  g.fillText("now", W - R, H);
+  g.textAlign = "left";
+
   if(hover !== null){
     const p = PSU_DATI[hover];
     g.strokeStyle = "#9a9a94"; g.lineWidth = 1;
@@ -2791,7 +2844,7 @@ function psuDisegna(hover){
   cv.onmousemove = ev => {
     if(PSU_DATI.length < 2) return;
     const r = cv.getBoundingClientRect();
-    const t1 = Date.now() / 1000, t0 = t1 - PSU_ORE * 3600;
+    const [t0, t1] = psuFinestra();
     const t = t0 + (ev.clientX - r.left - 44) / (r.width - 48) * (t1 - t0);
     let k = 0;
     PSU_DATI.forEach((p, i) => { if(Math.abs(p[0] - t) < Math.abs(PSU_DATI[k][0] - t)) k = i; });

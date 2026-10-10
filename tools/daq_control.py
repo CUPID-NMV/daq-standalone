@@ -1192,7 +1192,8 @@ class Controllo:
              "monitor_porta": self.porta_monitor,
              "scan": None, "coda": self.leggi_coda(),
              "scan_log": self.coda_scan(12) if not scan else None,
-             "psu": self.psu.stato() if self.psu else None}
+             "psu": self.psu.stato() if self.psu else None,
+             "versione": VERSIONE_PAGINA}
         if scan:
             s["scan"] = {
                 "avanzamento": self.avanzamento_scan(),
@@ -1891,6 +1892,18 @@ PAGINA = r"""<!doctype html>
 </style></head><body>
 <h1>DAQ Control</h1>
 
+<!-- Una scheda aperta ieri continua ad aggiornare i dati all'infinito, ma il
+     suo HTML resta quello di allora: i campi nuovi non ci sono e le richieste
+     partono senza. E' costato il numero di ripetizioni della coda, finito nel
+     nulla senza che niente lo dicesse. Non si ricarica da sola: potresti
+     avere un modulo mezzo compilato. -->
+<div id="vecchia" style="display:none;background:#8a6d1f;color:#fff;padding:9px 13px;
+     border-radius:8px;margin-bottom:12px;font-size:13px">
+  This page is older than the controller serving it: fields added since you
+  opened it are missing, and what you type in them is not sent.
+  <a href="#" id="ricarica" style="color:#fff;font-weight:600">Reload</a>
+</div>
+
 <div class="box" style="margin-bottom:14px">
   <span id="badge" class="stato ferma">...</span>
   <span id="sommario" style="margin-left:14px;color:#52514e"></span>
@@ -2113,6 +2126,8 @@ $("mon").href = location.protocol + "//" + location.hostname + ":" + PORTA_MON +
 
 const PAR = new URLSearchParams(location.search);
 const TOKEN = PAR.get("token") || "";
+const VERSIONE = "__VERSIONE__";     // impronta della pagina servita
+document.getElementById("ricarica").onclick = ev => { ev.preventDefault(); location.reload(); };
 
 // Gli errori NON spariscono da soli. Un rifiuto che svanisce dopo otto
 // secondi lascia la pagina con le modifiche ancora visibili e il file
@@ -2207,6 +2222,9 @@ async function aggiorna(){
   let s;
   try{ s = await (await fetch("/api/stato?token=" + TOKEN)).json(); }
   catch(e){ $("badge").textContent = "service unreachable"; return; }
+
+  // Il server ha una pagina diversa da questa: questa e' vecchia.
+  if(s.versione && s.versione !== VERSIONE) $("vecchia").style.display = "block";
 
   $("badge").textContent = s.in_corso ? "RUNNING" : "stopped";
   $("badge").className = "stato " + (s.in_corso ? "corso" : "ferma");
@@ -2945,6 +2963,12 @@ setInterval(psuSerie, 15000);
 </script></body></html>
 """
 
+# L'impronta della pagina servita. Serve a dirle quando e' piu' vecchia del
+# controllore: una scheda aperta ieri continua ad aggiornarsi, ma manda
+# richieste senza i campi aggiunti nel frattempo.
+VERSIONE_PAGINA = hashlib.sha1(PAGINA.encode()).hexdigest()[:8]
+
+
 
 def crea_handler(ctrl, token):
     class Handler(BaseHTTPRequestHandler):
@@ -3019,7 +3043,9 @@ def crea_handler(ctrl, token):
             parti = urllib.parse.urlparse(self.path)
             qs = urllib.parse.parse_qs(parti.query)
             if parti.path == "/":
-                return self._manda(200, "text/html; charset=utf-8", PAGINA.encode())
+                return self._manda(200, "text/html; charset=utf-8",
+                                   PAGINA.replace("__VERSIONE__",
+                                                  VERSIONE_PAGINA).encode())
             # Il monitor, servito attraverso QUESTA porta. Esiste perche' il
             # monitor gira su una porta sua, e chi guarda la pagina da fuori
             # -- VPN, inoltro di porta di VS Code, il collegamento diretto che

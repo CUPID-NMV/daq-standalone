@@ -1990,7 +1990,7 @@ PAGINA = r"""<!doctype html>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <input id="cnome" placeholder="run name" style="width:190px">
     <input id="csec" placeholder="duration [s]" style="width:95px" title="empty = stops at NEvents">
-    <input id="crip" placeholder="\u00d7 1" style="width:58px" title="how many identical runs to queue: 10 shorter runs give the same statistics as one long one, in files you can still open">
+    <input id="crip" placeholder="× 1" style="width:58px" title="how many identical runs to queue: 10 shorter runs give the same statistics as one long one, in files you can still open">
     <button id="cadd" style="background:#ececea">Add current configuration</button>
     <span style="margin-left:auto;display:flex;gap:8px">
       <button id="cgo" style="background:#15603a;color:#fff">Start queue</button>

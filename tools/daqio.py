@@ -282,3 +282,8 @@ def count_events(path, live=True):
     finally:
         f.close()
         _cleanup(tmp)
+
+
+# Il parser dei canali sta in un modulo senza dipendenze: lo usa anche la
+# pagina di controllo, che non ha motivo di tirarsi dentro h5py e numpy.
+from canali import parse_channels   # noqa: E402,F401

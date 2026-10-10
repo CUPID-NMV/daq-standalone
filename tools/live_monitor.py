@@ -37,7 +37,7 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import daqio
-from daqio import load, baseline_amplitude, DaqFileError
+from daqio import load, baseline_amplitude, DaqFileError, parse_channels
 
 
 def _mila(n):
@@ -2386,39 +2386,6 @@ def _bin(valore):
         return None
     n = int(valore)
     return max(5, min(500, n))
-
-
-def parse_channels(testo):
-    """Interpreta "8,9,12-15" come [8, 9, 12, 13, 14, 15]. Vuoto = tutti.
-
-    Un intervallo scritto al contrario o un pezzo non numerico vengono
-    ignorati: e' una casella di testo in una pagina, e non deve poter far
-    cadere il server.
-    """
-    testo = (testo or "").strip()
-    if not testo:
-        return None
-    fuori = []
-    for pezzo in testo.replace(";", ",").split(","):
-        pezzo = pezzo.strip()
-        if not pezzo:
-            continue
-        if "-" in pezzo:
-            a, _, b = pezzo.partition("-")
-            try:
-                a, b = int(a), int(b)
-            except ValueError:
-                continue
-            if a <= b:
-                fuori.extend(range(a, b + 1))
-        else:
-            try:
-                fuori.append(int(pezzo))
-            except ValueError:
-                continue
-    # senza duplicati e in ordine, cosi' i grafici non dipendono da come si
-    # e' scritto l'elenco
-    return sorted(set(fuori)) or None
 
 
 def _fmt(v):

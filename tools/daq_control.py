@@ -54,6 +54,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import calibrazione
+import canali as canali_mod
 import tomledit
 import psu_control
 
@@ -580,9 +581,17 @@ def disegna_misure(nomi, logy, per_canale=False, canali="", mv_per_offset=""):
         cmd.append("--logy")
     if per_canale:
         cmd.append("--per-channel")
-        pulita = " ".join(x for x in canali.replace(",", " ").split() if x.isdigit())
-        if pulita:
-            cmd += ["--channels", pulita]
+        # "16,18" e "16-18" valgono tutt'e due, e vuoto vuol dire tutti. Prima
+        # qui passavano solo i numeri puri e un intervallo spariva in
+        # silenzio: si chiedevano tre canali e ne uscivano trentadue, senza
+        # che niente lo dicesse.
+        scelti = canali_mod.parse_channels(canali)
+        if canali.strip() and not scelti:
+            return False, ("Channel list not understood: %r. Use 16, 16,18 or "
+                           "16-18; leave it empty for every channel."
+                           % canali.strip()[:40]), None
+        if scelti:
+            cmd += ["--channels", " ".join(str(c) for c in scelti)]
     # La conversione forzata e' l'unica via per disegnare il conteggio per
     # canale a una frequenza dove non e' stata misurata. plot_scan.py si
     # rifiuta di inventarla, e fa bene; ma la via d'uscita esisteva solo da
@@ -2015,8 +2024,8 @@ PAGINA = r"""<!doctype html>
              title="counts each channel over threshold, recomputed from the recorded waveforms">
         <input type="checkbox" id="gperch"> per channel
       </label>
-      <input id="gchan" placeholder="all channels" style="width:98px;font-size:12px"
-             title="which channels to draw, e.g. 8,9 - empty means every channel in the file, including the unconnected ones">
+      <input id="gchan" placeholder="all — or 16,18 / 16-18" style="width:98px;font-size:12px"
+             title="which channels to draw: 16, or 16,18, or 16-18 - empty means every channel in the file, including the unconnected ones">
       <input id="gmvoff" placeholder="mV/offset" style="width:98px;font-size:12px"
              data-auto="1"
              title="mV per offset unit, to convert the threshold. Empty = the measured value for that sampling rate (2.5 GS/s and 1 GS/s only). At other rates the per-channel plot needs a number here, and the plot will say it is assumed.">

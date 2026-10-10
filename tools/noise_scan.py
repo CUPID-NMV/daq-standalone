@@ -105,8 +105,15 @@ def larghezza_impulsi(path, canali, quanti=300):
     durata della run, e la larghezza non dipende dal punto dello scan.
     """
     try:
-        hdr, d = carica_run(path, last=quanti, live=True,
-                            channels=canali or None, strict=False)
+        # live=True serve mentre la run scrive; su un file gia' chiuso e
+        # compresso daqio lo rifiuta, ed e' il caso quando si rilegge uno scan
+        # vecchio. Si prova l'uno e si ripiega sull'altro.
+        try:
+            hdr, d = carica_run(path, last=quanti, live=True,
+                                channels=canali or None, strict=False)
+        except Exception:
+            hdr, d = carica_run(path, last=quanti,
+                                channels=canali or None, strict=False)
         if d is None or d.shape[0] < 20:
             return None
         # SamplingTime sta nel file in SECONDI; qui si lavora in nanosecondi

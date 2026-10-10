@@ -128,17 +128,30 @@ def larghezza_impulsi(path, canali, quanti=300):
         base = np.median(d[:, 0, i0:i1], axis=1)
         w = d[:, 0, :] - base[:, None]
         w = w * (np.sign(np.sum(w)) or 1.0)      # impulsi positivi o negativi
-        med = np.median(w, axis=0)
-        pk = float(med.max())
-        if pk <= 0:
+
+        # La larghezza si misura EVENTO PER EVENTO, attorno al massimo di
+        # ciascuno, e poi se ne prende la mediana. Misurarla sulla forma
+        # d'onda media sembra piu' naturale ed e' sbagliato: gli impulsi non
+        # sono allineati nel tempo -- sugli impulsi al buio di un SiPM il
+        # picco della mediana e' 20 conteggi contro i 48 di ampiezza tipica,
+        # cioe' la media li impasta -- e la larghezza che ne usciva ballava
+        # fra 9 e 61 ns a seconda di quanti eventi si guardavano.
+        rumore = float(np.median(np.std(w[:, i0:i1], axis=1))) or 1.0
+        larghezze = []
+        for riga in w:
+            pk = float(riga.max())
+            if pk < 5 * rumore:                  # senza impulso non c'e' larghezza
+                continue
+            ipk = int(riga.argmax())
+            a = np.where(riga[:ipk] < pk / 2)[0]
+            b = np.where(riga[ipk:] < pk / 2)[0]
+            ta = t[a[-1]] if len(a) else t[0]
+            tb = t[ipk + b[0]] if len(b) else t[-1]
+            if tb > ta:
+                larghezze.append(tb - ta)
+        if len(larghezze) < 10:
             return None
-        ipk = int(med.argmax())
-        a = np.where(med[:ipk] < pk / 2)[0]
-        b = np.where(med[ipk:] < pk / 2)[0]
-        ta = t[a[-1]] if len(a) else t[0]
-        tb = t[ipk + b[0]] if len(b) else t[-1]
-        larg = float(tb - ta)
-        return round(larg, 1) if larg > 0 else None
+        return round(float(np.median(larghezze)), 1)
     except Exception:
         # Una larghezza che non si riesce a misurare non deve far fallire uno
         # scan: e' un di piu', e il campo resta assente.

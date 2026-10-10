@@ -135,9 +135,17 @@ aggiorna. Le chiavi nuove vanno aggiunte lì a parte, con un backup, dicendolo.
   frequenza fu preso). Per gli impulsi al buio dei SiPM, **20 ns**, non c'e'
   nessun punto applicabile.
 - **Gli impulsi dei SiPM hanno due larghezze a seconda di cosa li produce**:
-  col LED **165 ns** FWHM (428 ns al 10%), al buio in self-trigger **20 ns**
-  (255 ns al 10%). Misurati il 2026-10-09 su ch16 a 750 MS/s. In tutti e due
-  i casi si e' lontanissimi dagli 1.80 ns dei PMT.
+  col LED **156-165 ns** FWHM, al buio in self-trigger **~9 ns**. Misurati su
+  ch16 a 750 MS/s. In tutti e due i casi si e' lontanissimi dagli 1.80 ns dei
+  PMT, ed e' per questo che la calibrazione dei PMT non si applica.
+- **La larghezza si misura EVENTO PER EVENTO, non sulla forma d'onda media.**
+  Gli impulsi al buio di un SiPM non sono allineati nel tempo: il picco della
+  mediana vale 20 conteggi contro i 48 di ampiezza tipica per evento, cioe' la
+  media li impasta e ne allarga la forma. Misurata cosi', la larghezza ballava
+  fra 9 e 61 ns a seconda di quanti eventi si guardavano -- i "20 ns" scritti
+  qui il 2026-10-09 venivano da li'. Misurata attorno al massimo di ogni
+  singolo evento vale 9 ns e non si muove piu'. Sugli impulsi allineati (LED,
+  generatore) i due metodi concordano entro il 5%.
 - **Il rate del generatore si prende dal plateau dello scan, non dallo
   scaler.** Il 2026-10-09 lo scaler dava 88 Hz, il plateau 91.6, e durante la
   messa a punto la DAQ ne ha visti 12.9 per un'ora: era il sync che precedeva

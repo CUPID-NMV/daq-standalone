@@ -1262,7 +1262,7 @@ class Controllo:
     def coda_attiva(self):
         return bool(self.leggi_coda().get("attiva"))
 
-    def coda_aggiungi(self, nome, secondi, modifiche):
+    def coda_aggiungi(self, nome, secondi, modifiche, ripeti=1):
         with self.lock:
             d = self.leggi_coda()
             if d["attiva"]:
@@ -1292,13 +1292,35 @@ class Controllo:
                 except (TypeError, ValueError):
                     return False, "The duration must be between 1 and 86400 seconds."
 
-            d["voci"].append({
-                "id": max([v["id"] for v in d["voci"]] + [0]) + 1,
-                "nome": (nome or "").strip()[:60] or "run %d" % (len(d["voci"]) + 1),
-                "modifiche": pulite, "secondi": sec,
-                "stato": "pending", "run": None, "eventi": None, "messaggio": "",
-            })
+            # Ripetizioni: dieci run uguali per fare statistica, senza
+            # aggiungere dieci volte la stessa voce a mano. Il limite non e'
+            # prudenza astratta: a 50 voci la coda smette di stare sullo
+            # schermo, e un errore di battitura che ne crea mille si nota
+            # solo quando la notte e' gia' persa.
+            try:
+                n_rip = int(ripeti or 1)
+            except (TypeError, ValueError):
+                return False, "The repeat count must be a whole number."
+            if not 1 <= n_rip <= 50:
+                return False, "The repeat count must be between 1 and 50."
+
+            base = (nome or "").strip()[:52]
+            for k in range(n_rip):
+                # Il numero nel nome e' quello della RIPETIZIONE, non del file:
+                # i file li numera la DAQ e due cose che si somigliano ma non
+                # coincidono confondono quando si cerca una run nel log.
+                etichetta = (("%s %d/%d" % (base, k + 1, n_rip)) if base and n_rip > 1
+                             else base or "run %d" % (len(d["voci"]) + 1))
+                d["voci"].append({
+                    "id": max([v["id"] for v in d["voci"]] + [0]) + 1,
+                    "nome": etichetta,
+                    "modifiche": pulite, "secondi": sec,
+                    "stato": "pending", "run": None, "eventi": None, "messaggio": "",
+                })
             self._scrivi_coda(d)
+            if n_rip > 1:
+                return True, "Added %d identical runs to the queue: %s" % (
+                    n_rip, d["voci"][-1]["nome"])
             return True, "Added to the queue: %s" % d["voci"][-1]["nome"]
 
     def coda_rimuovi(self, voce_id):
@@ -1968,6 +1990,7 @@ PAGINA = r"""<!doctype html>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <input id="cnome" placeholder="run name" style="width:190px">
     <input id="csec" placeholder="duration [s]" style="width:95px" title="empty = stops at NEvents">
+    <input id="crip" placeholder="\u00d7 1" style="width:58px" title="how many identical runs to queue: 10 shorter runs give the same statistics as one long one, in files you can still open">
     <button id="cadd" style="background:#ececea">Add current configuration</button>
     <span style="margin-left:auto;display:flex;gap:8px">
       <button id="cgo" style="background:#15603a;color:#fff">Start queue</button>
@@ -2675,14 +2698,22 @@ async function codaAzione(azione, conferma){
 $("cadd").onclick = async () => {
   const mod = modificheCorrenti();
   const nome = $("cnome").value.trim(), sec = $("csec").value.trim();
+  const rip = parseInt($("crip").value.trim() || "1", 10);
+  if(!(rip >= 1 && rip <= 50)){ msg("Repeat count: a whole number between 1 and 50.", false); return; }
   const descr = mod.length ? mod.map(m => m[1] + "=" + m[2]).join(", ")
                            : "no changes: the configuration as it is in the file";
-  if(!confirm("Add to the queue?\n\n" + (nome || "(unnamed)") + "\n" + descr +
-              "\n" + (sec ? sec + " s" : "until NEvents"))) return;
+  // Quante run e quanto durano in tutto: dieci run da cinque minuti sono
+  // quasi un'ora, ed e' meglio accorgersene prima di premere.
+  const totale = (rip > 1 && sec) ? "\n\ntotal: " + (rip * parseFloat(sec) / 60).toFixed(0)
+                                    + " minutes" : "";
+  if(!confirm("Add to the queue?\n\n" + (rip > 1 ? rip + " identical runs" : "1 run") +
+              ": " + (nome || "(unnamed)") + "\n" + descr +
+              "\n" + (sec ? sec + " s each" : "until NEvents") + totale)) return;
   try{
     const r = await fetch("/api/coda/aggiungi?token=" + TOKEN, {
       method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({nome: nome, secondi: sec, modifiche: mod, chi: $("chi").value})
+      body: JSON.stringify({nome: nome, secondi: sec, modifiche: mod,
+                            ripeti: rip, chi: $("chi").value})
     });
     const d = await r.json();
     msg(d.messaggio, d.esito);
@@ -3119,7 +3150,8 @@ def crea_handler(ctrl, token):
                     chi = (corpo.get("chi") or chi).strip()[:40]
                     esito, messaggio = ctrl.coda_aggiungi(corpo.get("nome"),
                                                           corpo.get("secondi"),
-                                                          corpo.get("modifiche", []))
+                                                          corpo.get("modifiche", []),
+                                                          corpo.get("ripeti", 1))
                 elif azione == "rimuovi":
                     esito, messaggio = ctrl.coda_rimuovi(qs.get("id", [""])[0])
                 elif azione == "riprova":

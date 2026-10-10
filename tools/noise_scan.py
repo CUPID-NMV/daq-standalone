@@ -37,7 +37,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from daqio import count_events
+from daqio import count_events, load as carica_run
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 F_ADC = 30e6          # campionamento dell'ADC in Transparent Mode, ~30 MHz
@@ -91,6 +91,51 @@ def sigma_from_rate(distances, rate):
         else:
             hi = mid
     return 0.5 * (lo + hi)
+
+
+def larghezza_impulsi(path, canali, quanti=300):
+    """FWHM mediana degli impulsi in coda al file, in ns. None se non si puo'.
+
+    La si registra nella misura perche' e' lei a decidere quale calibrazione
+    offset -> mV si applica: fra 1.8 e 189 ns il fattore cambia di otto volte,
+    mentre fra 2.5 e 1 GS/s cambia del 25. Senza, chi disegna lo scan mesi
+    dopo puo' solo indovinare -- e indovinare qui costa un fattore sei.
+
+    Si leggono gli ultimi eventi e basta: il costo non deve crescere con la
+    durata della run, e la larghezza non dipende dal punto dello scan.
+    """
+    try:
+        hdr, d = carica_run(path, last=quanti, live=True,
+                            channels=canali or None, strict=False)
+        if d is None or d.shape[0] < 20:
+            return None
+        # SamplingTime sta nel file in SECONDI; qui si lavora in nanosecondi
+        # come tutto il resto del progetto.
+        dt = (float(hdr.get("SamplingTime") or 0) or 0.0) * 1e9
+        if not dt:
+            return None
+        t = np.arange(d.shape[2]) * dt
+        i0, i1 = int(10.0 / dt), int(180.0 / dt)
+        if i1 - i0 < 5:
+            return None
+        base = np.median(d[:, 0, i0:i1], axis=1)
+        w = d[:, 0, :] - base[:, None]
+        w = w * (np.sign(np.sum(w)) or 1.0)      # impulsi positivi o negativi
+        med = np.median(w, axis=0)
+        pk = float(med.max())
+        if pk <= 0:
+            return None
+        ipk = int(med.argmax())
+        a = np.where(med[:ipk] < pk / 2)[0]
+        b = np.where(med[ipk:] < pk / 2)[0]
+        ta = t[a[-1]] if len(a) else t[0]
+        tb = t[ipk + b[0]] if len(b) else t[-1]
+        larg = float(tb - ta)
+        return round(larg, 1) if larg > 0 else None
+    except Exception:
+        # Una larghezza che non si riesce a misurare non deve far fallire uno
+        # scan: e' un di piu', e il campo resta assente.
+        return None
 
 
 def main():
@@ -222,6 +267,7 @@ def main():
         "baseline": {str(int(c["ch"])): c["baseline"] for c in st["channels"]},
         "sigma_assunto": sigma,
         "secondi_per_punto": args.seconds,
+        "larghezza_fwhm_ns": larghezza_impulsi(path, channels),
         "punti": [{"offset": r[0], "distanza": r[1], "rate": r[2],
                    "atteso": r[3], "conteggi": r[4],
                    "eventi_da": r[5], "eventi_a": r[6]} for r in rows],

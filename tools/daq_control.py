@@ -53,6 +53,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import calibrazione
 import tomledit
 import psu_control
 
@@ -534,10 +535,19 @@ def elenco_misure(n=20):
                 d = json.load(f)
         except (OSError, ValueError):
             continue
+        # Quale calibrazione offset -> mV si applica a QUESTO scan. La
+        # larghezza degli impulsi, quando lo scan l'ha registrata, decide
+        # meglio della frequenza di campionamento: vedi tools/calibrazione.py.
+        mv, nota = (None, None)
+        if d.get("tipo") != "v812":
+            tag = next((t for t in ("5Gs", "2.5Gs", "1Gs", "750Ms")
+                        if t in str(d.get("file", ""))), None)
+            mv, nota = calibrazione.scegli(tag, d.get("larghezza_fwhm_ns"))
         fuori.append({"nome": nome, "quando": st.st_mtime,
                       "punti": len(d.get("punti", [])),
                       "tipo": "V812 CFD" if d.get("tipo") == "v812" else "V1742 self-trigger",
-                      "canali": d.get("canali")})
+                      "canali": d.get("canali"),
+                      "mvoff": mv, "mvoff_nota": nota})
     fuori.sort(key=lambda x: -x["quando"])
     return fuori[:n]
 
@@ -2008,7 +2018,9 @@ PAGINA = r"""<!doctype html>
       <input id="gchan" placeholder="all channels" style="width:98px;font-size:12px"
              title="which channels to draw, e.g. 8,9 - empty means every channel in the file, including the unconnected ones">
       <input id="gmvoff" placeholder="mV/offset" style="width:98px;font-size:12px"
+             data-auto="1"
              title="mV per offset unit, to convert the threshold. Empty = the measured value for that sampling rate (2.5 GS/s and 1 GS/s only). At other rates the per-channel plot needs a number here, and the plot will say it is assumed.">
+      <div id="gmvoffnota" style="font-size:11px;color:#6b6a65;max-width:190px;line-height:1.35"></div>
       <button id="gdraw" style="background:#2a78d6;color:#fff">Draw</button>
       <button id="ggo" style="background:#ececea">Refresh list</button>
       <a id="gapri" href="#" target="_blank" style="font-size:12px">open full size</a>
@@ -2541,7 +2553,39 @@ async function caricaGrafici(){
       if(scelti.has(o.value)){ o.selected = true; qualcuno = true; }
     if(!qualcuno) $("gsel").options[0].selected = true;
   }
+  MISURE = m;
+  suggerisciMvOff();
 }
+
+// La conversione soglia -> millivolt la propone il server, che sa con quali
+// impulsi ogni punto di calibrazione e' stato misurato. Si SCRIVE nella
+// casella invece di dirlo in un messaggio: chi disegna vuole il grafico, non
+// un compito. Resta modificabile, e accanto c'e' scritto su che impulso quel
+// numero vale -- perche' il fattore dipende dalla larghezza molto piu' che
+// dalla frequenza di campionamento, e un numero senza quella frase e' una
+// trappola per il prossimo che lo legge.
+let MISURE = [], MVOFF_MIO = false;
+
+function suggerisciMvOff(){
+  const scelti = new Set(Array.from($("gsel").selectedOptions).map(o => o.value));
+  const sel = MISURE.filter(x => scelti.has(x.nome));
+  const note = [...new Set(sel.map(x => x.mvoff_nota).filter(Boolean))];
+  const valori = [...new Set(sel.map(x => x.mvoff).filter(v => v !== null && v !== undefined))];
+  $("gmvoffnota").textContent = note.length === 1 ? note[0] :
+      (note.length ? "the selected scans need different calibrations: "
+                     + note.join("  |  ") : "");
+  // Quello che hai scritto tu non si tocca.
+  if(MVOFF_MIO) return;
+  $("gmvoff").value = valori.length === 1 ? String(valori[0]) : "";
+}
+
+$("gsel").addEventListener("change", suggerisciMvOff);
+$("gmvoff").addEventListener("input", () => {
+  // Vuota vuol dire "torna a proporre": non si resta prigionieri di una
+  // cancellatura.
+  MVOFF_MIO = $("gmvoff").value.trim() !== "";
+  if(!MVOFF_MIO) suggerisciMvOff();
+});
 
 async function disegna(){
   const scelti = Array.from($("gsel").selectedOptions).map(o => o.value);

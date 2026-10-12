@@ -81,6 +81,17 @@ GRAFICI = os.path.join(ROOT, "plots")
 # una coda che non c'e'.
 CODA = os.path.join(ROOT, "data", "coda.json")
 
+# E-log su Google: si versa da soli alla fine di ogni run. La chiave di
+# servizio sta FUORI dal repo, con permessi 600 -- in un repo ci finirebbe
+# dentro al primo "git add -A".
+ELOG_CHIAVE = os.environ.get("ELOG_CHIAVE",
+                             "1cM8O6Co1Llx5Ysa4BfS4rmMqa4XEYJpdjSv61xerp44")
+ELOG_CRED = os.environ.get("ELOG_CRED",
+                           os.path.expanduser("~/.config/daq-elog/credentials.json"))
+ELOG_PYTHON = os.environ.get("ELOG_PYTHON", os.path.expanduser("~/.venv-elog/bin/python"))
+ELOG_ULTIME = int(os.environ.get("ELOG_ULTIME", "20"))
+ELOG_LOG = "/tmp/elog_push.log"
+
 SCAN = {
     "v1742": {
         "script": os.path.join(ROOT, "tools", "scan_v1742.sh"),
@@ -996,6 +1007,7 @@ class Controllo:
         # e chi guarda da fuori crede che la run non sia finita. Succedeva una
         # volta per run.
         self.figli = []
+        self._daq_prima = trova_daq() is not None   # per vedere la FINE di una run
         self.storia = []          # (istante, eventi) per il rate recente
         self.porta_monitor = porta_monitor
         self.args_monitor = list(args_monitor or ARGS_MONITOR)
@@ -1221,6 +1233,34 @@ class Controllo:
                 runfile = riga.split("HDF5 output path selected:")[1].strip()
         return eventi, richiesti, runfile
 
+    def _versa_elog(self):
+        """Aggiorna il foglio e-log, senza far aspettare nessuno.
+
+        In un processo a parte e senza attenderlo: se Google e' lento o la
+        rete e' giu', la pagina di controllo non deve rallentare di un
+        millisecondo -- e men che meno fallire. Un errore finisce nel log, non
+        sullo schermo di chi sta acquisendo.
+        """
+        if not (os.path.exists(ELOG_CRED) and os.path.exists(ELOG_PYTHON)):
+            return
+        comando = (
+            "%s %s -n %d 2>>%s | %s %s /dev/stdin --chiave %s --credenziali %s >>%s 2>&1"
+            % (shlex.quote(sys.executable),
+               shlex.quote(os.path.join(ROOT, "tools", "elog.py")), ELOG_ULTIME,
+               shlex.quote(ELOG_LOG), shlex.quote(ELOG_PYTHON),
+               shlex.quote(os.path.join(ROOT, "tools", "elog_push.py")),
+               shlex.quote(ELOG_CHIAVE), shlex.quote(ELOG_CRED),
+               shlex.quote(ELOG_LOG)))
+        try:
+            with open(ELOG_LOG, "a") as f:
+                f.write("\n=== %s: run finita, aggiorno l'e-log ===\n"
+                        % time.strftime("%F %T"))
+            self.figli.append(subprocess.Popen(["/bin/sh", "-c", comando],
+                                               stdin=subprocess.DEVNULL,
+                                               start_new_session=True))
+        except OSError:
+            pass
+
     def _raccogli_figli(self):
         """Raccoglie le run gia' finite, cosi' non restano zombie."""
         self.figli = [p for p in self.figli if p.poll() is None]
@@ -1228,6 +1268,14 @@ class Controllo:
     def stato(self):
         self._raccogli_figli()
         pid = trova_daq()
+        # Fine di una run: lo si vede qui, in un posto solo, e vale sia per le
+        # run singole sia per quelle della coda. Si versa l'e-log DOPO che il
+        # processo e' sparito, cioe' a file chiuso e compresso: prima il log
+        # della run non ha ancora il riepilogo finale e la riga uscirebbe senza
+        # eventi ne' rate.
+        if self._daq_prima and pid is None:
+            self._versa_elog()
+        self._daq_prima = pid is not None
         scan = trova_scan()
         s = {"in_corso": pid is not None, "pid": pid,
              "config": self.config(), "log": self.coda_log(25),

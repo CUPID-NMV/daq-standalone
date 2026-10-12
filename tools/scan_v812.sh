@@ -196,6 +196,10 @@ rec = {
     "quando": time.strftime("%Y-%m-%d %H:%M:%S"),
     "base_address": hex(cfd.get("BaseAddress", 0)),
     "canali": cfd.get("Channels", []),
+    # Senza questa, uno scan in coincidenza a 2 e uno in OR si somigliano nel
+    # file e sono due misure diverse: l'uno conta i canali singoli sopra
+    # soglia, l'altro le coincidenze.
+    "maggioranza": cfd.get("Majority", 1),
     "width": cfd.get("Width"),
     "dead_time": cfd.get("DeadTime"),
     "secondi_per_punto": float(secondi),

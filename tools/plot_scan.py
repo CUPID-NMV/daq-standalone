@@ -61,7 +61,7 @@ TRATTO = {"v1742": "-", "v812": "--"}
 INCHIOSTRO = "#52514e"
 
 
-def _canali(c):
+def _canali(c, magg=1):
     """I canali come si leggono in una legenda, non come li stampa Python.
 
     Con piu' di un canale si scrive OR, e non per pignoleria: il rate di uno
@@ -76,6 +76,11 @@ def _canali(c):
         return "ch %s" % c
     if len(c) == 1:
         return "ch %s" % c[0]
+    # "OR" solo quando lo e' davvero: sul V812 la stessa uscita diventa una
+    # coincidenza a N alzando la soglia di maggioranza, e una curva di
+    # coincidenze etichettata "OR" si legge come una misura che non e'.
+    if (magg or 1) > 1:
+        return "%d-fold of ch %s" % (magg, ", ".join(str(x) for x in c))
     return "OR of ch %s" % ", ".join(str(x) for x in c)
 
 
@@ -184,7 +189,7 @@ def leggi(path, mv_per_offset_forzato):
         x = np.array([p["soglia_mv"] for p in punti], dtype=float)
         y = np.array([p["rate"] for p in punti], dtype=float)
         lim = np.array([p["eventi"] == 0 for p in punti])
-        nota = "V812 CFD   %s" % _canali(d.get("canali"))
+        nota = "V812 CFD   %s" % _canali(d.get("canali"), d.get("maggioranza", 1))
         return "v812", x, y, lim, nota, d, "mV"
 
     # formato di noise_scan.py: soglia in conteggi di offset

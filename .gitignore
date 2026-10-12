@@ -79,3 +79,6 @@ plots/
 # "git status" li, facendo sembrare divergente una copia allineata.
 __pycache__/
 *.pyc
+
+# Ambiente per il foglio e-log: librerie, non codice del progetto
+.venv-elog/

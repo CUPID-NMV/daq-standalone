@@ -168,6 +168,8 @@ def main():
     ap.add_argument("-d", "--data-dir", default=os.path.join(ROOT, "data"))
     ap.add_argument("-o", "--out", default=None, help="CSV di uscita (default: stdout)")
     ap.add_argument("--da", default=None, help="solo run dal giorno AAAA-MM-GG in poi")
+    ap.add_argument("-n", "--ultime", type=int, default=None,
+                    help="solo le ultime N run (le prime sono quasi sempre prove)")
     a = ap.parse_args()
 
     psu = leggi_psu(os.path.join(a.data_dir, "psu-log.csv"))
@@ -179,6 +181,10 @@ def main():
                 if r and (not a.da or r["data"] >= a.da):
                     righe.append(r)
     righe.sort(key=lambda r: (r["data"], r["ora"]))
+    # Le ultime N, non le prime: un e-log parte da quando si e' smesso di
+    # provare, e le prove restano sul disco per chi le vuole.
+    if a.ultime:
+        righe = righe[-a.ultime:]
 
     uscita = open(a.out, "w", newline="") if a.out else sys.stdout
     w = csv.DictWriter(uscita, fieldnames=COLONNE)

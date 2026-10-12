@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+"""
+Le righe automatiche dell'e-log, una per run.
+
+    python3 tools/elog.py                       # CSV su stdout
+    python3 tools/elog.py -o /tmp/runs_auto.csv
+    python3 tools/elog.py --da 2026-10-01
+
+Si legge il **log testuale** di ogni run, non l'HDF5: l'header di un file
+compresso si ottiene solo decomprimendolo tutto, e con 174 run da 67 GB
+sarebbero ore. Il .log ha gli stessi numeri ed e' istantaneo.
+
+Queste colonne si rigenerano da zero ogni volta. Le colonne scritte a mano --
+scopo, sorgente, setup, esito, note -- stanno in un ALTRO foglio, legato a
+questo dal nome della run: se stessero nelle stesse righe, la prima
+rigenerazione se le porterebbe via.
+"""
+import argparse
+import csv
+import os
+import re
+import sys
+import time
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+# L'ordine e' quello in cui si leggono: prima cos'e', poi com'era messa la
+# macchina, poi quanto e' durata.
+COLONNE = ["run", "data", "ora", "hv_v", "i_ua", "canali", "trigger",
+           "soglie", "maggioranza", "campionamento", "finestra_ns",
+           "post_trigger_pc", "eventi", "rate_hz", "durata_s", "file", "byte"]
+
+
+def _num(testo, patt, tipo=float, default=None):
+    m = re.search(patt, testo)
+    if not m:
+        return default
+    try:
+        return tipo(m.group(1))
+    except ValueError:
+        return default
+
+
+def leggi_psu(path):
+    """(istante, v_out, i_out) dal CSV dell'alimentatore, ordinati."""
+    fuori = []
+    try:
+        with open(path) as f:
+            for riga in csv.reader(f):
+                if len(riga) < 5 or not riga[0].replace(".", "").isdigit():
+                    continue
+                try:
+                    fuori.append((float(riga[0]), float(riga[2]), float(riga[4])))
+                except ValueError:
+                    continue
+    except OSError:
+        return []
+    fuori.sort()
+    return fuori
+
+
+def hv_a(psu, quando, tolleranza=600.0):
+    """Tensione e corrente al momento dato, se la lettura e' abbastanza vicina.
+
+    Fuori tolleranza si lascia vuoto: una tensione presa un'ora prima non
+    descrive questa run, e scriverla sarebbe peggio che non scriverla.
+    """
+    if not psu or quando is None:
+        return "", ""
+    migliore = min(psu, key=lambda r: abs(r[0] - quando))
+    if abs(migliore[0] - quando) > tolleranza:
+        return "", ""
+    return round(migliore[1], 2), round(migliore[2] * 1e6, 2)
+
+
+def riga_da_log(path_log, psu):
+    """Una riga dell'e-log dal log di una run, oppure None se non e' una run."""
+    try:
+        testo = ANSI.sub("", open(path_log, errors="replace").read())
+    except OSError:
+        return None
+
+    m = re.search(r"HDF5 output path selected:\s*(\S+)", testo)
+    if not m:
+        return None                      # run morta prima di aprire il file
+    h5 = os.path.basename(m.group(1).replace("//", "/"))
+    nome = h5[:-3] if h5.endswith(".h5") else h5
+
+    canali = ", ".join(re.findall(r"^Summary :\s+ch(\d+)\s*$", testo, re.M))
+
+    # Trigger: quale sorgente, e con che soglie. Le due provenienze NON si
+    # mescolano -- quelle del CFD sono millivolt misurati, quelle del
+    # self-trigger unita' di offset da convertire -- quindi la colonna dice
+    # anche da dove viene il numero.
+    self_on = "Self-trigger: ENABLED" in testo
+    est_on = "External trigger (TRG-IN): ENABLED" in testo
+    cfd = re.search(r"CFD V812 configurato:\s*(.+)", testo)
+    magg = _num(testo, r"maggioranza (\d+)", int, "")
+
+    if cfd and est_on:
+        trigger = "CFD (TRG-IN)"
+        soglie = "%s (CFD, mV)" % re.sub(r"ch\d+ a ", "", cfd.group(1)).strip()
+    elif self_on:
+        trigger = "self-trigger"
+        off = re.search(r"SelfTriggerThresholdOffset \[counts\]:\s*(.+)", testo)
+        soglie = ("%s (self, offset)" % re.sub(r"ch\d+=", "", off.group(1)).strip()
+                  if off else "")
+        magg = ""
+    elif est_on:
+        trigger = "TRG-IN"
+        soglie = ""
+        magg = ""
+    else:
+        trigger = "software"
+        soglie = ""
+        magg = ""
+
+    eventi = _num(testo, r"Events written to file:\s*(\d+)", int, "")
+    durata = _num(testo, r"Acquisition time:\s*([0-9.]+)", float, "")
+    rate = _num(testo, r"Trigger rate:\s*([0-9.]+) kHz", float, None)
+    rate = round(rate * 1000.0, 2) if rate is not None else ""
+
+    passo = _num(testo, r"Sampling frequency set to \S+ \(([0-9.]+) ns", float)
+    rl = _num(testo, r"RecordLength\s*=\s*(\d+)", int)
+    finestra = round(passo * rl) if (passo and rl) else ""
+
+    camp = (re.search(r"Sampling frequency set to (\S+)", testo) or [None, ""])
+    camp = camp.group(1) if hasattr(camp, "group") else ""
+    pt = _num(nome, r"_(\d+)PT$", int, "")
+
+    # L'istante: il mtime del log e' la FINE della run; l'inizio si ricava
+    # togliendo la durata, che e' quella misurata dalla DAQ.
+    fine = os.path.getmtime(path_log)
+    inizio = fine - (durata or 0)
+    v, i = hv_a(psu, inizio)
+
+    h5path = os.path.join(os.path.dirname(path_log), h5)
+    byte = ""
+    for p in (h5path, h5path + ".gz"):
+        if os.path.exists(p):
+            byte = os.path.getsize(p)
+            break
+
+    return {
+        "run": nome, "data": time.strftime("%Y-%m-%d", time.localtime(inizio)),
+        "ora": time.strftime("%H:%M:%S", time.localtime(inizio)),
+        "hv_v": v, "i_ua": i, "canali": canali, "trigger": trigger,
+        "soglie": soglie, "maggioranza": magg, "campionamento": camp,
+        "finestra_ns": finestra, "post_trigger_pc": pt, "eventi": eventi,
+        "rate_hz": rate, "durata_s": round(durata, 1) if durata != "" else "",
+        "file": os.path.basename(h5path) + (".gz" if byte and not os.path.exists(h5path) else ""),
+        "byte": byte,
+    }
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("-d", "--data-dir", default=os.path.join(ROOT, "data"))
+    ap.add_argument("-o", "--out", default=None, help="CSV di uscita (default: stdout)")
+    ap.add_argument("--da", default=None, help="solo run dal giorno AAAA-MM-GG in poi")
+    a = ap.parse_args()
+
+    psu = leggi_psu(os.path.join(a.data_dir, "psu-log.csv"))
+    righe = []
+    for radice, _, files in os.walk(a.data_dir):
+        for f in files:
+            if f.endswith(".log") and not f.startswith("daq-console"):
+                r = riga_da_log(os.path.join(radice, f), psu)
+                if r and (not a.da or r["data"] >= a.da):
+                    righe.append(r)
+    righe.sort(key=lambda r: (r["data"], r["ora"]))
+
+    uscita = open(a.out, "w", newline="") if a.out else sys.stdout
+    w = csv.DictWriter(uscita, fieldnames=COLONNE)
+    w.writeheader()
+    w.writerows(righe)
+    if a.out:
+        uscita.close()
+        print("%d run in %s" % (len(righe), a.out), file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

@@ -233,6 +233,12 @@ def main():
                     help="asse dei rate logaritmico. Di default e' lineare: il "
                          "logaritmo fa vedere bene le code basse ma schiaccia la "
                          "parte alta, dove di solito sta la soglia che interessa")
+    # Limiti degli assi: servono per confrontare due scan presi con intervalli
+    # diversi, dove l'autoscala di uno schiaccia l'altro in un angolo.
+    ap.add_argument("--xmin", type=float, default=None, help="limite inferiore asse x")
+    ap.add_argument("--xmax", type=float, default=None, help="limite superiore asse x")
+    ap.add_argument("--ymin", type=float, default=None, help="limite inferiore asse y")
+    ap.add_argument("--ymax", type=float, default=None, help="limite superiore asse y")
     ap.add_argument("-o", "--out", default=None, help="file PNG di uscita")
     args = ap.parse_args()
 
@@ -379,6 +385,12 @@ def main():
     else:
         ax.set_ylabel("trigger rate  [Hz]")
         ax.set_title("Threshold scan", fontsize=11)
+    # I limiti chiesti si applicano DOPO la scala logaritmica e dopo il
+    # set_ylim(bottom=0) del lineare, se no vengono sovrascritti da quelli.
+    if args.xmin is not None or args.xmax is not None:
+        ax.set_xlim(left=args.xmin, right=args.xmax)
+    if args.ymin is not None or args.ymax is not None:
+        ax.set_ylim(bottom=args.ymin, top=args.ymax)
     ax.grid(alpha=.3, which="both" if args.logy else "major")
 
     # La legenda va SOTTO gli assi, per la stessa ragione della nota piu' giu':

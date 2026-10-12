@@ -554,7 +554,8 @@ def elenco_misure(n=20):
     return fuori[:n]
 
 
-def disegna_misure(nomi, logy, per_canale=False, canali="", mv_per_offset=""):
+def disegna_misure(nomi, logy, per_canale=False, canali="", mv_per_offset="",
+                   limiti=None):
     """Lancia plot_scan.py sulle misure scelte. Torna (esito, messaggio, png)."""
     scelti = []
     for nome in nomi[:8]:
@@ -574,7 +575,8 @@ def disegna_misure(nomi, logy, per_canale=False, canali="", mv_per_offset=""):
     # stesso file, e il browser lo rilegge grazie al parametro anti-cache.
     firma = hashlib.sha1(("|".join(sorted(nomi)) + ("|log" if logy else "|lin") +
                           ("|ch:" + canali if per_canale else "|or") +
-                          ("|mv:" + str(mv_per_offset or "")))
+                          ("|mv:" + str(mv_per_offset or "")) +
+                          ("|lim:" + ",".join(str(x or "") for x in (limiti or []))))
                          .encode()).hexdigest()[:8]
     uscita = os.path.join(GRAFICI, "view_%s.png" % firma)
     cmd = [sys.executable, os.path.join(ROOT, "tools", "plot_scan.py")]
@@ -586,13 +588,17 @@ def disegna_misure(nomi, logy, per_canale=False, canali="", mv_per_offset=""):
         # qui passavano solo i numeri puri e un intervallo spariva in
         # silenzio: si chiedevano tre canali e ne uscivano trentadue, senza
         # che niente lo dicesse.
-        scelti = canali_mod.parse_channels(canali)
-        if canali.strip() and not scelti:
+        # NON si chiama "scelti": quel nome qui dentro sono gia' i PERCORSI
+        # delle misure, e riusarlo li sostituiva con dei numeri di canale.
+        # La riga di comando finiva senza nessun file e con degli interi
+        # dentro, e subprocess si rifiutava di partire.
+        canali_scelti = canali_mod.parse_channels(canali)
+        if canali.strip() and not canali_scelti:
             return False, ("Channel list not understood: %r. Use 16, 16,18 or "
                            "16-18; leave it empty for every channel."
                            % canali.strip()[:40]), None
-        if scelti:
-            cmd += ["--channels", " ".join(str(c) for c in scelti)]
+        if canali_scelti:
+            cmd += ["--channels", " ".join(str(c) for c in canali_scelti)]
     # La conversione forzata e' l'unica via per disegnare il conteggio per
     # canale a una frequenza dove non e' stata misurata. plot_scan.py si
     # rifiuta di inventarla, e fa bene; ma la via d'uscita esisteva solo da
@@ -606,6 +612,18 @@ def disegna_misure(nomi, logy, per_canale=False, canali="", mv_per_offset=""):
         if not 0 < k < 100:
             return False, "mV/offset fuori da ogni scala plausibile: %g" % k, None
         cmd += ["--mv-per-offset", repr(k)]
+    # Limiti degli assi, se chiesti. Un valore illeggibile si dice, non si
+    # ignora: una scala che non e' quella che hai scritto e' peggio di un
+    # messaggio di errore.
+    for nome, valore in zip(("--xmin", "--xmax", "--ymin", "--ymax"), limiti or []):
+        testo = str(valore or "").strip()
+        if not testo:
+            continue
+        try:
+            cmd += [nome, repr(float(testo.replace(",", ".")))]
+        except ValueError:
+            return False, "%s is not a number: %s" % (nome[2:], testo[:20]), None
+
     cmd += scelti + ["-o", uscita]
     # Dieci minuti e non due. Il conteggio per canale non si legge dal JSON
     # dello scan: rilegge le forme d'onda dal file della run, e a run finita
@@ -2130,6 +2148,16 @@ PAGINA = r"""<!doctype html>
       <input id="gmvoff" placeholder="mV/offset" style="width:98px;font-size:12px"
              data-auto="1"
              title="mV per offset unit, to convert the threshold. Empty = the measured value for that sampling rate (2.5 GS/s and 1 GS/s only). At other rates the per-channel plot needs a number here, and the plot will say it is assumed.">
+      <div style="display:flex;gap:4px">
+        <input id="gxmin" placeholder="x min" style="width:47px;font-size:12px"
+               title="limiti dell'asse x del grafico, nelle unita' dell'asse; vuoto = automatico">
+        <input id="gxmax" placeholder="x max" style="width:47px;font-size:12px">
+      </div>
+      <div style="display:flex;gap:4px">
+        <input id="gymin" placeholder="y min" style="width:47px;font-size:12px"
+               title="limiti dell'asse y (rate in Hz); vuoto = automatico">
+        <input id="gymax" placeholder="y max" style="width:47px;font-size:12px">
+      </div>
       <div id="gmvoffnota" style="font-size:11px;color:#6b6a65;max-width:190px;line-height:1.35"></div>
       <button id="gdraw" style="background:#2a78d6;color:#fff">Draw</button>
       <button id="ggo" style="background:#ececea">Refresh list</button>
@@ -2709,7 +2737,11 @@ async function disegna(){
                                  logy: $("glog").checked ? "1" : "0",
                                  perch: $("gperch").checked ? "1" : "0",
                                  canali: $("gchan").value.trim(),
-                                 mvoff: $("gmvoff").value.trim()});
+                                 mvoff: $("gmvoff").value.trim(),
+                                 gxmin: $("gxmin").value.trim(),
+                                 gxmax: $("gxmax").value.trim(),
+                                 gymin: $("gymin").value.trim(),
+                                 gymax: $("gymax").value.trim()});
   for(const s of scelti) q.append("misura", s);
   $("gdraw").disabled = true;
   // Con "per channel" il disegno rilegge le forme d'onda dal file della run,
@@ -3226,7 +3258,8 @@ def crea_handler(ctrl, token):
                 esito, messaggio, png = disegna_misure(
                     qs.get("misura", []), qs.get("logy", ["0"])[0] == "1",
                     qs.get("perch", ["0"])[0] == "1", qs.get("canali", [""])[0],
-                    qs.get("mvoff", [""])[0])
+                    qs.get("mvoff", [""])[0],
+                    [qs.get(k, [""])[0] for k in ("gxmin", "gxmax", "gymin", "gymax")])
                 extra["png"] = png
 
             elif parti.path.startswith("/api/coda/"):

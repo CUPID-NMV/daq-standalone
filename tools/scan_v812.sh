@@ -97,6 +97,14 @@ printf "  %8s %10s %12s %14s\n" "soglia" "eventi" "durata [s]" "rate [Hz]"
 # e il marcatore deve restare leggibile da chi lo analizza.
 N_PUNTI=$(echo $SOGLIE | wc -w | tr -d " ")
 K=0
+# La tensione dei SiPM nel nome dei file. Qui la DAQ la avvia questo script,
+# non il controllore, quindi nessuno aggiorna il prefisso: senza questa riga
+# le run si prenderebbero l'etichetta rimasta dall'ultima run lanciata dalla
+# pagina, cioe' una tensione vecchia dentro un nome che sembra autorevole.
+# Se il controllore non risponde, lo strumento toglie l'etichetta invece di
+# lasciare quella sbagliata.
+python3 "$ROOT/tools/prefisso_hv.py" "$TOML" || true
+
 for S in $SOGLIE; do
     K=$((K + 1))
     # Marcatore di avanzamento, letto dalla pagina di controllo: la tabella

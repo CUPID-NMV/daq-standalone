@@ -55,6 +55,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import calibrazione
 import canali as canali_mod
+import nomi
 import tomledit
 import psu_control
 
@@ -842,27 +843,13 @@ class Alimentatore:
         return {"ore": ore, "punti": fuori}
 
     def etichetta_file(self):
-        """La tensione come entra nel nome di un file: "54-0V". None = niente.
+        """La tensione come entra nel nome di un file. Vedi tools/nomi.py.
 
-        Si usa la tensione MISURATA, non quella impostata: nel nome ci va
-        quello che il rivelatore ha visto. Arrotondata a un decimo di volt
-        resta stabile per tutta una sequenza -- 52.02 e 52.04 danno lo stesso
-        nome -- e un decimo e' anche la risoluzione con cui queste tensioni si
-        scelgono.
-
-        Il punto decimale diventa un trattino, come li scrivi gia' a mano
-        ("Test_SiPM_56-5V_..."): un punto in piu' nel nome di un file e' un
-        invito a sbagliare uno split.
-
-        Uscita spenta: "HVoff". Dati presi senza bias non sono dati a 0 V, e
-        chiamarli "0-0V" li farebbe sembrare una misura.
+        La regola sta la' e non qui perche' la usano anche gli script che
+        avviano la DAQ per conto loro: una sola implementazione, se no
+        divergono.
         """
-        l = self.ultima
-        if not l or time.time() - l["t"] > 3 * PSU_PERIODO_S:
-            return None                      # lettura vecchia: meglio tacere
-        if not l["uscita"]:
-            return "HVoff"
-        return ("%.1fV" % l["v_out"]).replace(".", "-")
+        return nomi.etichetta(self.ultima, eta_max=3 * PSU_PERIODO_S)
 
     def riassunto(self):
         """Una riga per il registro delle azioni, all'avvio e all'arresto
@@ -1700,19 +1687,9 @@ class Controllo:
     # fra un mese non si sa piu' cos'e'. La DAQ il nome lo compone dal solo
     # OutputFile del TOML e non sa niente dell'alimentatore, quindi ce la mette
     # il controllore, che quella tensione la legge gia'.
-    RE_HV = re.compile(r"_(?:\d+-\dV|HVoff)$")
-
     def prefisso_con_hv(self, base):
-        """Il prefisso con la tensione attuale. Idempotente.
-
-        Si toglie sempre l'etichetta vecchia prima di metterne una nuova, se
-        no a ogni run il prefisso cresce di un pezzo. Cosi' la funzione si
-        puo' applicare a un prefisso gia' etichettato -- per esempio dopo un
-        riavvio del controllore a meta' sequenza -- senza fare danni.
-        """
-        base = self.RE_HV.sub("", str(base or "").strip())
-        et = self.psu.etichetta_file() if self.psu else None
-        return "%s_%s" % (base, et) if et and base else base
+        """Il prefisso con la tensione attuale. Vedi tools/nomi.py."""
+        return nomi.prefisso(base, self.psu.etichetta_file() if self.psu else None)
 
     def _scrivi_prefisso_hv(self):
         """Mette la tensione nel prefisso prima di far partire la run.

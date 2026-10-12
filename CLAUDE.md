@@ -158,6 +158,31 @@ aggiorna. Le chiavi nuove vanno aggiunte lì a parte, con un backup, dicendolo.
   posa dove il segnale non va mai e la run acquisisce zero eventi. Costato una
   run di 52 s a vuoto passando dai PMT al SiPM.
 
+## Il nome dei file e la tensione dei SiPM
+
+Dal 2026-10-12 il prefisso dei file porta la tensione misurata
+dell'alimentatore: `test_54-0V_0000_750Ms_40PT.h5`. Ce la mette il
+**controllore** quando avvia una run, non il C++, che dell'alimentatore non
+sa niente. La regola sta in `tools/nomi.py`, una sola implementazione.
+
+Conseguenze da sapere:
+
+- **La numerazione riparte per ogni tensione**: il numero di run lo calcola
+  il C++ contando i file con quel prefisso.
+- **Il prefisso resta scritto nel TOML** dopo la run. E' voluto -- si vede
+  nella pagina cosa si sta scrivendo -- ma vuol dire che **chi avvia la DAQ
+  senza passare dal controllore si porta dietro l'etichetta della run
+  precedente**, cioe' una tensione vecchia in un nome che sembra autorevole.
+- Per questo `tools/scan_v812.sh`, che lancia una DAQ per punto per conto
+  suo, chiama prima `tools/prefisso_hv.py`: chiede la tensione al
+  controllore e, se non risponde, **toglie** l'etichetta invece di lasciare
+  quella vecchia. Stessa cosa va fatta per qualunque avvio a mano dal
+  terminale.
+- Lo scan del self-trigger non ha questo problema: non avvia niente, cambia
+  le soglie su una run gia' in corso, quindi il file e' quello della run.
+
+---
+
 ## Strumenti
 
 | | |

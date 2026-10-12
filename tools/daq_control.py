@@ -841,6 +841,29 @@ class Alimentatore:
                           sum(x[2] for x in g) / len(g)])
         return {"ore": ore, "punti": fuori}
 
+    def etichetta_file(self):
+        """La tensione come entra nel nome di un file: "54-0V". None = niente.
+
+        Si usa la tensione MISURATA, non quella impostata: nel nome ci va
+        quello che il rivelatore ha visto. Arrotondata a un decimo di volt
+        resta stabile per tutta una sequenza -- 52.02 e 52.04 danno lo stesso
+        nome -- e un decimo e' anche la risoluzione con cui queste tensioni si
+        scelgono.
+
+        Il punto decimale diventa un trattino, come li scrivi gia' a mano
+        ("Test_SiPM_56-5V_..."): un punto in piu' nel nome di un file e' un
+        invito a sbagliare uno split.
+
+        Uscita spenta: "HVoff". Dati presi senza bias non sono dati a 0 V, e
+        chiamarli "0-0V" li farebbe sembrare una misura.
+        """
+        l = self.ultima
+        if not l or time.time() - l["t"] > 3 * PSU_PERIODO_S:
+            return None                      # lettura vecchia: meglio tacere
+        if not l["uscita"]:
+            return "HVoff"
+        return ("%.1fV" % l["v_out"]).replace(".", "-")
+
     def riassunto(self):
         """Una riga per il registro delle azioni, all'avvio e all'arresto
         delle run."""
@@ -955,7 +978,11 @@ class Controllo:
                  args_monitor=None, psu_host=None):
         self.toml = os.path.abspath(toml)
         self.log_path = log_path
-        self.lock = threading.Lock()
+        # Rientrante: avvia() tiene il lock e dentro ci sta una scrittura del
+        # TOML -- la tensione nel prefisso del file -- che il lock lo riprende.
+        # Con un Lock semplice quella sequenza si blocca per sempre, e si
+        # bloccherebbe a meta' di un avvio di run.
+        self.lock = threading.RLock()
         self.storia = []          # (istante, eventi) per il rate recente
         self.porta_monitor = porta_monitor
         self.args_monitor = list(args_monitor or ARGS_MONITOR)
@@ -1669,6 +1696,48 @@ class Controllo:
             messaggio += "  [%s]" % self.psu.riassunto()
         return esito, messaggio
 
+    # Il nome di un file di SiPM senza la tensione di lavoro e' un file che
+    # fra un mese non si sa piu' cos'e'. La DAQ il nome lo compone dal solo
+    # OutputFile del TOML e non sa niente dell'alimentatore, quindi ce la mette
+    # il controllore, che quella tensione la legge gia'.
+    RE_HV = re.compile(r"_(?:\d+-\dV|HVoff)$")
+
+    def prefisso_con_hv(self, base):
+        """Il prefisso con la tensione attuale. Idempotente.
+
+        Si toglie sempre l'etichetta vecchia prima di metterne una nuova, se
+        no a ogni run il prefisso cresce di un pezzo. Cosi' la funzione si
+        puo' applicare a un prefisso gia' etichettato -- per esempio dopo un
+        riavvio del controllore a meta' sequenza -- senza fare danni.
+        """
+        base = self.RE_HV.sub("", str(base or "").strip())
+        et = self.psu.etichetta_file() if self.psu else None
+        return "%s_%s" % (base, et) if et and base else base
+
+    def _scrivi_prefisso_hv(self):
+        """Mette la tensione nel prefisso prima di far partire la run.
+
+        Non si rimette a posto alla fine: il TOML resta con il prefisso
+        dell'ultima run, che e' la verita' di cosa si sta scrivendo, ed e'
+        visibile nella pagina. Rimetterlo a posto "appena la DAQ e' partita"
+        sarebbe una corsa con la lettura del file, che la DAQ fa una volta
+        sola all'avvio e senza avvisare.
+        """
+        if not self.psu:
+            return None
+        try:
+            import tomllib
+            with open(self.toml, "rb") as f:
+                base = tomllib.load(f).get("digitizer", {}).get("OutputFile", "")
+        except Exception:
+            return None
+        nuovo = self.prefisso_con_hv(base)
+        if not nuovo or nuovo == base:
+            return None
+        esito, messaggio, _ = self.scrivi_config(
+            [["digitizer", "OutputFile", nuovo]], None)
+        return nuovo if esito else None
+
     def _avvia(self, da_coda=False):
         if not da_coda and self.coda_attiva():
             return False, "A queue is running: it is the one driving the DAQ."
@@ -1680,6 +1749,10 @@ class Controllo:
             return False, "Binary not found: %s" % BINARIO
         if not os.path.exists(self.toml):
             return False, "Configuration not found: %s" % self.toml
+        # La tensione dei SiPM nel nome del file, prima di partire: dopo non
+        # si puo' piu', il nome la DAQ lo compone una volta sola.
+        prefisso = self._scrivi_prefisso_hv()
+
         try:
             log = open(self.log_path, "wb")
         except OSError as e:
@@ -1701,7 +1774,8 @@ class Controllo:
         for _ in range(50):
             time.sleep(0.1)
             if trova_daq():
-                return True, "DAQ started."
+                return True, ("DAQ started." if not prefisso
+                              else "DAQ started, writing %s_NNNN..." % prefisso)
         return False, "Started but I cannot find it among the processes: check the log."
 
     def cartella_uscita(self):

@@ -1099,7 +1099,11 @@ class Monitor:
             # Piu' larghe di tutte le altre: su una forma d'onda si guarda il
             # tempo, e 200 px in piu' sull'asse x si leggono. Sono l'unica
             # figura che CRESCE in questo riassetto.
-            fig, axes = plt.subplots(len(channels), 1,
+            # Un pannello per canale DISEGNATO, non per canale registrato:
+            # aprendo il dettaglio di un canale solo, gli altri due restavano
+            # li' vuoti con gli assi 0-1, come se mancassero i dati. L'altezza
+            # era gia' contata sui disegnati, i pannelli no.
+            fig, axes = plt.subplots(len(canali_dis), 1,
                                      figsize=(LARG_PX * k / DPI_FIG,
                                               3.3 * k * len(canali_dis)),
                                      squeeze=False, sharex=True)

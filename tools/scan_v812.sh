@@ -150,11 +150,26 @@ try:
     # live=True e' l'unico modo di rileggerla.
     hdr, _ = daqio.load(runfile, last=1, live=not runfile.endswith(".gz"))
     eventi = int(hdr["NEventsInFile"])
-    # La durata si misura da StartTime, scritto dalla DAQ quando apre il file,
-    # cioe' dopo la configurazione: usare il tempo totale del processo
-    # includerebbe i secondi di messa a punto e abbasserebbe il rate di un
-    # fattore che cambia da punto a punto.
-    durata = fine - float(hdr["StartTime"])
+    # La durata la dichiara la DAQ: e' la finestra di acquisizione vera.
+    #
+    # Prima si calcolava "istante dopo la morte del processo meno StartTime", e
+    # in quell'intervallo ci sono anche la chiusura e la COMPRESSIONE del file,
+    # che durano quanto il file e' grosso. Misurato il 2026-10-12: la DAQ
+    # acquisiva 57.3 s su ogni punto, il conto ne dava 57, 58, 61 e 68, e il
+    # punto a 68 era quello a rate piu' alto -- quindi il file piu' grande e la
+    # compressione piu' lunga. Il risultato era una curva con la gobba
+    # all'inizio: il primo punto sembrava avere MENO rate del secondo, che per
+    # uno scan in soglia e' impossibile.
+    durata = None
+    try:
+        m = re.search(r"Acquisition time:\s*([0-9.]+)",
+                      open(uscita, errors="replace").read())
+        if m:
+            durata = float(m.group(1))
+    except OSError:
+        pass
+    if not durata:
+        durata = fine - float(hdr["StartTime"])   # ripiego, se il log manca
 except Exception as e:
     eventi = 0
     durata = 0.0

@@ -970,6 +970,14 @@ class Controllo:
         # Con un Lock semplice quella sequenza si blocca per sempre, e si
         # bloccherebbe a meta' di un avvio di run.
         self.lock = threading.RLock()
+        # Le run avviate da qui restano FIGLIE di questo processo anche con
+        # start_new_session, che cambia la sessione e non il genitore. Senza
+        # raccoglierne lo stato d'uscita ognuna lascia uno zombie: innocuo per
+        # il controllore, che riconosce la DAQ da /proc/<pid>/exe e per uno
+        # zombie quel link e' vuoto, ma "pgrep -x DAQ-WC" continua a contarlo
+        # e chi guarda da fuori crede che la run non sia finita. Succedeva una
+        # volta per run.
+        self.figli = []
         self.storia = []          # (istante, eventi) per il rate recente
         self.porta_monitor = porta_monitor
         self.args_monitor = list(args_monitor or ARGS_MONITOR)
@@ -1195,7 +1203,12 @@ class Controllo:
                 runfile = riga.split("HDF5 output path selected:")[1].strip()
         return eventi, richiesti, runfile
 
+    def _raccogli_figli(self):
+        """Raccoglie le run gia' finite, cosi' non restano zombie."""
+        self.figli = [p for p in self.figli if p.poll() is None]
+
     def stato(self):
+        self._raccogli_figli()
         pid = trova_daq()
         scan = trova_scan()
         s = {"in_corso": pid is not None, "pid": pid,
@@ -1739,11 +1752,12 @@ class Controllo:
             # servizio: la run sopravvive al riavvio del controllore e alla
             # caduta della rete, che e' esattamente il guaio che questa
             # pagina deve togliere di mezzo.
-            subprocess.Popen([BINARIO, self.toml],
-                             cwd=os.path.dirname(BINARIO),
-                             stdout=log, stderr=subprocess.STDOUT,
-                             stdin=subprocess.DEVNULL,
-                             start_new_session=True)
+            self.figli.append(subprocess.Popen(
+                [BINARIO, self.toml],
+                cwd=os.path.dirname(BINARIO),
+                stdout=log, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True))
         except OSError as e:
             return False, "Start failed: %s" % e
         finally:

@@ -1338,8 +1338,12 @@ class Monitor:
                 # istogramma calcolato su tutto, con la risoluzione sprecata
                 # fuori dalla vista. E' la stessa ragione per cui lo spettro
                 # delle ampiezze fa cosi'.
-                lo = xlo if xlo is not None else float(val.min())
-                hi = xhi if xhi is not None else float(val.max())
+                # Autoscala sui PERCENTILI, non su minimo e massimo: bastano
+                # quattro eventi di rumore con carica molto negativa perche'
+                # l'asse si allarghi a -5000 pC e il picco vero finisca
+                # schiacciato in un angolo, illeggibile finche' qualcuno non
+                # digita i limiti a mano. I muri lo fanno gia' cosi'.
+                lo, hi = _estremi_utili(val, xlo, xhi)
                 if not hi > lo:
                     hi = lo + 1.0
                 est = (lo, hi)
@@ -1477,8 +1481,7 @@ class Monitor:
                 # su tutto il range e la risoluzione sarebbe sprecata.
                 kw = {}
                 if xlo is not None or xhi is not None:
-                    lo = xlo if xlo is not None else float(np.min(values))
-                    hi = xhi if xhi is not None else float(np.max(values))
+                    lo, hi = _estremi_utili(values, xlo, xhi)
                     if hi > lo:
                         kw["range"] = (lo, hi)
 
@@ -1697,6 +1700,7 @@ PAGE = """<!DOCTYPE html>
            align-items:center; justify-content:center; z-index:50; }
   .lente.apri { display:flex; }
   .lentebox { background:var(--bg); border-radius:10px; padding:10px;
+              max-width:min(96vw, 1500px); max-height:92vh; overflow:auto;
               max-width:96vw; max-height:94vh; overflow:auto;
               box-shadow:0 10px 40px rgba(0,0,0,.45); }
   .lentetop { display:flex; align-items:center; gap:10px; margin-bottom:6px;
@@ -2004,6 +2008,10 @@ function aggiornaLente() {
   if (!lente) return;
   const q = new URLSearchParams(params());
   q.set("solo", lente.ch);
+  // Il dettaglio si apre per guardarci dentro: va chiesto piu' grande della
+  // miniatura da cui si arriva, e indipendentemente dalla scala scelta per la
+  // pagina -- che serve a far stare tutto insieme, non a leggere un canale.
+  q.set("scala", "L");
   q.set("t", Date.now());
   const imgs = document.getElementById("lenteimg").getElementsByTagName("img");
   lente.sorgenti.forEach((sg, k) => {
@@ -2076,6 +2084,7 @@ function aggiornaFinestre() {
         // condivisi con chi guarda la stessa pagina da un'altra macchina
         const q = new URLSearchParams(p);
         q.set("solo", f.ch);
+        q.set("scala", "L");
         q.set("t", Date.now());
         f.sorgenti.forEach((sg, k) => {
           if (dentro[k]) dentro[k].src = sg[0] + ".png?" + q.toString();
@@ -2356,6 +2365,29 @@ MURO_MX, MURO_MY = 0.012, 0.030      # margini laterali e in basso
 MURO_TOP = 0.90         # sotto il titolo
 MURO_GX, MURO_GY = 0.012, 0.055      # spazio fra le celle
 MURO_CELLA_MAX = 300    # lato massimo di una cella quadrata, in pixel
+
+
+def _estremi_utili(valori, xlo, xhi, taglio=0.3):
+    """Estremi di un istogramma: quelli chiesti, se no i percentili.
+
+    Minimo e massimo assoluti sono una pessima autoscala per uno spettro con
+    code: quattro eventi di rumore a -5000 pC allargano l'asse di dieci volte
+    e il picco vero diventa una riga sottile in un angolo. Si tagliano tre
+    per mille per lato -- abbastanza da togliere gli isolati, troppo poco da
+    nascondere una coda vera -- e si lascia un margine, se no l'istogramma
+    tocca la cornice.
+    """
+    v = np.asarray(valori, dtype=float)
+    if v.size == 0:
+        return (xlo if xlo is not None else 0.0, xhi if xhi is not None else 1.0)
+    lo = xlo if xlo is not None else float(np.percentile(v, taglio))
+    hi = xhi if xhi is not None else float(np.percentile(v, 100.0 - taglio))
+    if not hi > lo:
+        hi = lo + 1.0
+    if xlo is None and xhi is None:
+        aria = (hi - lo) * 0.03
+        lo, hi = lo - aria, hi + aria
+    return lo, hi
 
 
 def geometria_muro(n):

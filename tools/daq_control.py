@@ -1008,6 +1008,12 @@ class Controllo:
         # volta per run.
         self.figli = []
         self._daq_prima = trova_daq() is not None   # per vedere la FINE di una run
+        # Un filo che guarda la fine delle run per conto suo. Non basta
+        # accorgersene dentro stato(): quello gira solo quando qualcuno ha la
+        # pagina aperta, e allora l'e-log si aggiornerebbe solo se c'e'
+        # qualcuno a guardare -- cioe' mai di notte, che e' quando le sequenze
+        # lunghe finiscono. Due secondi, come il polling della pagina.
+        threading.Thread(target=self._guarda_fine_run, daemon=True).start()
         self.storia = []          # (istante, eventi) per il rate recente
         self.porta_monitor = porta_monitor
         self.args_monitor = list(args_monitor or ARGS_MONITOR)
@@ -1233,6 +1239,18 @@ class Controllo:
                 runfile = riga.split("HDF5 output path selected:")[1].strip()
         return eventi, richiesti, runfile
 
+    def _guarda_fine_run(self):
+        """Vede finire le run anche se nessuno sta guardando la pagina."""
+        while True:
+            try:
+                vivo = trova_daq() is not None
+                if self._daq_prima and not vivo:
+                    self._versa_elog()
+                self._daq_prima = vivo
+            except Exception:
+                pass            # un errore qui non deve fermare il controllore
+            time.sleep(2.0)
+
     def _versa_elog(self):
         """Aggiorna il foglio e-log, senza far aspettare nessuno.
 
@@ -1268,14 +1286,6 @@ class Controllo:
     def stato(self):
         self._raccogli_figli()
         pid = trova_daq()
-        # Fine di una run: lo si vede qui, in un posto solo, e vale sia per le
-        # run singole sia per quelle della coda. Si versa l'e-log DOPO che il
-        # processo e' sparito, cioe' a file chiuso e compresso: prima il log
-        # della run non ha ancora il riepilogo finale e la riga uscirebbe senza
-        # eventi ne' rate.
-        if self._daq_prima and pid is None:
-            self._versa_elog()
-        self._daq_prima = pid is not None
         scan = trova_scan()
         s = {"in_corso": pid is not None, "pid": pid,
              "config": self.config(), "log": self.coda_log(25),

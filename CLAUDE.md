@@ -158,6 +158,30 @@ aggiorna. Le chiavi nuove vanno aggiunte lì a parte, con un backup, dicendolo.
   posa dove il segnale non va mai e la run acquisisce zero eventi. Costato una
   run di 52 s a vuoto passando dai PMT al SiPM.
 
+## La maggioranza del V812 si verifica in 30 secondi
+
+**Se la maggioranza non agisce, il colpevole e' il cavo, non il codice.** Il
+2026-10-12 quattro run da 30 s con gli stessi segnali e le stesse soglie hanno
+dato lo stesso rate per `Majority` = 1, 2, 3 e **20**: 4643, 4780, 4815, 4905
+eventi. Chiedere una coincidenza a venti canali su tre deve dare ZERO; dava
+tutto. Il modulo faceva l'OR, perche' TRG-IN non era sull'uscita OR/MAJ del
+V812 -- qualcuno aveva spostato un cavo.
+
+**La prova**: una run di 30 s con `Majority = 20`. Se il rate non cambia, il
+trigger non viene dall'uscita di maggioranza e non c'e' niente da cercare nel
+software.
+
+Cosa NON e' il problema, verificato quel giorno: gli indirizzi dei registri
+sono quelli del manuale (soglie `0x00+2n`, maggioranza `0x48`, inibizione
+`0x4A`), la formula e' quella del §3.7 (`MAJTHR = NINT[(MAJLEV*50-25)/4]`), e
+il modulo risponde -- si fa riconoscere dal codice fisso `0xFAF5` e **alle
+soglie obbedisce**, come mostra qualunque scan in soglia.
+
+Corollario generale: **prima di dare la colpa al software, guardare cosa e'
+cambiato al banco.** Qui lavorano piu' persone sulla stessa catena.
+
+---
+
 ## Il nome dei file e la tensione dei SiPM
 
 Dal 2026-10-12 il prefisso dei file porta la tensione misurata

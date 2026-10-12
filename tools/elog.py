@@ -156,7 +156,13 @@ def riga_da_log(path_log, psu):
         # Una run il cui log si ferma ad "Acquisition started" e' stata
         # interrotta: niente riepilogo finale, quindi niente eventi ne' rate.
         # E' un'informazione, non un buco, e va detta.
-        "chiusa": "si" if eventi != "" else "NO",
+        # Tre stati, non due: una run IN CORSO non ha ancora il riepilogo
+        # finale e sembrerebbe interrotta. Si distingue dal fatto che il suo
+        # .h5 non compresso esiste ancora ed e' stato scritto da poco.
+        "chiusa": ("si" if eventi != ""
+                   else ("in corso" if (os.path.exists(h5path) and
+                                        time.time() - os.path.getmtime(h5path) < 120)
+                         else "NO")),
         "file": os.path.basename(h5path) + (".gz" if byte and not os.path.exists(h5path) else ""),
         "byte": byte,
     }

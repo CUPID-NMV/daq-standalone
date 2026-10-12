@@ -17,11 +17,15 @@ CHIAVE="${ELOG_CHIAVE:-1cM8O6Co1Llx5Ysa4BfS4rmMqa4XEYJpdjSv61xerp44}"
 REMOTO="${ELOG_REMOTO:-daq-pc}"
 REPO_REMOTO="${ELOG_REPO:-/home/daq/daq-standalone}"
 ULTIME=10
+PASSA=()          # opzioni da girare a elog_push.py
 
+# Le opzioni sconosciute si rifiutano invece di passarle a valle: accettare
+# tutto maschera i refusi, e qui un refuso puo' voler dire "--rifai".
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -n|--ultime) ULTIME="$2"; shift 2 ;;
         --tutte)     ULTIME=""; shift ;;
+        --rifai)     PASSA+=(--rifai); shift ;;
         -h|--help)   sed -n '3,9p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit 0 ;;
         *) echo "opzione sconosciuta: $1" >&2; exit 1 ;;
     esac
@@ -51,6 +55,6 @@ ssh "$REMOTO" "cd $REPO_REMOTO && python3 tools/elog.py $OPZ" > "$CSV"
 echo "  $(( $(wc -l < "$CSV") - 1 )) run"
 
 echo "→ verso nel foglio"
-"$PY" "$ROOT/tools/elog_push.py" "$CSV" --chiave "$CHIAVE" "$@"
+"$PY" "$ROOT/tools/elog_push.py" "$CSV" --chiave "$CHIAVE" ${PASSA[@]+"${PASSA[@]}"}
 
 echo "https://docs.google.com/spreadsheets/d/$CHIAVE/edit"

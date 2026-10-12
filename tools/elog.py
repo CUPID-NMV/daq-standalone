@@ -17,6 +17,7 @@ rigenerazione se le porterebbe via.
 """
 import argparse
 import csv
+import json
 import os
 import re
 import sys
@@ -30,7 +31,7 @@ ANSI = re.compile(r"\x1b\[[0-9;]*m")
 COLONNE = ["run", "data", "ora", "hv_v", "i_ua", "canali", "trigger",
            "soglie", "maggioranza", "campionamento", "finestra_ns",
            "post_trigger_pc", "eventi", "rate_hz", "durata_s", "chiusa",
-           "file", "byte"]
+           "operatore", "file", "byte"]
 
 
 def _num(testo, patt, tipo=float, default=None):
@@ -41,6 +42,54 @@ def _num(testo, patt, tipo=float, default=None):
         return tipo(m.group(1))
     except ValueError:
         return default
+
+
+def leggi_avvii(path):
+    """(istante, chi) di ogni avvio di run, dal registro del controllore.
+
+    Chi ha lanciato la run lo sa gia' la pagina: lo scrivi nella casella "who
+    are you" e finisce in data/azioni.jsonl a ogni avvio. Ricopiarlo a mano
+    nell'e-log sarebbe esattamente il lavoro che questo strumento esiste per
+    togliere.
+    """
+    fuori = []
+    try:
+        with open(path) as f:
+            for riga in f:
+                try:
+                    v = json.loads(riga)
+                except ValueError:
+                    continue
+                if v.get("azione") not in ("avvia", "coda/avvia"):
+                    continue
+                try:
+                    t = time.mktime(time.strptime(v["quando"], "%Y-%m-%d %H:%M:%S"))
+                except (KeyError, ValueError):
+                    continue
+                chi = (v.get("chi") or "").strip()
+                if chi and chi != "(anonymous)":
+                    fuori.append((t, chi))
+    except OSError:
+        return []
+    fuori.sort()
+    return fuori
+
+
+def chi_ha_avviato(avvii, inizio, prima_di=900.0):
+    """Chi ha premuto Start piu' di recente PRIMA di questa run.
+
+    Solo prima, e non troppo: in una coda il nome e' quello di chi l'ha fatta
+    partire, e vale per tutte le run che ne seguono. Un avvio di mezza giornata
+    prima non dice piu' niente, quindi oltre il quarto d'ora si lascia vuoto
+    invece di attribuire una run a chi non c'era.
+    """
+    if not avvii or inizio is None:
+        return ""
+    candidati = [a for a in avvii if a[0] <= inizio + 60]
+    if not candidati:
+        return ""
+    t, chi = candidati[-1]
+    return chi if inizio - t <= prima_di else ""
 
 
 def leggi_psu(path):
@@ -75,7 +124,7 @@ def hv_a(psu, quando, tolleranza=600.0):
     return round(migliore[1], 2), round(migliore[2] * 1e6, 2)
 
 
-def riga_da_log(path_log, psu):
+def riga_da_log(path_log, psu, avvii=()):
     """Una riga dell'e-log dal log di una run, oppure None se non e' una run."""
     try:
         testo = ANSI.sub("", open(path_log, errors="replace").read())
@@ -159,6 +208,7 @@ def riga_da_log(path_log, psu):
         # Tre stati, non due: una run IN CORSO non ha ancora il riepilogo
         # finale e sembrerebbe interrotta. Si distingue dal fatto che il suo
         # .h5 non compresso esiste ancora ed e' stato scritto da poco.
+        "operatore": chi_ha_avviato(avvii, inizio),
         "chiusa": ("si" if eventi != ""
                    else ("in corso" if (os.path.exists(h5path) and
                                         time.time() - os.path.getmtime(h5path) < 120)
@@ -179,11 +229,12 @@ def main():
     a = ap.parse_args()
 
     psu = leggi_psu(os.path.join(a.data_dir, "psu-log.csv"))
+    avvii = leggi_avvii(os.path.join(a.data_dir, "azioni.jsonl"))
     righe = []
     for radice, _, files in os.walk(a.data_dir):
         for f in files:
             if f.endswith(".log") and not f.startswith("daq-console"):
-                r = riga_da_log(os.path.join(radice, f), psu)
+                r = riga_da_log(os.path.join(radice, f), psu, avvii)
                 if r and (not a.da or r["data"] >= a.da):
                     righe.append(r)
     righe.sort(key=lambda r: (r["data"], r["ora"]))

@@ -34,6 +34,12 @@ RICHIAMI = [("data", 2), ("ora", 3), ("HV [V]", 4), ("I [uA]", 5),
 # sdoppiatori e attenuatori non stanno in nessun file -- stanno nei cavi.
 A_MANO = ["purpose", "source", "setup", "outcome", "notes", "operator"]
 
+# "operator" si riempie da solo con chi ha premuto Start, ma resta una colonna
+# A MANO: il nome entra come VALORE, non come formula, cosi' lo si puo'
+# correggere -- il controllore sa chi ha avviato la coda, non chi era al banco
+# tre ore dopo -- e nessuna rigenerazione lo riscrive sopra.
+COL_OPERATORE_IN_CSV = 17
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
@@ -91,6 +97,9 @@ def main():
         prima = len(gia) + 2
         if el.row_count < prima + len(nuove) + 10:
             el.add_rows(prima + len(nuove) + 100 - el.row_count)
+        operatore = {r[0]: (r[COL_OPERATORE_IN_CSV - 1]
+                            if len(r) >= COL_OPERATORE_IN_CSV else "")
+                     for r in righe[1:]}
         blocco = []
         for k, nome in enumerate(nuove):
             r = prima + k
@@ -98,7 +107,8 @@ def main():
             # riordinato o riscritto senza che queste righe si spostino.
             blocco.append([nome] + [
                 '=IFERROR(VLOOKUP($A%d;runs_auto!$A:$R;%d;FALSE);"")' % (r, col)
-                for _, col in RICHIAMI])
+                for _, col in RICHIAMI]
+                + [""] * (len(A_MANO) - 1) + [operatore.get(nome, "")])
         el.update(values=blocco, range_name="A%d" % prima,
                   value_input_option="USER_ENTERED")
     abbellisci(sh, el, len(nomi))

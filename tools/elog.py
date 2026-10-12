@@ -60,10 +60,13 @@ def leggi_avvii(path):
                     v = json.loads(riga)
                 except ValueError:
                     continue
-                # Qualunque azione, non solo gli avvii: chi sta al banco
-                # cambia la configurazione, rampa la tensione, lancia la coda.
-                # Sono tutte firme sue, e in una coda che dura ore l'unico
-                # avvio con un nome e' il primo.
+                # Solo le azioni che fanno PARTIRE l'acquisizione. Contare
+                # qualunque azione firmata attribuiva la run a chi aveva
+                # riavviato il monitor cinque minuti prima, che non e' aver
+                # condotto l'acquisizione. L'attribuzione dura fino al
+                # prossimo avvio, quindi una coda resta a chi l'ha lanciata.
+                if v.get("azione") not in ("avvia", "coda/avvia"):
+                    continue
                 try:
                     t = time.mktime(time.strptime(v["quando"], "%Y-%m-%d %H:%M:%S"))
                 except (KeyError, ValueError):

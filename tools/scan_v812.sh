@@ -127,27 +127,52 @@ for S in $SOGLIE; do
         continue
     fi
 
-    python3 - "$ROOT" "$RUNFILE" "$S" "$FINE" "$RISULTATI" <<'PY'
-import json, os, sys
+    python3 - "$ROOT" "$RUNFILE" "$S" "$FINE" "$RISULTATI" "$USCITA" <<'PY'
+import json, os, re, sys
 # python legge da stdin, quindi __file__ non esiste: la radice del progetto
 # arriva da argv.
 sys.path.insert(0, os.path.join(sys.argv[1], "tools"))
 import daqio
 
 runfile, soglia, fine, dest = sys.argv[2], float(sys.argv[3]), float(sys.argv[4]), sys.argv[5]
+uscita = sys.argv[6]
 if not os.path.exists(runfile):
     runfile += ".gz"
 
-# Una run chiusa dal timeout lascia il file con il flag SWMR aperto: live=True
-# e' l'unico modo di rileggerla.
-hdr, _ = daqio.load(runfile, last=1, live=not runfile.endswith(".gz"))
-eventi = int(hdr["NEventsInFile"])
+# ZERO EVENTI E' UN RISULTATO, non un errore: a soglia alta e' esattamente
+# quello che deve succedere, ed e' il senso dello scan. Prima daqio alzava
+# "Il file non contiene ancora eventi" e set -e faceva morire l'intero scan al
+# primo punto vuoto -- cioe' una curva completa non si poteva misurare.
+# Quando il file e' vuoto la durata si prende dalla DAQ stessa, che la stampa
+# sempre, invece che da StartTime che li' non si puo' leggere.
+try:
+    # Una run chiusa dal timeout lascia il file con il flag SWMR aperto:
+    # live=True e' l'unico modo di rileggerla.
+    hdr, _ = daqio.load(runfile, last=1, live=not runfile.endswith(".gz"))
+    eventi = int(hdr["NEventsInFile"])
+    # La durata si misura da StartTime, scritto dalla DAQ quando apre il file,
+    # cioe' dopo la configurazione: usare il tempo totale del processo
+    # includerebbe i secondi di messa a punto e abbasserebbe il rate di un
+    # fattore che cambia da punto a punto.
+    durata = fine - float(hdr["StartTime"])
+except Exception as e:
+    eventi = 0
+    durata = 0.0
+    try:
+        testo = open(uscita, errors="replace").read()
+        m = re.search(r"Acquisition time:\s*([0-9.]+)", testo)
+        if m:
+            durata = float(m.group(1))
+    except OSError:
+        pass
+    print("  %8.1f %10d %12.1f %14.3f   (nessun evento: %s)"
+          % (soglia, 0, durata, 0.0, str(e).splitlines()[0][:40]))
+    with open(dest, "a") as f:
+        f.write(json.dumps({"soglia_mv": soglia, "eventi": 0,
+                            "durata_s": round(durata, 2), "rate": 0.0,
+                            "file": os.path.basename(runfile)}) + "\n")
+    sys.exit(0)
 
-# La durata si misura da StartTime, scritto dalla DAQ quando apre il file,
-# cioe' dopo la configurazione: usare il tempo totale del processo includerebbe
-# i secondi di messa a punto e abbasserebbe il rate di un fattore che cambia
-# da punto a punto.
-durata = fine - float(hdr["StartTime"])
 rate = eventi / durata if durata > 0 else 0.0
 
 print("  %8.1f %10d %12.1f %14.3f" % (soglia, eventi, durata, rate))

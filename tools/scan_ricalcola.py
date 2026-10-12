@@ -44,12 +44,27 @@ def ripara(path, data_dir, prova=False):
     d = json.load(open(path))
     if d.get("tipo") != "v812":
         return None                      # gli scan del self-trigger non hanno il difetto
-    cambiati, senza_log = [], 0
+    # Prima si raccolgono i tempi dichiarati, poi si riempiono i buchi con la
+    # loro MEDIANA. I punti di uno scan durano tutti lo stesso -- il timeout e'
+    # unico -- e misurati sono stabilissimi (57.3 s su ogni punto il
+    # 2026-10-12). Dove la run e' stata chiusa dal timeout senza scrivere il
+    # riepilogo il tempo manca, e lasciare li' il valore vecchio darebbe una
+    # curva corretta a META', che e' peggio di una sbagliata per intero:
+    # sbagliata lo si vede, mezza no.
+    tempi = [t for t in (tempo_daq(data_dir, p.get("file", ""))
+                         for p in d.get("punti", [])) if t]
+    if not tempi:
+        return [], len(d.get("punti", []))
+    tempi_ord = sorted(tempi)
+    mediana = tempi_ord[len(tempi_ord) // 2]
+
+    cambiati, stimati = [], 0
     for p in d.get("punti", []):
         t = tempo_daq(data_dir, p.get("file", ""))
         if not t:
-            senza_log += 1
-            continue
+            t = mediana
+            stimati += 1
+            p["durata_stimata"] = True
         vecchio = p.get("rate", 0.0)
         p["durata_s"] = round(t, 2)
         p["rate"] = round((p.get("eventi") or 0) / t, 4)
@@ -58,10 +73,12 @@ def ripara(path, data_dir, prova=False):
     if not prova and cambiati:
         if not os.path.exists(path + ".bak"):
             shutil.copy(path, path + ".bak")
-        d["nota_ricalcolo"] = ("durate riprese dal tempo di acquisizione "
-                               "dichiarato dalla DAQ")
+        d["nota_ricalcolo"] = (
+            "durate riprese dal tempo di acquisizione dichiarato dalla DAQ; "
+            "dove manca (run chiusa dal timeout senza riepilogo) si usa la "
+            "mediana degli altri punti, e il punto porta durata_stimata")
         json.dump(d, open(path, "w"), indent=2)
-    return cambiati, senza_log
+    return cambiati, stimati
 
 
 def main():
@@ -79,17 +96,18 @@ def main():
             print("%-44s non e' uno scan del V812, lasciato com'e'"
                   % os.path.basename(path))
             continue
-        cambiati, senza_log = esito
+        cambiati, stimati = esito
         nome = os.path.basename(path)
         if not cambiati:
             print("%-44s gia' a posto%s" % (nome,
-                  "" if not senza_log else "  (%d punti senza log)" % senza_log))
+                  "" if not stimati else "  (%d punti col tempo stimato)" % stimati))
             continue
         peggio = max(cambiati, key=lambda c: abs(c[2] - c[1]) / max(c[1], 1e-9))
         print("%-44s %d punti corretti, il peggiore a %.0f mV: %.1f -> %.1f Hz (%+.0f%%)%s"
               % (nome, len(cambiati), peggio[0], peggio[1], peggio[2],
                  100 * (peggio[2] - peggio[1]) / max(peggio[1], 1e-9),
-                 "" if not senza_log else "  [%d punti senza log]" % senza_log))
+                 "" if not stimati else
+                 "  [%d punti senza tempo dichiarato: uso la mediana degli altri]" % stimati))
     if a.prova:
         print("\n(prova: non ho scritto niente)", file=sys.stderr)
 

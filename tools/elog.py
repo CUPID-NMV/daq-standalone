@@ -60,8 +60,10 @@ def leggi_avvii(path):
                     v = json.loads(riga)
                 except ValueError:
                     continue
-                if v.get("azione") not in ("avvia", "coda/avvia"):
-                    continue
+                # Qualunque azione, non solo gli avvii: chi sta al banco
+                # cambia la configurazione, rampa la tensione, lancia la coda.
+                # Sono tutte firme sue, e in una coda che dura ore l'unico
+                # avvio con un nome e' il primo.
                 try:
                     t = time.mktime(time.strptime(v["quando"], "%Y-%m-%d %H:%M:%S"))
                 except (KeyError, ValueError):
@@ -75,21 +77,22 @@ def leggi_avvii(path):
     return fuori
 
 
-def chi_ha_avviato(avvii, inizio, prima_di=900.0):
-    """Chi ha premuto Start piu' di recente PRIMA di questa run.
+def chi_ha_avviato(avvii, inizio):
+    """Chi si e' fatto vedere per ultimo prima di questa run, lo stesso giorno.
 
-    Solo prima, e non troppo: in una coda il nome e' quello di chi l'ha fatta
-    partire, e vale per tutte le run che ne seguono. Un avvio di mezza giornata
-    prima non dice piu' niente, quindi oltre il quarto d'ora si lascia vuoto
-    invece di attribuire una run a chi non c'era.
+    Una coda dura ore e appartiene a chi l'ha lanciata: una finestra di
+    minuti attribuiva solo la prima run e lasciava vuote tutte le altre. Il
+    limite e' il GIORNO di calendario, che e' anche come la gente ragiona --
+    "ieri sera le ha lanciate Luigi" -- e impedisce che la firma di ieri
+    finisca su una run di stamattina presto.
     """
     if not avvii or inizio is None:
         return ""
-    candidati = [a for a in avvii if a[0] <= inizio + 60]
-    if not candidati:
-        return ""
-    t, chi = candidati[-1]
-    return chi if inizio - t <= prima_di else ""
+    giorno = time.strftime("%Y-%m-%d", time.localtime(inizio))
+    candidati = [a for a in avvii
+                 if a[0] <= inizio + 60
+                 and time.strftime("%Y-%m-%d", time.localtime(a[0])) == giorno]
+    return candidati[-1][1] if candidati else ""
 
 
 def leggi_psu(path):

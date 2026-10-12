@@ -29,7 +29,8 @@ ANSI = re.compile(r"\x1b\[[0-9;]*m")
 # macchina, poi quanto e' durata.
 COLONNE = ["run", "data", "ora", "hv_v", "i_ua", "canali", "trigger",
            "soglie", "maggioranza", "campionamento", "finestra_ns",
-           "post_trigger_pc", "eventi", "rate_hz", "durata_s", "file", "byte"]
+           "post_trigger_pc", "eventi", "rate_hz", "durata_s", "chiusa",
+           "file", "byte"]
 
 
 def _num(testo, patt, tipo=float, default=None):
@@ -93,7 +94,10 @@ def riga_da_log(path_log, psu):
     # mescolano -- quelle del CFD sono millivolt misurati, quelle del
     # self-trigger unita' di offset da convertire -- quindi la colonna dice
     # anche da dove viene il numero.
-    self_on = "Self-trigger: ENABLED" in testo
+    # Due formulazioni nella storia del log: "Self-trigger: ENABLED" e
+    # "Self-trigger ENABLED (mode = ...)". Cercare solo la prima faceva
+    # risultare "software" centocinquanta run di self-trigger dei PMT.
+    self_on = re.search(r"Self-trigger:?\s+ENABLED", testo) is not None
     est_on = "External trigger (TRG-IN): ENABLED" in testo
     cfd = re.search(r"CFD V812 configurato:\s*(.+)", testo)
     magg = _num(testo, r"maggioranza (\d+)", int, "")
@@ -149,6 +153,10 @@ def riga_da_log(path_log, psu):
         "soglie": soglie, "maggioranza": magg, "campionamento": camp,
         "finestra_ns": finestra, "post_trigger_pc": pt, "eventi": eventi,
         "rate_hz": rate, "durata_s": round(durata, 1) if durata != "" else "",
+        # Una run il cui log si ferma ad "Acquisition started" e' stata
+        # interrotta: niente riepilogo finale, quindi niente eventi ne' rate.
+        # E' un'informazione, non un buco, e va detta.
+        "chiusa": "si" if eventi != "" else "NO",
         "file": os.path.basename(h5path) + (".gz" if byte and not os.path.exists(h5path) else ""),
         "byte": byte,
     }

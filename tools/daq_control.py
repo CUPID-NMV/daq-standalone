@@ -2032,8 +2032,8 @@ PAGINA = r"""<!doctype html>
  /* La riga dell'alimentazione: si deve vedere dall'altro capo della stanza,
     e lo stato pericoloso -- bias acceso con l'amplificatore spento -- deve
     gridare, non sussurrare. */
- .alim{padding:8px 13px;border-radius:8px;margin-bottom:12px;font-size:13px;
-       font-weight:600;letter-spacing:.02em}
+ .alim{display:inline-block;padding:4px 10px;border-radius:6px;font-size:12px;
+       font-weight:600;letter-spacing:.02em;white-space:nowrap}
  .alim.bene{background:#e7f3ec;color:#15603a;border:1px solid #bcddc9}
  .alim.male{background:#a8321f;color:#fff}
  .alim.spento{background:#ececea;color:#6b6a65;font-weight:500}
@@ -2116,7 +2116,6 @@ PAGINA = r"""<!doctype html>
   <a href="#" id="ricarica" style="color:#fff;font-weight:600">Reload</a>
 </div>
 
-<div id="alim" class="alim spento" style="display:none"></div>
 <div class="box" style="margin-bottom:14px">
   <span id="badge" class="stato ferma">...</span>
   <span id="sommario" style="margin-left:14px;color:#52514e"></span>
@@ -2137,6 +2136,10 @@ PAGINA = r"""<!doctype html>
        style="font-size:12px;color:#6b6a65"
        title="Straight to the monitor port: only works from a network that can reach it">direct</a>
     <span id="monstato" style="font-size:12px;color:#6b6a65"></span>
+    <!-- L'alimentazione sta nella barra in alto, accanto allo stato della run:
+         e' la riga che si guarda per prima entrando, e una fascia a se' sopra
+         al riquadro rubava spazio senza dire di piu'. -->
+    <span id="alim" class="alim spento" style="display:none"></span>
     <label style="margin-left:auto;color:#6b6a65">who are you
       <input id="chi" placeholder="your name" style="width:140px">
     </label>
@@ -3118,17 +3121,21 @@ function avvisoAlimentazione(s){
   const bOn = b && b.uscita, aOn = a && a.uscita;
   if(bOn && !aOn){
     el.className = "alim male";
-    el.textContent = "SiPM bias ON with the amplifier supply OFF \u2014 "
-        + "switch the bias off, or the amplifier on";
+    el.textContent = "\u26a0 BIAS ON, AMPLIFIER OFF";
+    el.title = "The SiPM bias is on while the amplifier board has no supply: "
+        + "switch the bias off, or the amplifier on.";
   } else if(bOn && aOn){
     el.className = "alim bene";
-    el.textContent = "POWERED \u00b7 bias " + b.v_out.toFixed(2) + " V  "
-        + (b.i_out * 1e6).toFixed(1) + " \u00b5A \u00b7 amplifier "
-        + a.v_out.toFixed(2) + " V  " + (a.i_out * 1e3).toFixed(0) + " mA";
+    el.textContent = "POWERED \u00b7 " + b.v_out.toFixed(2) + " V \u00b7 "
+        + a.v_out.toFixed(2) + " V";
+    el.title = "SiPM bias " + b.v_out.toFixed(2) + " V  " + (b.i_out * 1e6).toFixed(1)
+        + " \u00b5A\namplifier board " + a.v_out.toFixed(2) + " V  "
+        + (a.i_out * 1e3).toFixed(0) + " mA";
   } else {
     el.className = "alim spento";
     el.textContent = "not powered \u00b7 bias " + (bOn ? "ON" : "off")
-        + " \u00b7 amplifier " + (aOn ? "ON" : "off");
+        + " \u00b7 ampli " + (aOn ? "ON" : "off");
+    el.title = "";
   }
 }
 

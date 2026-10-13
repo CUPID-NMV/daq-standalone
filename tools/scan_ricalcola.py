@@ -32,6 +32,14 @@ def tempo_daq(data_dir, nome_file):
     """I secondi di acquisizione dichiarati dalla DAQ, o None."""
     base = nome_file.replace(".h5.gz", "").replace(".h5", "")
     log = os.path.join(data_dir, base + ".log")
+    # Dal 2026-10-13 le run di scan stanno in data/scan/, e nel .json c'e' il
+    # solo nome del file: senza questa ricerca il riparatore direbbe "gia' a
+    # posto" su uno scan che non ha potuto leggere: silenzio, non errore.
+    if not os.path.exists(log):
+        for radice, _, files in os.walk(data_dir):
+            if base + ".log" in files:
+                log = os.path.join(radice, base + ".log")
+                break
     try:
         m = re.search(r"Acquisition time:\s*([0-9.]+)",
                       open(log, errors="replace").read())

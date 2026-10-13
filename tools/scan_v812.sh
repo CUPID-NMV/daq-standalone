@@ -81,6 +81,27 @@ trap 'cp "$BACKUP" "$TOML"; echo; echo "TOML ripristinato da $BACKUP"' EXIT
 # Durante lo scan comanda il tempo, non il conteggio.
 sed -i -E "s|^NEvents *=.*|NEvents         = 100000000|" "$TOML"
 
+# Le run di uno scan vanno in una cartella loro. Sono decine di file che non
+# contengono fisica -- servono a misurare un rate contro una soglia -- e
+# mescolate a quelle dei cosmici rendono impossibile portare via "solo i dati"
+# senza guardarli uno per uno. Il ripristino del TOML, che c'e' comunque,
+# rimette la cartella di prima a fine scan.
+USCITA_BASE=$(python3 - "$TOML" <<'EOF'
+import sys, tomllib
+try:
+    with open(sys.argv[1], "rb") as f:
+        print(tomllib.load(f).get("digitizer", {}).get("OutputDir", "") or "")
+except Exception:
+    print("")
+EOF
+)
+if [[ -n "$USCITA_BASE" ]]; then
+    USCITA_SCAN="${USCITA_BASE%/}/scan"
+    mkdir -p "$USCITA_SCAN"
+    sed -i -E "s|^OutputDir *=.*|OutputDir       = \"$USCITA_SCAN\"|" "$TOML"
+    echo "run dello scan in: $USCITA_SCAN"
+fi
+
 STAMP=$(date +%Y%m%d_%H%M%S)
 LAVORO=$(mktemp -d)
 RISULTATI="$LAVORO/punti.jsonl"

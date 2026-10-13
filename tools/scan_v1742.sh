@@ -105,6 +105,17 @@ if (( ETA > 600 )); then
     exit 1
 fi
 
+# Qui la run la lancia l'utente PRIMA, e questo scan si limita a muovere le
+# soglie: il file sta dove lo ha messo lui. Lo scan del V812 invece avvia una
+# run per punto e le mette in data/scan/ da se'. Dirlo qui evita di cercare
+# quei file nella cartella sbagliata.
+if [[ "$DATI" != *"/scan"* ]]; then
+    echo "nota: la run e' gia' aperta in $DATI, e questo scan non la sposta."
+    echo "      Per tenere separate le run di scan, imposta OutputDir su una"
+    echo "      cartella dedicata PRIMA di far partire la run."
+    echo
+fi
+
 echo "=== Scan in soglia del self-trigger V1742 ==="
 echo "offset  : $OFFSETS"
 echo "durata  : $SECONDI s per punto"

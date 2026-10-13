@@ -232,12 +232,20 @@ def main():
     ap.add_argument("--da", default=None, help="solo run dal giorno AAAA-MM-GG in poi")
     ap.add_argument("-n", "--ultime", type=int, default=None,
                     help="solo le ultime N run (le prime sono quasi sempre prove)")
+    ap.add_argument("--anche-scan", action="store_true",
+                    help="includi le run degli scan in soglia (data/scan/)")
     a = ap.parse_args()
 
     psu = leggi_psu(os.path.join(a.data_dir, "psu-log.csv"))
     avvii = leggi_avvii(os.path.join(a.data_dir, "azioni.jsonl"))
     righe = []
-    for radice, _, files in os.walk(a.data_dir):
+    for radice, cartelle, files in os.walk(a.data_dir):
+        # Un e-log e' il registro di cosa si e' misurato, e uno scan in soglia
+        # e' UNA misura, non cinquanta run: lasciarle entrare spinge fuori
+        # dalle "ultime 10" tutte le run di cosmici della serata. I file stanno
+        # su disco e lo scan ha il suo .json con i punti.
+        if not a.anche_scan:
+            cartelle[:] = [c for c in cartelle if c != "scan"]
         for f in files:
             if f.endswith(".log") and not f.startswith("daq-console"):
                 r = riga_da_log(os.path.join(radice, f), psu, avvii)

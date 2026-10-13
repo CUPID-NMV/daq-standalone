@@ -241,6 +241,27 @@ Conseguenze da sapere:
 
 ---
 
+## Le run degli scan stanno in `data/scan/`
+
+Dal 2026-10-13 `scan_v812.sh` scrive le sue run in `<OutputDir>/scan`: sono
+decine di file che non contengono fisica -- servono a misurare un rate contro
+una soglia -- e mescolate ai cosmici rendono impossibile portare via "solo i
+dati" senza guardare un file per volta. La cartella la impone lo script
+riscrivendo `OutputDir` nel TOML, e il `trap` che c'era gia' la rimette come
+prima a fine scan.
+
+- **L'e-log salta `data/scan/`** (`tools/elog.py`, si riprende con
+  `--anche-scan`): cinquanta punti di uno scan sono UNA misura, e lasciati
+  entrare spingono fuori dalle "ultime 10" tutte le run della serata.
+- **Lo scan del self-trigger non puo' farlo**: la run la apre l'utente prima,
+  e lo script muove solo le soglie. Se la si vuole separata, si cambia
+  `OutputDir` *prima* di far partire la run; lo script lo ricorda a video
+  quando vede che la run non e' in una cartella di scan.
+- `tools/scan_ricalcola.py` cerca i `.log` anche nelle sottocartelle, altrimenti
+  su uno scan nuovo direbbe "gia' a posto" senza aver letto niente.
+
+---
+
 ## Strumenti
 
 | | |

@@ -2166,6 +2166,37 @@ PAGINA = r"""<!doctype html>
   <canvas id="psugi" class="hvg"></canvas>
 </div>
 
+<!-- La scheda di amplificazione dei SiPM, su un CPX400SP. Pannello piu'
+     piccolo di quello del bias e non per pigrizia: qui non si rampa, non c'e'
+     OVP da sorvegliare, e quello che si guarda e' una corrente che deve stare
+     ferma. Il tetto di tensione e' 13 V, non 57: la scheda vuole 12. -->
+<div class="box" id="b_ampli"><h2>Amplifier supply<span class="qm" data-aiuto="aiutoampli">?</span><span class="riass"></span></h2>
+  <div id="amperr" class="msg ko" style="margin:0 0 8px"></div>
+  <div style="display:flex;gap:18px;align-items:baseline;flex-wrap:wrap">
+    <span id="ampout" class="stato ferma">&hellip;</span>
+    <span><span id="ampv" class="hvnum">&mdash;</span><span class="hvu">V</span></span>
+    <span><span id="ampi" class="hvnum">&mdash;</span><span class="hvu">mA</span></span>
+  </div>
+  <div id="ampinfo" style="font-size:12px;color:#6b6a65;margin-top:4px"></div>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+    <label style="font-size:12px;color:#6b6a65">voltage
+      <input id="ampvset" style="width:70px" placeholder="12.00"></label>
+    <button id="ampset" style="background:#2a78d6;color:#fff">Set</button>
+    <button id="ampon" style="background:#15603a;color:#fff">Output ON</button>
+    <button id="ampoff" style="background:#a8321f;color:#fff">Output OFF</button>
+    <label style="font-size:12px;color:#6b6a65;margin-left:10px">current limit [A]
+      <input id="ampilim" style="width:70px" placeholder="0.50"></label>
+    <button id="ampsetilim" style="background:#ececea">Set</button>
+  </div>
+  <div id="aiutoampli" class="aiuto">
+    The CPX400SP that powers the SiPM amplifier board. Measured on 2026-10-13 it
+    runs at 12.00 V drawing 0.19 A. The voltage ceiling here is 13 V, not the
+    57 V of the bias supply: a typo that is harmless on the bias would destroy
+    this board. Every reading is logged to <code>data/psu-ampli-log.csv</code>,
+    the same way as the bias.
+  </div>
+</div>
+
 <div class="box" id="b_coda"><h2>Run queue<span class="qm" data-aiuto="aiutocoda">?</span><span class="riass"></span></h2>
   <div id="codastato" style="margin-bottom:10px"></div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -2413,6 +2444,7 @@ async function aggiorna(){
   $("ferma").disabled = !s.in_corso || !!s.scan || (s.coda && s.coda.attiva);
   aggiornaMonitor(s);
   aggiornaPsu(s.psu);
+  aggiornaAmpli(s.psu_ampli);
 
   // Riepiloghi nei titoli: chiuso, il pannello dice ancora la cosa per cui lo
   // si sarebbe aperto.
@@ -2934,10 +2966,13 @@ caricaGrafici();
 caricaConfig();
 // -- alimentatore dei SiPM ------------------------------------------------
 let PSU = null;
-async function psuAzione(azione, valore, conferma){
+async function psuAzione(azione, valore, conferma, quale){
   if(conferma && !confirm(conferma)) return;
   try{
     const q = new URLSearchParams({chi: $("chi").value, token: TOKEN});
+    // Senza "quale" si parla al bias: le pagine aperte prima che esistesse il
+    // secondo strumento continuano a funzionare come hanno sempre fatto.
+    if(quale) q.set("quale", quale);
     if(valore !== undefined) q.set("valore", valore);
     const d = await (await fetch("/api/psu/" + azione + "?" + q, {method: "POST"})).json();
     msg(d.messaggio, d.esito);
@@ -2969,6 +3004,48 @@ $("psuogo").onclick = () => {
   psuAzione("ovp", v, "Set the over-voltage protection to " + v + " V?");
 };
 $("psufind").onclick = () => psuAzione("trova");
+
+// --- alimentatore della scheda di amplificazione -------------------------
+$("ampset").onclick = () => {
+  const v = psuNum("ampvset"); if(v === null) return;
+  psuAzione("tensione", v, "Set the amplifier supply to " + v.toFixed(2) + " V?", "ampli");
+};
+$("ampon").onclick  = () => psuAzione("on", undefined,
+    "Switch the amplifier board supply ON?", "ampli");
+$("ampoff").onclick = () => psuAzione("off", undefined,
+    "Switch the amplifier board supply OFF?\n\nThe SiPM signals stop being amplified.", "ampli");
+$("ampsetilim").onclick = () => {
+  const v = psuNum("ampilim"); if(v === null) return;
+  psuAzione("ilim", v, "Set the amplifier current limit to " + v + " A?", "ampli");
+};
+
+// Il pannello dell'alimentatore della scheda: piccolo apposta, e con la
+// corrente in MILLIampere -- 0.19 A si legge peggio di 193 mA, e qui la
+// corrente e' la cosa che si guarda per prima.
+function aggiornaAmpli(p){
+  const box = $("b_ampli");
+  box.style.display = p ? "" : "none";
+  if(!p) return;
+  const l = p.lettura;
+  const eta = l ? (Date.now() / 1000 - l.t) : Infinity;
+  const fresca = eta < 4 * p.periodo;
+  $("amperr").style.display = p.errore ? "block" : "none";
+  $("amperr").textContent = p.errore ? "Supply not answering \u2014 " + p.errore : "";
+  $("ampv").textContent = l ? l.v_out.toFixed(2) : "\u2014";
+  $("ampi").textContent = l ? (l.i_out * 1e3).toFixed(0) : "\u2014";
+  $("ampv").style.color = $("ampi").style.color = fresca ? "" : "#b5b5b0";
+  $("ampout").textContent = !l ? "\u2026" : (l.uscita ? "OUTPUT ON" : "output off");
+  $("ampout").className = "stato " + (l && l.uscita ? "corso" : "ferma");
+  if(l){
+    $("ampinfo").textContent = "set " + l.v_set.toFixed(2) + " V \u00b7 limit "
+        + l.i_lim.toFixed(2) + " A \u00b7 allowed up to " + p.vmax + " V \u00b7 " + p.host
+        + (p.idn ? "  \u00b7  " + p.idn.split(",")[1].trim() : "");
+    if(!$("ampvset").value && document.activeElement !== $("ampvset"))
+      $("ampvset").placeholder = l.v_set.toFixed(2);
+  }
+  riass("b_ampli", l ? l.v_out.toFixed(2) + " V  " + (l.i_out * 1e3).toFixed(0) + " mA  "
+        + (l.uscita ? "ON" : "OFF") : "");
+}
 
 function aggiornaPsu(p){
   PSU = p;

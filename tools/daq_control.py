@@ -798,6 +798,7 @@ class Alimentatore:
         self.vmax = vmax if vmax is not None else psu_control.VMAX
         self.csv = csv or PSU_LOG
         self.descrizione = descrizione
+        self.altro = None                 # l'altro alimentatore, per l'ordine
         self.lock = threading.Lock()      # una sola conversazione alla volta
         self.ultima = None                # ultima lettura riuscita
         self.errore = None
@@ -926,7 +927,37 @@ class Alimentatore:
             except OSError as e:
                 return False, "Supply not answering at %s: %s" % (self.host, e)
 
-    def uscita(self, accesa):
+    # L'ordine di accensione non e' una preferenza: l'ingresso della scheda di
+    # amplificazione non deve vedere il bias dei SiPM senza essere alimentato.
+    #   ON : prima il CPX (ampli), poi il PLH (bias)
+    #   OFF: prima il PLH (bias), poi il CPX (ampli)
+    # Il controllo sta qui e non solo nella pagina: una pagina puo' essere
+    # vecchia, e queste rotte si possono chiamare anche da fuori.
+    def _ordine_ok(self, accesa):
+        """(True, "") se la manovra rispetta l'ordine, se no (False, perche')."""
+        altro = self.altro
+        if altro is None:
+            return True, ""                      # un solo strumento: niente ordine
+        l = altro.ultima
+        fresca = l and (time.time() - l["t"]) < 4 * PSU_PERIODO_S
+        if not fresca:
+            return False, ("cannot verify the %s supply (no fresh reading): "
+                           "switch it by hand, or pass forza=1 if you know what "
+                           "you are doing" % altro.descrizione)
+        if self.nome == "bias" and accesa and not l["uscita"]:
+            return False, ("switch the amplifier supply ON first \u2014 "
+                           "ON order: CPX (amplifier) then PLH (bias)")
+        if self.nome == "ampli" and not accesa and l["uscita"]:
+            return False, ("switch the SiPM bias OFF first \u2014 "
+                           "OFF order: PLH (bias) then CPX (amplifier)")
+        return True, ""
+
+    def uscita(self, accesa, forza=False):
+        if not forza:
+            ok, perche = self._ordine_ok(accesa)
+            if not ok:
+                return False, "Refused: %s." % perche
+
         if not accesa:
             # Spegnere deve funzionare SEMPRE, anche a meta' rampa: e' il
             # pulsante che si preme quando qualcosa non va.
@@ -1044,6 +1075,11 @@ class Controllo:
         self.psu_ampli = (Alimentatore(psu_ampli_host, "ampli", AMPLI_VMAX,
                                        AMPLI_LOG, "amplifier board")
                           if psu_ampli_host else None)
+        # Si conoscono a vicenda: l'ordine di accensione lo controlla chi
+        # riceve il comando, guardando lo stato dell'altro.
+        if self.psu and self.psu_ampli:
+            self.psu.altro = self.psu_ampli
+            self.psu_ampli.altro = self.psu
 
     # -- configurazione ----------------------------------------------------
     def config(self):
@@ -1993,6 +2029,14 @@ PAGINA = r"""<!doctype html>
 <style>
  body{font:14px/1.45 system-ui,sans-serif;margin:0;padding:12px;background:#f6f6f4;color:#1a1a19}
  h1{font-size:18px;margin:0 0 14px}
+ /* La riga dell'alimentazione: si deve vedere dall'altro capo della stanza,
+    e lo stato pericoloso -- bias acceso con l'amplificatore spento -- deve
+    gridare, non sussurrare. */
+ .alim{padding:8px 13px;border-radius:8px;margin-bottom:12px;font-size:13px;
+       font-weight:600;letter-spacing:.02em}
+ .alim.bene{background:#e7f3ec;color:#15603a;border:1px solid #bcddc9}
+ .alim.male{background:#a8321f;color:#fff}
+ .alim.spento{background:#ececea;color:#6b6a65;font-weight:500}
  .riga{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
  .box{background:#fff;border:1px solid #e2e2de;border-radius:8px;padding:10px 12px;flex:1 1 320px}
  /* Colonna di riquadri impilati dentro una .riga: serve per mettere i pannelli
@@ -2072,6 +2116,7 @@ PAGINA = r"""<!doctype html>
   <a href="#" id="ricarica" style="color:#fff;font-weight:600">Reload</a>
 </div>
 
+<div id="alim" class="alim spento" style="display:none"></div>
 <div class="box" style="margin-bottom:14px">
   <span id="badge" class="stato ferma">...</span>
   <span id="sommario" style="margin-left:14px;color:#52514e"></span>
@@ -2443,8 +2488,10 @@ async function aggiorna(){
   $("avvia").disabled = s.in_corso || !!s.scan || (s.coda && s.coda.attiva);
   $("ferma").disabled = !s.in_corso || !!s.scan || (s.coda && s.coda.attiva);
   aggiornaMonitor(s);
+  ULTIMO_STATO = s;
   aggiornaPsu(s.psu);
   aggiornaAmpli(s.psu_ampli);
+  avvisoAlimentazione(s);
 
   // Riepiloghi nei titoli: chiuso, il pannello dice ancora la cosa per cui lo
   // si sarebbe aperto.
@@ -2825,6 +2872,9 @@ async function caricaGrafici(){
 // dalla frequenza di campionamento, e un numero senza quella frase e' una
 // trappola per il prossimo che lo legge.
 let MISURE = [], MVOFF_MIO = false;
+// L'ultimo stato intero: i due pannelli degli alimentatori si guardano a
+// vicenda, perche' cosa si puo' premere sull'uno dipende dall'altro.
+let ULTIMO_STATO = null;
 
 function suggerisciMvOff(){
   const scelti = new Set(Array.from($("gsel").selectedOptions).map(o => o.value));
@@ -3043,8 +3093,55 @@ function aggiornaAmpli(p){
     if(!$("ampvset").value && document.activeElement !== $("ampvset"))
       $("ampvset").placeholder = l.v_set.toFixed(2);
   }
+  const bias = (ULTIMO_STATO && ULTIMO_STATO.psu) || null;
+  const biasAcceso = bias && bias.lettura ? bias.lettura.uscita : null;
+  pulsantiPsu("ampon", "ampoff", l ? l.uscita : null, "",
+              biasAcceso === true ? "switch the SiPM bias OFF first" : "");
   riass("b_ampli", l ? l.v_out.toFixed(2) + " V  " + (l.i_out * 1e3).toFixed(0) + " mA  "
         + (l.uscita ? "ON" : "OFF") : "");
+}
+
+// I pulsanti di accensione non devono solo funzionare: devono dire a colpo
+// d'occhio DOVE si e'. Quello che corrisponde allo stato attuale si spegne --
+// non c'e' niente da premere -- e quello che manovra resta pieno. In piu' si
+// disabilita quello che l'ordine di accensione vieta, con il motivo nel
+// title: ON prima il CPX e poi il PLH, OFF prima il PLH e poi il CPX.
+// Una riga sola in cima: dice se il rivelatore sta alimentando, e grida
+// quando lo stato e' quello che l'ordine di accensione serve a evitare --
+// bias acceso con la scheda di amplificazione spenta.
+function avvisoAlimentazione(s){
+  const b = s.psu && s.psu.lettura ? s.psu.lettura : null;
+  const a = s.psu_ampli && s.psu_ampli.lettura ? s.psu_ampli.lettura : null;
+  const el = $("alim");
+  if(!b && !a){ el.style.display = "none"; return; }
+  el.style.display = "";
+  const bOn = b && b.uscita, aOn = a && a.uscita;
+  if(bOn && !aOn){
+    el.className = "alim male";
+    el.textContent = "SiPM bias ON with the amplifier supply OFF \u2014 "
+        + "switch the bias off, or the amplifier on";
+  } else if(bOn && aOn){
+    el.className = "alim bene";
+    el.textContent = "POWERED \u00b7 bias " + b.v_out.toFixed(2) + " V  "
+        + (b.i_out * 1e6).toFixed(1) + " \u00b5A \u00b7 amplifier "
+        + a.v_out.toFixed(2) + " V  " + (a.i_out * 1e3).toFixed(0) + " mA";
+  } else {
+    el.className = "alim spento";
+    el.textContent = "not powered \u00b7 bias " + (bOn ? "ON" : "off")
+        + " \u00b7 amplifier " + (aOn ? "ON" : "off");
+  }
+}
+
+function pulsantiPsu(idOn, idOff, acceso, vietatoOn, vietatoOff){
+  const on = $(idOn), off = $(idOff);
+  on.disabled  = acceso === true  || !!vietatoOn;
+  off.disabled = acceso === false || !!vietatoOff;
+  on.style.opacity  = on.disabled  ? ".35" : "1";
+  off.style.opacity = off.disabled ? ".35" : "1";
+  on.style.cursor  = on.disabled  ? "default" : "";
+  off.style.cursor = off.disabled ? "default" : "";
+  on.title  = vietatoOn  || (acceso === true  ? "already on"  : "");
+  off.title = vietatoOff || (acceso === false ? "already off" : "");
 }
 
 function aggiornaPsu(p){
@@ -3066,6 +3163,10 @@ function aggiornaPsu(p){
   $("psuv").style.color = $("psui").style.color = fresca ? "" : "#b5b5b0";
   $("psuout").textContent = !l ? "\u2026" : (l.uscita ? "OUTPUT ON" : "output off");
   $("psuout").className = "stato " + (l && l.uscita ? "corso" : "ferma");
+  const amp = (ULTIMO_STATO && ULTIMO_STATO.psu_ampli) || null;
+  const ampAcceso = amp && amp.lettura ? amp.lettura.uscita : null;
+  pulsantiPsu("psuon", "psuoff", l ? l.uscita : null,
+              ampAcceso === false ? "switch the amplifier supply ON first" : "", "");
   $("psurampa").textContent = p.rampa
       ? "ramping to " + p.rampa.a.toFixed(2) + " V" + (p.rampa.v != null ? " (now " + p.rampa.v.toFixed(1) + ")" : "")
       : "";
@@ -3484,9 +3585,9 @@ def crea_handler(ctrl, token):
                         return self._json({"esito": False, "messaggio": "Not a number."})
                     esito, messaggio = numerico[azione](valore)
                 elif azione == "on":
-                    esito, messaggio = psu.uscita(True)
+                    esito, messaggio = psu.uscita(True, qs.get("forza", ["0"])[0] == "1")
                 elif azione == "off":
-                    esito, messaggio = psu.uscita(False)
+                    esito, messaggio = psu.uscita(False, qs.get("forza", ["0"])[0] == "1")
                 elif azione == "trova":
                     esito, messaggio = psu.trova()
                 else:

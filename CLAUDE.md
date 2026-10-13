@@ -158,6 +158,40 @@ aggiorna. Le chiavi nuove vanno aggiunte lì a parte, con un backup, dicendolo.
   posa dove il segnale non va mai e la run acquisisce zero eventi. Costato una
   run di 52 s a vuoto passando dai PMT al SiPM.
 
+## Il rate di uno scan non deve contare la compressione
+
+Fino al 2026-10-12 `scan_v812.sh` misurava la durata di ogni punto come
+"istante dopo la morte del processo meno StartTime", e dentro ci finivano
+chiusura e **compressione** del file, che dura quanto il file e' grosso.
+Misurato: la DAQ acquisiva **57.3 s su ogni punto**, il conto ne dava 57, 58,
+61 e **68**. Il punto da 68 era quello a rate piu' alto -- file piu' grande,
+compressione piu' lunga -- e usciva a **449 Hz invece di 533**.
+
+Il sintomo e' una curva con la **gobba iniziale**: il primo punto sembra avere
+meno rate del secondo, che per uno scan in soglia e' impossibile. Se lo vedi,
+e' questo.
+
+Ora la durata la dichiara la DAQ (`Acquisition time`). Gli scan vecchi si
+riparano con `tools/scan_ricalcola.py` finche' i `.log` delle run sono sul
+disco; i punti chiusi dal timeout non dichiarano il tempo e prendono la
+mediana degli altri, marcati `durata_stimata`.
+
+Gli scan del **self-trigger non hanno il difetto**: li' il rate viene dai
+confini in eventi dentro una sola run, senza compressioni in mezzo.
+
+## Il conteggio per canale non e' il rate del canale
+
+E' il rate con cui quel canale supera la soglia **fra gli eventi che qualcun
+altro ha fatto registrare**, e il campione cambia con la soglia. Misurato il
+2026-10-12 con il CFD in OR su ch16, 17, 18: a 5 mV **ch18 era sopra soglia in
+tutti e 30542 gli eventi** e ch16 solo in 3220; a 10 mV ch16 saliva a 12230.
+Il conteggio CRESCE alzando la soglia, e non e' un baco.
+
+Il motivo: a soglia bassa triggera quasi solo il canale piu' rumoroso -- ch18
+ha rms 3.8 mV contro gli 0.8 di ch16 -- e gli eventi registrati sono i suoi
+lampi di rumore, dove gli altri non hanno niente. Per uno scan per canale
+pulito va tolto dall'OR il canale rumoroso, o alzata la sua soglia.
+
 ## La maggioranza del V812 si verifica in 30 secondi
 
 **Se la maggioranza non agisce, il colpevole e' il cavo, non il codice.** Il

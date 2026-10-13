@@ -116,10 +116,17 @@ class PLH:
         self.check_errors(cmd)
 
 
-def controlla_tensione(volt):
-    if not 0 <= volt <= VMAX:
-        raise ValueError("%.3f V fuori dall'intervallo ammesso 0-%.1f V (VMAX in "
-                         "tools/psu_control.py)" % (volt, VMAX))
+def controlla_tensione(volt, vmax=None):
+    """Il tetto e' di chi lo usa, non del modulo.
+
+    Sulla stessa rete ci sono un PLH250-P per il bias dei SiPM (57 V) e un
+    CPX400SP per la scheda di amplificazione (12 V): un tetto unico o lascia
+    passare 57 V su una scheda da 12, o impedisce il bias.
+    """
+    tetto = VMAX if vmax is None else vmax
+    if not 0 <= volt <= tetto:
+        raise ValueError("%.3f V fuori dall'intervallo ammesso 0-%.1f V"
+                         % (volt, tetto))
 
 
 def ramp(psu, target, step, dwell, passo=None, interrompi=None):

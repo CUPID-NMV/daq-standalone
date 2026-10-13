@@ -772,14 +772,32 @@ def ultime_azioni(n=12):
 #  chiude, cosi' tools/psu_control.py da terminale continua a funzionare.
 PSU_PERIODO_S = 3.0
 PSU_LOG = os.path.join(ROOT, "data", "psu-log.csv")
+# Il CPX400SP che alimenta la scheda di amplificazione dei SiPM. Tetto a 13 V
+# e non 57: la scheda lavora a 12.00 V e 0.19 A, misurati, e un tetto buono
+# per il bias qui sarebbe un modo per bruciarla con un errore di battitura.
+AMPLI_HOST = os.environ.get("PSU_AMPLI_HOST", "192.168.99.107")
+AMPLI_LOG = os.path.join(ROOT, "data", "psu-ampli-log.csv")
+AMPLI_VMAX = 13.0
 PSU_STORIA_S = 24 * 3600
 PSU_PASSO_V = 5.0          # rampa: volt per passo
 PSU_ATTESA_S = 0.5         # rampa: secondi fra un passo e l'altro
 
 
 class Alimentatore:
-    def __init__(self, host):
+    """Un alimentatore TTi sulla rete. Ce n'e' piu' di uno.
+
+    Ognuno ha il SUO tetto di tensione e il suo registro: il bias dei SiPM sta
+    a 52 V su un PLH250-P, l'alimentazione della scheda di amplificazione a
+    12 V su un CPX400SP. Un tetto solo per tutti e due vorrebbe dire o lasciare
+    passare 57 V su una scheda da 12, o impedire il bias.
+    """
+
+    def __init__(self, host, nome="bias", vmax=None, csv=None, descrizione=""):
         self.host = host
+        self.nome = nome
+        self.vmax = vmax if vmax is not None else psu_control.VMAX
+        self.csv = csv or PSU_LOG
+        self.descrizione = descrizione
         self.lock = threading.Lock()      # una sola conversazione alla volta
         self.ultima = None                # ultima lettura riuscita
         self.errore = None
@@ -805,8 +823,8 @@ class Alimentatore:
         if self.storia and self.storia[0][0] < limite:
             self.storia = [x for x in self.storia if x[0] >= limite]
         try:
-            nuovo = not os.path.exists(PSU_LOG)
-            with open(PSU_LOG, "a") as f:
+            nuovo = not os.path.exists(self.csv)
+            with open(self.csv, "a") as f:
                 if nuovo:
                     f.write("unix_time,ora,v_set,v_out,i_out,i_lim,uscita\n")
                 f.write("%.1f,%s,%.3f,%.3f,%.8f,%.6f,%d\n" % (
@@ -820,7 +838,7 @@ class Alimentatore:
         svuotare il grafico proprio quando serve a vedere una deriva."""
         storia, limite = [], time.time() - PSU_STORIA_S
         try:
-            with open(PSU_LOG, "rb") as f:
+            with open(self.csv, "rb") as f:
                 f.seek(0, os.SEEK_END)
                 # ~70 byte a riga, una riga ogni PSU_PERIODO_S: 24 ore ci stanno
                 f.seek(max(0, f.tell() - int(80 * PSU_STORIA_S / PSU_PERIODO_S)))
@@ -853,8 +871,9 @@ class Alimentatore:
     # -- per la pagina -----------------------------------------------------
     def stato(self):
         return {"host": self.host, "idn": self.idn, "lettura": self.ultima,
-                "errore": self.errore, "rampa": self.rampa,
-                "vmax": psu_control.VMAX, "periodo": PSU_PERIODO_S}
+                "errore": self.errore, "rampa": self.rampa, "nome": self.nome,
+                "descrizione": self.descrizione,
+                "vmax": self.vmax, "periodo": PSU_PERIODO_S}
 
     def serie(self, ore):
         """Storia ridotta a ~300 punti, media per intervallo. La media e non
@@ -944,9 +963,9 @@ class Alimentatore:
         """Avvia la rampa in un thread e torna subito: la pagina segue
         l'avanzamento dallo stato."""
         try:
-            psu_control.controlla_tensione(volt)
+            psu_control.controlla_tensione(volt, self.vmax)
         except ValueError:
-            return False, "%.2f V is outside 0-%.1f V." % (volt, psu_control.VMAX)
+            return False, "%.2f V is outside 0-%.1f V." % (volt, self.vmax)
         if self.rampa:
             return False, "A ramp is already in progress."
         self.rampa = {"a": volt, "v": None}
@@ -991,7 +1010,7 @@ class Alimentatore:
 # ---------------------------------------------------------------------------
 class Controllo:
     def __init__(self, toml, log_path, porta_monitor=PORTA_MONITOR,
-                 args_monitor=None, psu_host=None):
+                 args_monitor=None, psu_host=None, psu_ampli_host=None):
         self.toml = os.path.abspath(toml)
         self.log_path = log_path
         # Rientrante: avvia() tiene il lock e dentro ci sta una scrittura del
@@ -1017,7 +1036,14 @@ class Controllo:
         self.storia = []          # (istante, eventi) per il rate recente
         self.porta_monitor = porta_monitor
         self.args_monitor = list(args_monitor or ARGS_MONITOR)
-        self.psu = Alimentatore(psu_host) if psu_host else None
+        # Il bias dei SiPM e l'alimentazione della scheda di amplificazione.
+        # Due strumenti diversi con due tetti diversi: 57 V sul PLH250-P,
+        # 13 V sul CPX400SP, che la scheda vuole 12.
+        self.psu = Alimentatore(psu_host, "bias", psu_control.VMAX, PSU_LOG,
+                                "SiPM bias") if psu_host else None
+        self.psu_ampli = (Alimentatore(psu_ampli_host, "ampli", AMPLI_VMAX,
+                                       AMPLI_LOG, "amplifier board")
+                          if psu_ampli_host else None)
 
     # -- configurazione ----------------------------------------------------
     def config(self):
@@ -1296,6 +1322,7 @@ class Controllo:
              "scan": None, "coda": self.leggi_coda(),
              "scan_log": self.coda_scan(12) if not scan else None,
              "psu": self.psu.stato() if self.psu else None,
+             "psu_ampli": self.psu_ampli.stato() if self.psu_ampli else None,
              "versione": VERSIONE_PAGINA}
         if scan:
             s["scan"] = {
@@ -3253,13 +3280,15 @@ def crea_handler(ctrl, token):
             if parti.path == "/api/psu/serie":
                 if not self._autorizzato(qs):
                     return self._json({"errore": "token mancante o sbagliato"}, 403)
-                if not ctrl.psu:
+                quale = qs.get("quale", ["bias"])[0]
+                psu = ctrl.psu_ampli if quale == "ampli" else ctrl.psu
+                if not psu:
                     return self._json({"punti": []})
                 try:
                     ore = min(24.0, max(0.1, float(qs.get("ore", ["6"])[0])))
                 except ValueError:
                     ore = 6.0
-                return self._json(ctrl.psu.serie(ore))
+                return self._json(psu.serie(ore))
 
             if parti.path in ("/api/stato", "/api/config"):
                 if not self._autorizzato(qs):
@@ -3359,26 +3388,30 @@ def crea_handler(ctrl, token):
                 registra(chi, da, "ferma scan", messaggio)
 
             elif parti.path.startswith("/api/psu/"):
-                if not ctrl.psu:
+                # Quale strumento: "bias" di serie, cosi' le pagine vecchie
+                # continuano a funzionare senza sapere che ce n'e' un secondo.
+                quale = qs.get("quale", ["bias"])[0]
+                psu = ctrl.psu_ampli if quale == "ampli" else ctrl.psu
+                if not psu:
                     return self._json({"esito": False,
-                                       "messaggio": "The controller runs without a supply (--psu-host '')."})
+                                       "messaggio": "No %s supply configured." % quale})
                 azione = parti.path.rsplit("/", 1)[1]
                 try:
                     valore = float(qs.get("valore", ["nan"])[0])
                 except ValueError:
                     valore = float("nan")
-                numerico = {"tensione": ctrl.psu.tensione,
-                            "ilim": ctrl.psu.limite_corrente, "ovp": ctrl.psu.ovp}
+                numerico = {"tensione": psu.tensione,
+                            "ilim": psu.limite_corrente, "ovp": psu.ovp}
                 if azione in numerico:
                     if valore != valore:
                         return self._json({"esito": False, "messaggio": "Not a number."})
                     esito, messaggio = numerico[azione](valore)
                 elif azione == "on":
-                    esito, messaggio = ctrl.psu.uscita(True)
+                    esito, messaggio = psu.uscita(True)
                 elif azione == "off":
-                    esito, messaggio = ctrl.psu.uscita(False)
+                    esito, messaggio = psu.uscita(False)
                 elif azione == "trova":
-                    esito, messaggio = ctrl.psu.trova()
+                    esito, messaggio = psu.trova()
                 else:
                     return self._manda(404, "text/plain", b"not found")
                 registra(chi, da, "psu/" + azione, messaggio)
@@ -3422,6 +3455,9 @@ def main():
                     help="dove finisce l'uscita della DAQ")
     ap.add_argument("--psu-host", default=psu_control.DEFAULT_HOST,
                     help="alimentatore dei SiPM; '' per farne a meno")
+    ap.add_argument("--psu-ampli-host", default=AMPLI_HOST,
+                    help="alimentatore della scheda di amplificazione "
+                         "(CPX400SP); vuoto per non usarlo")
     ap.add_argument("--psu-log", default=PSU_LOG,
                     help="CSV delle letture: una prova su un'altra porta deve "
                          "scriverne uno suo, non mescolarsi a quello vero")
@@ -3433,13 +3469,16 @@ def main():
     if "-p" not in args_mon and "--port" not in args_mon:
         args_mon += ["-p", str(args.monitor_port)]
     PSU_LOG = args.psu_log
-    ctrl = Controllo(args.config, args.log, args.monitor_port, args_mon, args.psu_host)
+    ctrl = Controllo(args.config, args.log, args.monitor_port, args_mon,
+                     args.psu_host, args.psu_ampli_host)
     stampa = lambda s: print(s, flush=True)
     stampa("Configurazione : %s" % ctrl.toml)
     stampa("Binario        : %s%s" % (BINARIO, "" if os.path.exists(BINARIO) else "   NON ESISTE"))
     stampa("Uscita DAQ     : %s" % args.log)
     stampa("Alimentatore   : %s" % ("%s, letture in %s" % (args.psu_host, PSU_LOG)
                                     if args.psu_host else "nessuno"))
+    stampa("Ampli (CPX)    : %s" % ("%s, letture in %s" % (args.psu_ampli_host, AMPLI_LOG)
+                                    if args.psu_ampli_host else "nessuno"))
     if args.token:
         stampa("Token          : attivo")
     pid = trova_daq()

@@ -6,6 +6,12 @@ CLAUDE.md e i commenti nel codice, questa e' solo una lista di lavoro.
 
 ## Calibrazione: il punto a 20 ns — da fare lunedi 2026-10-12
 
+Nota del 2026-10-14: la premessa e' in dubbio. Sulle run al buio del
+2026-10-06 gli impulsi del SiPM risultano larghi 83-104 ns, non 9-20
+(CLAUDE.md, sotto "La larghezza si misura EVENTO PER EVENTO"), e il punto a
+46.7 ns del 2026-10-13 sta gia' sull'altopiano. Prima di farlo, verificare la
+larghezza vera.
+
 Il banco e' pronto e il generatore e' gia' su ch16 (SiPM scollegato da quel
 canale, restano su ch17 e ch18). Serve **cambiare solo la larghezza**: da
 200 ns a ~20 ns, che e' quella degli impulsi del SiPM al buio. Tutto il resto
@@ -31,6 +37,29 @@ Procedura, la stessa di venerdi:
 
 Seconda ampiezza (meta') per la linearita', come a settembre: due punti che
 concordano entro il 3% sono quello che dice che non c'e' un errore grossolano.
+
+## SiPM al buio: scan in soglia e run col trigger cieco — al banco
+
+Aggiunto il 2026-10-14. Le run al buio del 2026-10-06 dicono che con offset 3
+il self-trigger perde ~2/3 degli impulsi da 1 p.e. (CLAUDE.md, "Il
+self-trigger con offset 3..."), ma non perche'. Due misure, nella stessa
+sessione, con il SiPM al buio a una tensione fissa (54 V):
+
+1. **Scan in `SelfTriggerThresholdOffset`** durante una sola run, con
+   `tools/noise_scan.py` (registra i confini in eventi di ogni passo):
+   offset 1, 2, 3, 4, 6, 8, 12, ~20 mila eventi per passo. Il rate non serve
+   (DAQ satura); serve lo SPETTRO DI CARICA di ogni passo: la frazione di
+   1 p.e. in funzione dell'offset e' la soglia effettiva in p.e.
+2. **Una run con trigger che non dipende dal segnale**: generatore su TRG-IN,
+   LED scollegato. Gli impulsi al buio sono allora davvero a caso: DCR sopra
+   0.5/1.5/2.5 p.e., crosstalk indipendente, afterpulse dal rate dopo ogni
+   impulso. Il generatore lontano dalla scheda: nelle run col LED il rumore
+   e' 1.5-2 volte quello delle run al buio (sospetto il generatore, non
+   verificato). Il trigger software in acquisizione oggi non c'e': il codice
+   manda trigger software solo in `MeasureBaseline`.
+
+Va fatto prima di usare il self-trigger sui pannelli o sul sistema a ~200
+canali.
 
 ## Scelta automatica della calibrazione in plot_scan
 

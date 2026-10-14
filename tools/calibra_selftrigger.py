@@ -86,6 +86,8 @@ def main():
                     help="indice del passo da cui prendere la distribuzione (default: il primo)")
     ap.add_argument("--tieni-spuri", action="store_true",
                     help="non vetare i picchi spuri del V1742")
+    ap.add_argument("--verifica", action="store_true",
+                    help="secondo stimatore indipendente: il bordo basso di ogni passo")
     ap.add_argument("-o", "--out", default=None, help="JSON con i dati grezzi")
     a = ap.parse_args()
 
@@ -114,7 +116,8 @@ def main():
     # riferimento. Su un file da 652 MB compressi fa la differenza fra un
     # minuto e dieci.
     t0 = time.time()
-    hdr, dati = daqio.load(h5, max_events=rif["eventi_a"], channels=canali)
+    fino_a = punti[-1]["eventi_a"] if a.verifica else rif["eventi_a"]
+    hdr, dati = daqio.load(h5, max_events=fino_a, channels=canali)
     print("letti       : %d eventi in %.0f s" % (len(dati), time.time() - t0))
 
     blocco = dati[rif["eventi_da"]:rif["eventi_a"]]
@@ -174,6 +177,43 @@ def main():
               % (abs(inter) / max(sigma, 1e-9)))
         print("  a un punto solo, che passa per l'origine, qui non e' applicabile.")
 
+    # --- secondo stimatore, indipendente dal primo -------------------------
+    # Gli eventi registrati a un passo sono quelli che hanno superato la sua
+    # soglia: il BORDO BASSO della loro distribuzione di ampiezze e' la soglia
+    # stessa, letta direttamente in millivolt. Non usa i rate, non usa il passo
+    # di riferimento, non assume che il campione sia stazionario. Se i due
+    # metodi danno la stessa pendenza, la calibrazione non dipende da come la
+    # si e' estratta; se divergono, uno dei due ha un'ipotesi rotta e il numero
+    # non va scritto da nessuna parte.
+    verifica = []
+    if a.verifica:
+        print()
+        print("%8s %10s %12s %12s" % ("offset", "eventi", "minimo mV", "1% mV"))
+        for p in punti:
+            blk = dati[p["eventi_da"]:p["eventi_a"]]
+            if len(blk) < 50:
+                continue
+            am, pc = ampiezze_mV(blk)
+            if not a.tieni_spuri:
+                am = am[~marca_spuri(pc)]
+            if len(am) < 50:
+                continue
+            q1 = float(np.quantile(am, 0.01))
+            verifica.append((p["offset"], len(am), float(am.min()), q1))
+            print("%8g %10d %12.2f %12.2f" % (p["offset"], len(am), am.min(), q1))
+        if len(verifica) >= 3:
+            xv = np.array([r[0] for r in verifica], float)
+            yv = np.array([r[3] for r in verifica], float)
+            pv, iv = np.polyfit(xv, yv, 1)
+            rv = yv - (pv * xv + iv)
+            sv = float(np.sqrt(np.sum(rv ** 2) / (len(xv) - 2)))
+            ev = sv / np.sqrt(np.sum((xv - xv.mean()) ** 2))
+            print()
+            print("  secondo metodo (bordo basso, 1%% ): %.4f +- %.4f mV/offset,"
+                  " intercetta %.2f mV" % (pv, ev, iv))
+            diff = abs(pv - pend) / np.sqrt(ev ** 2 + err_pend ** 2)
+            print("  differenza fra i due metodi: %.1f sigma" % diff)
+
     out = a.out or os.path.join(
         ROOT, "measurements",
         "calib_selftrigger_%s.json" % os.path.basename(a.scan)
@@ -188,6 +228,9 @@ def main():
         "frazione_spuri": float(spuri.mean()),
         "punti": [{"offset": o, "rate": r, "frazione": f, "soglia_mv": s}
                   for o, r, f, s in righe],
+        "verifica_bordo_basso": [
+            {"offset": o, "eventi": n_, "minimo_mv": mi, "q1_mv": q}
+            for o, n_, mi, q in verifica],
         "fit": {"pendenza_mv_per_offset": pend, "errore_pendenza": float(err_pend),
                 "intercetta_mv": inter, "residui_rms_mv": sigma,
                 "attenuazione": pend / MV_PER_CONTEGGIO, "n_punti": len(x)},

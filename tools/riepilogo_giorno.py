@@ -282,7 +282,8 @@ def componi_riepilogo(cartelle_dati, giorno):
                     "%.0f Hz" % float(r["rate_hz"]) if r["rate_hz"] != "" else "—",
                     "%.1f V" % float(r["hv_v"]) if r["hv_v"] != "" else "—",
                     {"si": "yes", "NO": "NO"}.get(r["chiusa"], r["chiusa"]),
-                    " ".join("%s:%.0f" % (ch, 100 * c["eff"]) for ch, c in r["eff"]["canali"].items())
+                    (" ".join("%s:%.0f" % (ch, 100 * c["eff"]) for ch, c in r["eff"]["canali"].items())
+                     + (" (ped %.0f-%.0f ns)" % tuple(r["eff"]["ped_ns"]) if r["eff"].get("ped_ristretta") else ""))
                     if r.get("eff") else "—"))
 
     totale = "Total: %d runs, %s events, %s of acquisition, %s" % (
@@ -299,7 +300,9 @@ def componi_riepilogo(cartelle_dati, giorno):
         note.append("eff = fraction of recorded events in which the channel goes above %g sigma "
                     "of its pedestal (pedestal from 10-180 ns, event by event). A rough estimate: "
                     "noise alone passes it in a fraction of events (dotted in the plot), and the "
-                    "V1742 spurious spikes count as pulses." % SIGMA_N_EFF)
+                    "V1742 spurious spikes count as pulses. Where the pulse falls inside 10-180 ns "
+                    "(high PostTriggerSize) the pedestal window ends 60 ns before it, and the "
+                    "table says so; '—' means no estimate." % SIGMA_N_EFF)
     note.append("Rates are the DAQ's own: above ~900 Hz it saturates and the true rate is higher.")
 
     larg = [max(len(intest[i]), *(len(t[i]) for t in tab)) if tab else len(intest[i])

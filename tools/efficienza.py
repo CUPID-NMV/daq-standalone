@@ -44,6 +44,10 @@ import daqio   # noqa: E402
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE = os.path.join(ROOT, "data", "efficienza")
 PED_NS = (10.0, 180.0)
+# Fra la fine della finestra del piedistallo e il picco: la salita degli
+# impulsi al buio dei SiPM dura ~30 ns (CLAUDE.md), il doppio per sicurezza.
+MARGINE_NS = 60.0
+MIN_CAMPIONI_PED = 20
 SIGMA_N = 4.0
 BLOCCO = 2000            # eventi letti per volta: 32 canali x 1024 campioni x 4 byte = 260 MB
 MV_PER_CONTEGGIO = 1000.0 / 4096
@@ -87,11 +91,39 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None):
         if totale == 0:
             raise daqio.DaqFileError("nessun evento")
         t = np.arange(ns) * dt
+
+        # Dove sta l'impulso. Con PostTriggerSize alto il self-trigger lo mette
+        # presto: il 2026-10-13 a 70% cadeva a 115 ns, DENTRO 10-180, e la
+        # stima dava efficienza 0 e pavimento 100%. Si misura con la mediana di
+        # tutta la traccia, che non dipende dalla finestra: e' solo per sapere
+        # DOVE, non per misurare il piedistallo.
+        prova = np.asarray(ds[0:min(totale, 1000)], dtype=np.float32).reshape(-1, nch, ns)
+        prova = prova - np.median(prova, axis=2)[:, :, None]
+        if segno is None:
+            su = np.median(prova.max(axis=2), axis=0)
+            giu = np.median(-prova.min(axis=2), axis=0)
+            segni_prova = np.where(su > giu, 1.0, -1.0)
+        else:
+            segni_prova = np.full(nch, float(segno))
+        orientato = segni_prova[None, :, None] * prova
+        amp_p = orientato.max(axis=2)
+        pos_p = orientato.argmax(axis=2) * dt
+        alti = amp_p >= np.median(amp_p, axis=0)[None, :]
+        picco_ns = float(np.median(pos_p[alti]))
+        del prova, orientato
+
+        ped_dichiarata = tuple(ped_ns)
+        ristretta = False
+        if picco_ns - MARGINE_NS < ped_ns[1]:
+            ped_ns = (ped_ns[0], picco_ns - MARGINE_NS)
+            ristretta = True
         i0 = int(np.searchsorted(t, ped_ns[0]))
         i1 = int(np.searchsorted(t, ped_ns[1], "right"))
         lung_ped = i1 - i0
-        if lung_ped < 5 or i1 >= ns - 5:
-            raise daqio.DaqFileError("finestra del piedistallo %s ns fuori dalla traccia" % (ped_ns,))
+        if lung_ped < MIN_CAMPIONI_PED or i1 >= ns - 5:
+            raise daqio.DaqFileError(
+                "l'impulso cade a %.0f ns: prima di lui restano %d campioni di piedistallo, "
+                "troppo pochi per stimarne la larghezza" % (picco_ns, max(lung_ped, 0)))
 
         sigma = soglia = segni = None
         sopra = np.zeros(nch, dtype=np.int64)
@@ -147,7 +179,9 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None):
             "pavimento_rumore": round(float(pavimento), 5),
         }
     return {"file": os.path.basename(path), "eventi": int(totale),
-            "sigma_n": sigma_n, "ped_ns": list(ped_ns), "ricerca_campioni": int(lung_ricerca),
+            "sigma_n": sigma_n, "ped_ns": [round(x, 1) for x in ped_ns],
+            "ped_ns_dichiarata": list(ped_dichiarata), "ped_ristretta": ristretta,
+            "picco_ns": round(picco_ns, 1), "ricerca_campioni": int(lung_ricerca),
             "polarita_da": fonte_segno, "canali": fuori}
 
 
@@ -169,7 +203,7 @@ def stima_in_cache(path, **kw):
     """
     os.makedirs(CACHE, exist_ok=True)
     cache = os.path.join(CACHE, nome_run(path) + ".json")
-    chiave = {"mtime": os.path.getmtime(path), "sigma_n": kw.get("sigma_n", SIGMA_N),
+    chiave = {"versione": 2, "mtime": os.path.getmtime(path), "sigma_n": kw.get("sigma_n", SIGMA_N),
               "ped_ns": list(kw.get("ped_ns", PED_NS))}
     try:
         with open(cache) as f:
@@ -206,6 +240,9 @@ def main():
     r = stima(a.file, sigma_n=a.sigma, max_eventi=a.max_eventi)
     print("%s: %d eventi, soglia %.1f sigma_ped, polarita' dal %s"
           % (r["file"], r["eventi"], r["sigma_n"], r["polarita_da"]))
+    print("impulso a %.0f ns, piedistallo in %.0f-%.0f ns%s"
+          % (r["picco_ns"], r["ped_ns"][0], r["ped_ns"][1],
+             "  (RISTRETTA: l'impulso cadeva nella finestra dichiarata)" if r["ped_ristretta"] else ""))
     print("%4s %4s %9s %11s %9s %8s %9s" % ("ch", "pol", "sigma_ped", "soglia", "sopra", "eff",
                                               "pavimento"))
     for ch, c in r["canali"].items():

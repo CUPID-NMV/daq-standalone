@@ -552,15 +552,23 @@ def elenco_misure(n=20):
         # larghezza degli impulsi, quando lo scan l'ha registrata, decide
         # meglio della frequenza di campionamento: vedi tools/calibrazione.py.
         mv, nota = (None, None)
+        mv_cfd, nota_cfd = (None, None)
         if d.get("tipo") != "v812":
             tag = next((t for t in ("5Gs", "2.5Gs", "1Gs", "750Ms")
                         if t in str(d.get("file", ""))), None)
             mv, nota = calibrazione.scegli(tag, d.get("larghezza_fwhm_ns"))
+            # Lo stesso fattore riferito all'ingresso del CFD. Serve quando si
+            # sovrappone questo scan a uno del V812, il cui asse e' gia' in
+            # millivolt misurati LI'. La pagina sceglie da sola quale usare.
+            if mv is not None:
+                mv_cfd = calibrazione.al_cfd(mv)
+                nota_cfd = calibrazione.nota_cfd(mv)
         fuori.append({"nome": nome, "quando": st.st_mtime,
                       "punti": len(d.get("punti", [])),
                       "tipo": "V812 CFD" if d.get("tipo") == "v812" else "V1742 self-trigger",
                       "canali": d.get("canali"),
-                      "mvoff": mv, "mvoff_nota": nota})
+                      "mvoff": mv, "mvoff_nota": nota,
+                      "mvoff_cfd": mv_cfd, "mvoff_cfd_nota": nota_cfd})
     fuori.sort(key=lambda x: -x["quando"])
     return fuori[:n]
 
@@ -2882,8 +2890,17 @@ let ULTIMO_STATO = null;
 function suggerisciMvOff(){
   const scelti = new Set(Array.from($("gsel").selectedOptions).map(o => o.value));
   const sel = MISURE.filter(x => scelti.has(x.nome));
-  const note = [...new Set(sel.map(x => x.mvoff_nota).filter(Boolean))];
-  const valori = [...new Set(sel.map(x => x.mvoff).filter(v => v !== null && v !== undefined))];
+  // Un V812 nella selezione cambia il punto in cui si misurano i millivolt:
+  // il suo asse e' nativo all'ingresso del CFD, quindi gli offset del
+  // self-trigger vanno portati LI', non all'ingresso del digitizer. Senza
+  // questo si sovrappongono due assi che si chiamano "mV" e non lo sono nello
+  // stesso posto -- e le curve non tornano per un fattore 1.7.
+  const conCfd = sel.some(x => x.tipo === "V812 CFD")
+              && sel.some(x => x.tipo !== "V812 CFD");
+  const campo = conCfd ? "mvoff_cfd" : "mvoff";
+  const campoNota = conCfd ? "mvoff_cfd_nota" : "mvoff_nota";
+  const note = [...new Set(sel.map(x => x[campoNota]).filter(Boolean))];
+  const valori = [...new Set(sel.map(x => x[campo]).filter(v => v !== null && v !== undefined))];
   $("gmvoffnota").textContent = note.length === 1 ? note[0] :
       (note.length ? "the selected scans need different calibrations: "
                      + note.join("  |  ") : "");

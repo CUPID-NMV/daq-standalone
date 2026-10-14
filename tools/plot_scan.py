@@ -371,15 +371,23 @@ def main():
         # millivolt vengono da un numero assunto. A 750 MS/s la conversione
         # non e' misurata e la dipendenza dalla frequenza vale il 29% fra
         # 2.5 e 1 GS/s, per un meccanismo che non e' capito.
+        # DOVE valgono questi millivolt. Non e' pignoleria: le due catene non
+        # vedono la stessa ampiezza -- il CFD ne vede il 58% -- quindi un asse
+        # che dice solo "mV" mette sullo stesso righello due numeri presi in
+        # due punti diversi. Uno scan del V812 ha l'asse nativo all'ingresso
+        # del CFD, quindi basta che ce ne sia uno perche' l'asse comune sia
+        # quello.
+        dove = ("the CFD input" if any(t[0] == "v812" for t in tutte)
+                else "the digitizer input")
         if args.mv_per_offset:
             misurata = (MV_PER_OFFSET.get(frequenza(tutte[0][5].get("file", "")))
                         if tutte else None)
             come = "measured" if misurata == args.mv_per_offset else "ASSUMED"
-            ax.set_xlabel("threshold  [mV at the detector input]"
-                          "      (%.2f mV per offset unit, %s)"
-                          % (args.mv_per_offset, come))
+            ax.set_xlabel("threshold  [mV at %s]"
+                          "      (%.3f mV per offset unit, %s)"
+                          % (dove, args.mv_per_offset, come))
         else:
-            ax.set_xlabel("threshold  [mV at the detector input]")
+            ax.set_xlabel("threshold  [mV at %s]" % dove)
     else:
         # Si dice "from baseline" perche' e' una distanza, non una soglia
         # assoluta: il piedistallo sta scritto nel JSON di ogni scan.

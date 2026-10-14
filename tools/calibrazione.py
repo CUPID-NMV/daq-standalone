@@ -35,6 +35,27 @@ PUNTI = [
      "nota": "SiPM; impulsi positivi da 189.34 mV"},
 ]
 
+# Il rapporto fra le ampiezze che i due strumenti vedono ai loro ingressi.
+# NON e' una proprieta' delle schede: e' una proprieta' dei CAVI -- sdoppiatori,
+# attenuatori, l'amplificatore -- e cambia il giorno che qualcuno sposta
+# qualcosa al banco. Per questo porta la data e come e' stato ottenuto, e per
+# questo non va mai mescolato con i PUNTI qui sopra, che invece descrivono la
+# scheda e restano veri.
+#
+# Serve per una cosa sola, ma importante: uno scan del V812 ha l'asse gia' in
+# millivolt ALL'INGRESSO DEL CFD. Per sovrapporgli uno scan del self-trigger,
+# gli offset vanno convertiti con la scala riferita allo stesso punto, se no si
+# confrontano due assi che si chiamano "mV" e non lo sono nello stesso posto.
+RAPPORTO_CATENE = {
+    "g": 0.585,                 # ampiezza al CFD / ampiezza al digitizer
+    "minimo": 0.575, "massimo": 0.597,
+    "quando": "2026-10-13",
+    "misura": "rapporto_catene_20261013.json",
+    "nota": "ricavato da due scan del self-trigger contro uno del CFD, che "
+            "danno lo stesso 0.585; da confermare al banco con un impulso e "
+            "l'oscilloscopio sui due ingressi",
+}
+
 # Quanto puo' distare in larghezza un punto perche' lo si consideri
 # applicabile. Due e' gia' generoso: fra 1.8 e 96 ns, cioe' un fattore 53, il
 # fattore cambia di otto, quindi dentro un fattore due ci si aspetta una
@@ -42,8 +63,29 @@ PUNTI = [
 FATTORE_MAX = 2.0
 
 
+def al_cfd(valore):
+    """Lo stesso fattore, ma riferito all'ingresso del CFD invece che a quello
+    del digitizer. Vedi RAPPORTO_CATENE: dipende dal cablaggio, non dalla
+    scheda."""
+    return None if valore is None else round(valore * RAPPORTO_CATENE["g"], 4)
+
+
+def nota_cfd(valore):
+    """La nota da mostrare accanto a un fattore riferito al CFD."""
+    return ("%.3f mV/offset at the CFD input: %.3f at the digitizer × %.3f, the "
+            "amplitude ratio of the two chains measured on %s. This one depends "
+            "on the CABLING — splitters, attenuators, the amplifier — so it is "
+            "only valid while nothing is moved at the bench."
+            % (al_cfd(valore), valore, RAPPORTO_CATENE["g"],
+               RAPPORTO_CATENE["quando"]))
+
+
 def scegli(tag_frequenza=None, larghezza_ns=None):
     """(valore, nota) per queste condizioni, oppure (None, perche' no).
+
+    Il valore e' riferito all'INGRESSO DEL DIGITIZER, che e' dove il
+    comparatore del self-trigger guarda. Per riferirlo all'ingresso del CFD,
+    cioe' per confrontarlo con uno scan del V812, c'e' al_cfd().
 
     La nota e' in inglese perche' finisce nella pagina, che si mostra anche
     fuori dal gruppo.
@@ -65,7 +107,7 @@ def scegli(tag_frequenza=None, larghezza_ns=None):
         p = (stessa or vicini)[0]
         come = "measured" if stessa else "nearest in pulse width"
         return p["mv_per_offset"], (
-            "%.3f mV/offset, %s: %s ns %s pulses%s"
+            "%.3f mV/offset at the digitizer input, %s: %s ns %s pulses%s"
             % (p["mv_per_offset"], come, _ns(p["larghezza_ns"]), _verso(p),
                "" if stessa else " at %s" % _freq(p)))
 
@@ -78,7 +120,8 @@ def scegli(tag_frequenza=None, larghezza_ns=None):
                       "label it ASSUMED." % (tag_frequenza or "this sampling rate"))
     p = per_freq[0]
     return p["mv_per_offset"], (
-        "%.3f mV/offset, measured on %s ns %s pulses — this run does not "
+        "%.3f mV/offset at the digitizer input, measured on %s ns %s pulses — "
+        "this run does not "
         "record its pulse width, so check it is the same kind of signal"
         % (p["mv_per_offset"], _ns(p["larghezza_ns"]), _verso(p)))
 

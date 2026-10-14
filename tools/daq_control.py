@@ -2669,7 +2669,6 @@ PAGINA = r"""<!doctype html>
     <button id="n_prova" class="nb">Send test mail</button>
     <button id="n_riep" class="nb">Send today's summary now</button>
   </div>
-  <div id="n_via" class="az" style="margin-top:6px;color:#6b6a65"></div>
   <div class="sezh" style="margin-top:12px;cursor:default">Recipients</div>
   <table class="az" style="font-size:13px">
     <thead><tr><td class="k">Address</td><td class="k" style="text-align:center">Daily summary</td>
@@ -2691,13 +2690,10 @@ PAGINA = r"""<!doctype html>
   <div class="sezh" style="margin-top:12px;cursor:default">Last notifications</div>
   <div id="n_storico" class="az"></div>
   <div id="aiutonot" class="aiuto">
-    Mails sent by this controller from the DAQ PC, by one of two routes, shown at
-    the top of this panel. <b>With SMTP credentials</b> in
-    <code>~/.config/daq-notify/smtp.json</code> on the DAQ PC (permissions 600) they
-    go through the LNF outgoing server, smtp.lnf.infn.it, and reach any address.
-    <b>Without</b>, through the LNF incoming servers, which deliver only to
-    @lnf.infn.it mailboxes; there the first mail to a new address can take a few
-    minutes (the server makes unknown senders retry).<br><br>
+    Mails sent by this controller from the DAQ PC. <b>Only @lnf.infn.it addresses
+    can be used</b>: the mail leaves through the LNF incoming servers, which deliver
+    only to LNF mailboxes; to get it elsewhere, forward it from an LNF mailbox. The first mail
+    to a new address can take a few minutes (the server makes unknown senders retry).<br><br>
     <b>Daily summary</b>: the runs of the day, with the rate plot, at the time set
     below. Scan runs are counted, not listed.<br>
     <b>Run errors</b>: a run that ends without its end-of-run summary, that stops
@@ -2876,7 +2872,6 @@ function disegnaNotifiche(n){
     st.className = "alim male"; st.textContent = "LAST MAIL NOT DELIVERED";
     $("n_statod").textContent = u.quando.slice(5, 16) + " — " + (u.dettaglio || "");
   }
-  $("n_via").textContent = n.via || "";
   riass("b_notifiche", n.destinatari.length + (n.destinatari.length === 1 ? " recipient" : " recipients") +
                        " · summary at " + n.ora_riepilogo);
 

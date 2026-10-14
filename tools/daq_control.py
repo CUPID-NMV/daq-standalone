@@ -2786,7 +2786,11 @@ $("ferma").onclick = () => azione("ferma",
 
 // --- notifiche ---------------------------------------------------------------
 const NOMI_NOT = {riepilogo: "Daily summary", errori: "Run error", hw: "Hardware", prova: "Test"};
-const escH = t => String(t).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+// Le virgolette come \x22 e non nude: tools/check_page.py, che toglie le
+// stringhe prima di cercare le chiamate, si confonde con una virgoletta dentro
+// un'espressione regolare e da li' in poi legge i testi come codice.
+const escH = t => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                           .replace(/>/g, "&gt;").replace(/\x22/g, "&quot;");
 let notDisegnata = "", notImpostata = false;
 
 async function notAzione(par, conferma){

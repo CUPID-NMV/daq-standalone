@@ -63,6 +63,7 @@ def grafico_rate(righe, giorno):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    import matplotlib.ticker  # noqa: F401
 
     fig, ax = plt.subplots(figsize=(8.0, 3.0), dpi=110)
     alto = 0.0
@@ -77,9 +78,13 @@ def grafico_rate(righe, giorno):
             continue
         rate = float(r["rate_hz"])
         alto = max(alto, rate)
-        ax.plot([x0, max(x1, x0 + 0.02)], [rate, rate], lw=4,
-                color="#15603a" if r["chiusa"] == "si" else "#a8321f",
-                solid_capstyle="butt")
+        colore = "#15603a" if r["chiusa"] == "si" else "#a8321f"
+        if x1 - x0 < 0.08:
+            # Sotto i cinque minuti il segmento sarebbe un trattino largo un
+            # pixel: un punto si vede, e dice lo stesso.
+            ax.plot([(x0 + x1) / 2], [rate], "o", ms=3.5, color=colore)
+        else:
+            ax.plot([x0, x1], [rate, rate], lw=4, color=colore, solid_capstyle="butt")
     if len(righe) <= 25:
         for r in righe:
             if r["rate_hz"] != "":
@@ -97,7 +102,11 @@ def grafico_rate(righe, giorno):
         ax.set_xlim(max(0, int(a) - 0.25), min(24, int(b) + 1.25))
     else:
         ax.set_xlim(0, 24)
-    ax.set_xlabel("time of day [h]")
+    ax.xaxis.set_major_locator(matplotlib.ticker.MultipleLocator(
+        1 if ax.get_xlim()[1] - ax.get_xlim()[0] <= 8 else 2))
+    ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
+        lambda v, _: "%02d:00" % int(round(v))))
+    ax.set_xlabel("time of day")
     ax.set_ylabel("mean rate per run [Hz]")
     ax.set_title("DAQ rate, %s  (green: closed cleanly, red: not)" % giorno, fontsize=10)
     ax.grid(alpha=.3)
@@ -110,6 +119,8 @@ def grafico_rate(righe, giorno):
 
 def _durata(s):
     s = int(round(s))
+    if s < 60:
+        return "%d s" % s
     return "%d h %02d min" % (s // 3600, (s % 3600) // 60) if s >= 3600 else "%d min" % (s // 60)
 
 

@@ -235,7 +235,3 @@ Riavviare il monitor NON tocca la presa dati: si fa da *Stop monitor* /
    bias sotto la corrente di lavoro con l'uscita accesa su un carico, e
    guardare quale bit si accende e cosa dice la mail. Il significato
    (2 = OVP, 3 = OCP) viene dal manuale e non e' mai stato visto accadere.
-3. **Il rate dentro una run**: il riepilogo ne disegna solo la media, perche'
-   l'HDF5 non registra l'istante di ogni evento. Scrivere il trigger time tag
-   del V1742 per evento darebbe una curva continua -- e servirebbe anche
-   all'analisi.

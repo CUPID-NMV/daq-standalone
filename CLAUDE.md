@@ -380,6 +380,11 @@ guasti dell'**hardware**.
   ogni accensione) e un alimentatore muto per piu' di un minuto.
 - **`LSR1?` si azzera a ogni lettura** e ora lo legge il controllore ogni 3 s:
   `psu_control.py status` da terminale non mostra piu' gli scatti gia' visti.
+- **Il rate nel tempo** lo annota il controllore in `data/rate-log.csv`,
+  ogni 15 s, contando gli eventi del file HDF5 in SWMR (o, se il file non si
+  apre, dal contatore stampato dalla DAQ). Il riepilogo ne fa una curva a
+  intervalli di 2 minuti sopra la media di ogni run. Il monitor disegna la
+  stessa curva ma la tiene in memoria: non serve per una giornata intera.
 - Un **controllore di prova** su un'altra porta va lanciato con
   `--notifiche /tmp/qualcosa.json`, se no manda le mail vere a tutta la lista.
   Le sue azioni finiscono comunque in `data/azioni.jsonl`, che e' unico.

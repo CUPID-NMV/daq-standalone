@@ -127,6 +127,21 @@ aggiorna. Le chiavi nuove vanno aggiunte lì a parte, con un backup, dicendolo.
   tabella di `plot_scan` vale per impulsi da 1.8 ns dei PMT e per i SiPM
   **sovrastima la soglia di sei volte** -- il sintomo era un asse che arrivava
   a 2400 mV su un ingresso da 1 Vpp.
+- **A 46.7 ns la calibrazione vale 0.42 mV per unita' di offset**
+  (attenuazione 1.7), misurata il 2026-10-13 a 750 MS/s sugli impulsi al buio
+  dei SiPM. Misurata **senza generatore e senza CFD**: la scala in millivolt
+  ce l'ha gia' il digitizer, che registra le forme d'onda degli eventi che ha
+  triggerato. Due stimatori che non condividono ipotesi -- mappatura dei
+  quantili fra i rate dei passi, e bordo basso della distribuzione di ampiezze
+  a ogni passo -- danno 0.4252 +- 0.0080 e 0.4166 +- 0.0033, cioe' 1.0 sigma.
+  Lo fa `tools/calibra_selftrigger.py` su un JSON di `noise_scan.py`.
+- **La dipendenza dalla larghezza e' PIATTA fra 47 e 189 ns**: 0.42 a 46.7 ns,
+  0.46 a 96, 0.436 a 189. Il fattore otto compare solo scendendo a 1.6 ns.
+  Il modello giusto non e' "cresce al calare della larghezza" ma "c'e' un
+  altopiano a ~1.8 di attenuazione per gli impulsi larghi, e un ginocchio
+  sotto il quale l'attenuazione sale". **Dove sia il ginocchio non e'
+  misurato**: sta fra 1.6 e 47 ns. Interpolare in legge di potenza fra i punti
+  a 1.6 e 96 ns da' 0.66 a 47 ns, cioe' il 57% in piu' del vero: non si fa.
 - **La tabella `MV_PER_OFFSET` e' indicizzata sulla sola frequenza di
   campionamento, e quella chiave non basta.** Quello che conta davvero e' la
   **larghezza**: un fattore 8 fra 1.6 e 96 ns, contro il 25% fra 2.5 e

@@ -26,6 +26,10 @@ PUNTI = [
     {"mv_per_offset": 0.462, "frequenza": None,    "larghezza_ns": 96.0,
      "polarita": "negativa", "misura": "calibrazione_pulser_20260923.json",
      "nota": "la misura non registra la frequenza di campionamento"},
+    {"mv_per_offset": 0.42,  "frequenza": "750Ms", "larghezza_ns": 46.7,
+     "polarita": "positiva", "misura": "calib_selftrigger_20261013_104413.json",
+     "nota": "SiPM, impulsi al buio; misurato dal digitizer stesso su 15 punti "
+             "di scan, due stimatori indipendenti a 1 sigma"},
     {"mv_per_offset": 0.436, "frequenza": "750Ms", "larghezza_ns": 189.0,
      "polarita": "positiva", "misura": "calibrazione_sipm_larghi_20261009.json",
      "nota": "SiPM; impulsi positivi da 189.34 mV"},

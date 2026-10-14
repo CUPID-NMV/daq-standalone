@@ -74,18 +74,21 @@ def main():
     # La zona proibita per prima, cosi' sta sotto a tutto il resto.
     ax.fill_between(xx, 0, passo * xx, color=GRIGIO, alpha=0.13, lw=0)
     ax.plot(xx, passo * xx, color=GRIGIO, lw=1.2, ls=":")
-    ax.text(xx[-1] * 0.985, passo * xx[-1] * 0.62,
-            "impossible: the Transparent Mode\nis passive and can only attenuate",
-            ha="right", va="top", fontsize=8.5, color=GRIGIO, style="italic")
     ax.text(xx[-1] * 0.985, passo * xx[-1] * 1.03,
             "0.244 mV/offset  (no attenuation)",
             ha="right", va="bottom", fontsize=8.5, color=GRIGIO)
 
     if a.cfd:
         ax.plot(xx, a.cfd * xx, color="#8c564b", lw=1.6, ls="--")
-        ax.text(xx[-1] * 0.985, a.cfd * xx[-1] * 0.93,
+        # Le tre scritte stanno su righe quasi parallele e vicine: ognuna va
+        # ancorata a un'ascissa diversa, se no si accavallano fra loro e sulle
+        # righe. Lo si vede solo guardando il PNG, non rileggendo il codice.
+        ax.text(xx[-1] * 0.60, a.cfd * xx[-1] * 0.60 - 6,
                 "%.2f mV/offset from overlaying the CFD scan" % a.cfd,
-                ha="right", va="top", fontsize=9, color="#8c564b")
+                ha="center", va="top", fontsize=9, color="#8c564b")
+    ax.text(xx[-1] * 0.985, passo * xx[-1] * 0.30,
+            "impossible: the Transparent Mode\nis passive and can only attenuate",
+            ha="right", va="top", fontsize=8.5, color=GRIGIO, style="italic")
 
     ax.plot(xx, p1 * xx + i1, color=BLU, lw=1.4, alpha=0.8)
     ax.plot(x1, y1, "o", ms=8, color=BLU, mec="white", mew=1.2, zorder=5,

@@ -75,6 +75,7 @@ config/run-*.toml
 # si vedono, ed e' cosi' che le misure del 14 ottobre sono rimaste non
 # committate su una macchina che non puo' fare push.
 *.bak-*
+*.bak[0-9]*
 *-dev
 
 # Grafici generati da tools/plot_waveforms.py

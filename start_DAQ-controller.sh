@@ -2,11 +2,11 @@
 #
 # Avvia (o riavvia) la pagina di controllo della DAQ.
 #
-#   ./avvia-controllore.sh              # avvia, o riavvia se gira gia'
-#   ./avvia-controllore.sh --stato      # dice solo come sta, non tocca niente
-#   ./avvia-controllore.sh --ferma      # lo ferma e basta
-#   ./avvia-controllore.sh -p 8799      # su un'altra porta, per le prove
-#   ./avvia-controllore.sh -- --psu-host 127.0.0.1
+#   ./start_DAQ-controller.sh              # avvia, o riavvia se gira gia'
+#   ./start_DAQ-controller.sh --stato      # dice solo come sta, non tocca niente
+#   ./start_DAQ-controller.sh --ferma      # lo ferma e basta
+#   ./start_DAQ-controller.sh -p 8799      # su un'altra porta, per le prove
+#   ./start_DAQ-controller.sh -- --psu-host 127.0.0.1
 #                                       # tutto quello dopo "--" va a daq_control.py
 #
 # Il monitor NON lo avvia: conviene accenderlo da dentro la pagina (Start

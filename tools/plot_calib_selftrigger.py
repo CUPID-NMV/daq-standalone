@@ -70,6 +70,10 @@ def main():
         gridspec_kw={"height_ratios": [3, 1], "hspace": 0.08})
 
     xx = np.linspace(0, max(x1.max(), x2.max() if hanno_2 else 0) * 1.05, 100)
+    # L'altezza del riquadro serve PRIMA delle scritte: uno scostamento in
+    # millivolt fissi su un asse che cambia da misura a misura lascia le
+    # etichette attaccate alle righe, o fuori dal grafico.
+    ytop = max(y1.max(), y2.max() if hanno_2 else 0) * 1.12
 
     # La zona proibita per prima, cosi' sta sotto a tutto il resto.
     ax.fill_between(xx, 0, passo * xx, color=GRIGIO, alpha=0.13, lw=0)
@@ -83,7 +87,7 @@ def main():
         # Le tre scritte stanno su righe quasi parallele e vicine: ognuna va
         # ancorata a un'ascissa diversa, se no si accavallano fra loro e sulle
         # righe. Lo si vede solo guardando il PNG, non rileggendo il codice.
-        ax.text(xx[-1] * 0.60, a.cfd * xx[-1] * 0.60 - 6,
+        ax.text(xx[-1] * 0.60, a.cfd * xx[-1] * 0.60 - 0.055 * ytop,
                 "%.2f mV/offset from overlaying the CFD scan" % a.cfd,
                 ha="center", va="top", fontsize=9, color="#8c564b")
     ax.text(xx[-1] * 0.985, passo * xx[-1] * 0.30,
@@ -102,7 +106,7 @@ def main():
 
     ax.set_ylabel("threshold at the digitizer input  [mV]")
     ax.set_xlim(0, xx[-1])
-    ax.set_ylim(0, max(y1.max(), y2.max() if hanno_2 else 0) * 1.12)
+    ax.set_ylim(0, ytop)
     ax.grid(alpha=0.25)
     ax.legend(loc="upper left", fontsize=9, framealpha=0.95)
     ax.set_title("V1742 self-trigger threshold, calibrated by the digitizer itself\n"

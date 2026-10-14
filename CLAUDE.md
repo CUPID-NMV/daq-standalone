@@ -161,12 +161,44 @@ aggiorna. Le chiavi nuove vanno aggiunte lì a parte, con un backup, dicendolo.
   qui il 2026-10-09 venivano da li'. Misurata attorno al massimo di ogni
   singolo evento vale 9 ns e non si muove piu'. Sugli impulsi allineati (LED,
   generatore) i due metodi concordano entro il 5%.
+  **I 9 ns NON tengono sulle run al buio del 2026-10-06** (ch16, 750 MS/s,
+  52-56.5 V), rimisurate il 2026-10-14: FWHM per evento 83-104 ns sul segnale
+  filtrato a 50 MHz, salita ~30 ns, discesa di centinaia di ns. Il segnale
+  grezzo porta un'oscillazione a ~98 MHz di +-10 conteggi, presente anche prima
+  dell'impulso, i cui massimi sono larghi pochi ns: il sospetto e' che i 9 ns
+  misurassero quella. Non verificato rifacendo quella misura. Il punto di
+  calibrazione a 46.7 ns del 2026-10-13 va nella stessa direzione.
 - **Il rate del generatore si prende dal plateau dello scan, non dallo
   scaler.** Il 2026-10-09 lo scaler dava 88 Hz, il plateau 91.6, e durante la
   messa a punto la DAQ ne ha visti 12.9 per un'ora: era il sync che precedeva
   l'impulso di 75 us, cinquantacinque finestre di acquisizione, quindi
   l'impulso non poteva essere dentro nessuna. Al plateau e' la DAQ stessa a
   contare, con la soglia ben sotto l'impulso.
+- **Il self-trigger con offset 3 non registra fedelmente gli impulsi da 1 p.e.
+  di un SiPM.** Run al buio del 2026-10-06 (S13360-6075PE su ch16, 52-56.5 V,
+  PostTrigger 40), analizzate il 2026-10-14 in
+  `tools/SiPM_Characterization_DC_Study.ipynb`:
+  - nell'impulso che ha fatto scattare il trigger manca circa il 63% degli
+    1 p.e. rispetto alla Borel col crosstalk del LED, e il deficit cresce con
+    la tensione (a 56.5 V gli eventi da >=2 p.e. sono 3.6 volte quelli da 1,
+    il crosstalk ne giustifica 0.5);
+  - gli impulsi a caso PRIMA del trigger non hanno il deficit;
+  - nei ~120 ns prima dell'impulso del trigger non c'e' mai un impulso da
+    >=2 p.e., mentre gli 1 p.e. ci sono al rate normale: la scheda era gia'
+    pronta e un 2 p.e. l'avrebbe fatta scattare. **Soglia effettiva fra 1 e
+    2 p.e.**, contro quella attesa da 0.42-0.44 mV/offset (~1.3 mV, cioe'
+    ~0.45 p.e. a 54 V e ~0.2 a 56.5 V): perche' non torni non e' capito;
+  - esclusi come causa il rumore (i trigger sul rumore lasciano il gate vuoto,
+    7-28% degli eventi, e non spostano 1 p.e. in 2) e gli impulsi a caso
+    aggiunti nel gate (danno un crosstalk sbagliato).
+  Q_pe e crosstalk misurati al buio coincidono col LED (entro 4% e 2% fino a
+  55.5 V), V_bd entro 1.2 sigma: la distanza fra i picchi non risente della
+  scelta del trigger, i pesi dei picchi si'.
+- **Il DCR non si misura dalle run in self-trigger**, nemmeno contando gli
+  impulsi nelle tracce: prima del trigger mancano quelli che lo avrebbero fatto
+  scattare, dopo pesa la coda dell'impulso del trigger. Il rate della run e'
+  quello della DAQ satura (~975 Hz a ogni tensione). Serve un trigger che non
+  dipenda dal segnale: esterno, o le run dei pannelli col trigger dei muoni.
 - **`TriggerPolarity`, `DCOffset` e il segno dell'impulso sono una cosa
   sola.** Piedistallo in basso (DCOffset alto) significa impulsi positivi e
   quindi fronte di salita. Sbagliare uno dei tre non dà errori: la soglia si

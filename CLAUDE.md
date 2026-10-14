@@ -339,6 +339,51 @@ prima a fine scan.
 
 ---
 
+## Le mail della DAQ
+
+Dal 2026-10-14 il controllore manda tre tipi di mail, con una lista di persone
+per tipo, gestita dal riquadro *Notifications* della pagina e salvata in
+`data/notifiche.json` (sul PC DAQ, fuori da git): il **riepilogo** della
+giornata col grafico del rate, all'ora scelta; le **run finite male**; i
+guasti dell'**hardware**.
+
+- **Si raggiungono solo indirizzi @lnf.infn.it.** Dalla rete 192.168.99.x le
+  porte di invio di `smtp.lnf.infn.it` (25/587/465) sono chiuse, e anche
+  Gmail. La posta esce dai server di posta in ingresso dei Laboratori,
+  `pmg1`/`pmg2` porta 25, senza autenticazione, che consegnano solo alle
+  caselle LNF ("Relay access denied" per il resto). Per scrivere fuori serve
+  che il Servizio Calcolo apra la 587: allora si cambia `SERVER` in
+  `tools/posta.py` e si aggiunge il login, nient'altro.
+- **Greylisting**: il primo invio a una coppia mittente/destinatario nuova
+  prende "450 try later" e passa dopo ~5 minuti. `posta.invia` riprova da sola
+  per un quarto d'ora. Una volta accettata, la posta arriva in pochi secondi.
+- **Una run finita male si riconosce dal log, non dal codice di uscita.** Se
+  il collegamento col digitizer cade, il C++ scrive "giving up", chiude il
+  file col riepilogo normale ed esce con 0. Le regole stanno in
+  `notifiche.esito_run`; provate sulle 320 run di `data/` al 2026-10-14: 185
+  fermate a richiesta, 66 arrivate a NEvents, 61 senza riepilogo (quasi tutti
+  punti di scan chiusi dal timeout) e **8 col collegamento perso**, di cui
+  nessuno era stato avvisato.
+- **I punti degli scan non si giudicano**: finiscono col timeout per
+  costruzione, e sarebbero un allarme al minuto.
+- Il log della run il controllore lo trova fra i file aperti dal processo
+  (`/proc/<pid>/fd`), quindi vale anche per le run lanciate da terminale.
+  L'uscita della console si copia nella mail **subito**: si sovrascrive alla
+  run dopo, ed e' l'unico posto dove resta il motivo di una DAQ morta prima
+  di aprire il log (un VME che non risponde all'avvio).
+- **Alimentatori**: l'allarme principale e' l'uscita che si spegne senza che
+  nessuno abbia premuto *Output OFF* nella pagina -- anche uno spegnimento da
+  `psu_control.py off` da terminale lo fa scattare, ed e' giusto cosi'. In
+  piu' i bit di scatto del registro `LSR1?` (2 = OVP, 3 = OCP, dal manuale,
+  **non verificati con uno scatto vero**), il limite di corrente (bit 1, solo
+  se la corrente letta e' davvero al 95% del limite: il bit scatta anche a
+  ogni accensione) e un alimentatore muto per piu' di un minuto.
+- **`LSR1?` si azzera a ogni lettura** e ora lo legge il controllore ogni 3 s:
+  `psu_control.py status` da terminale non mostra piu' gli scatti gia' visti.
+- Un **controllore di prova** su un'altra porta va lanciato con
+  `--notifiche /tmp/qualcosa.json`, se no manda le mail vere a tutta la lista.
+  Le sue azioni finiscono comunque in `data/azioni.jsonl`, che e' unico.
+
 ## Strumenti
 
 | | |
@@ -351,6 +396,9 @@ prima a fine scan.
 | `tools/daqio.py` | I/O condiviso; `channels=` legge solo alcuni canali |
 | `tools/daq_control.py` | pagina di controllo (8766): configurazione, run, coda, scan |
 | `tools/psu_control.py` | alimentatore Aim-TTi PLH250-P via LAN (porta 9221): stato, rampa in tensione, limiti, log su CSV. IP da DHCP: `find` lo ritrova |
+| `tools/posta.py` | spedizione delle mail via pmg1/pmg2, con i tentativi per il greylisting; `--prova indirizzo` |
+| `tools/riepilogo_giorno.py` | il riepilogo di un giorno dai .log delle run, col grafico del rate; `--png`, `--invia` |
+| `tools/notifiche.py` | lista delle persone, invio in sottofondo, storico, riepilogo all'ora fissata, diagnosi di fine run |
 | `tools/WCFastCheck.ipynb` | analisi offline; legge i due formati e i `.gz` via `daqio` |
 
 Le misure stanno in `measurements/*.json` con i dati grezzi, e gli script di

@@ -2815,7 +2815,8 @@ function disegnaNotifiche(n){
     st.className = "alim male"; st.textContent = "LAST MAIL NOT DELIVERED";
     $("n_statod").textContent = u.quando.slice(5, 16) + " — " + (u.dettaglio || "");
   }
-  riass("b_notifiche", n.destinatari.length + " recipients · summary at " + n.ora_riepilogo);
+  riass("b_notifiche", n.destinatari.length + (n.destinatari.length === 1 ? " recipient" : " recipients") +
+                       " · summary at " + n.ora_riepilogo);
 
   const firma = JSON.stringify(n.destinatari);
   if(firma !== notDisegnata){

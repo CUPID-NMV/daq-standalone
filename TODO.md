@@ -225,3 +225,20 @@ piu' larghi dello schermo e vanno a capo (e' voluto, ma va visto).
 
 Riavviare il monitor NON tocca la presa dati: si fa da *Stop monitor* /
 *Start monitor* nella pagina di controllo.
+
+## Mail: cose rimaste dopo il 2026-10-14
+
+1. **La stima dell'efficienza nel riepilogo giornaliero**, accanto al grafico
+   del rate. Chiesta dall'utente, anche rozza; da definire con lui su quali
+   dati e con che metodo.
+2. **Verificare i bit di `LSR1?` con uno scatto vero**: abbassare l'OCP del
+   bias sotto la corrente di lavoro con l'uscita accesa su un carico, e
+   guardare quale bit si accende e cosa dice la mail. Il significato
+   (2 = OVP, 3 = OCP) viene dal manuale e non e' mai stato visto accadere.
+3. **Il rate dentro una run**: il riepilogo ne disegna solo la media, perche'
+   l'HDF5 non registra l'istante di ogni evento. Scrivere il trigger time tag
+   del V1742 per evento darebbe una curva continua -- e servirebbe anche
+   all'analisi.
+4. **Indirizzi fuori da LNF**: chiedere al Servizio Calcolo di aprire la
+   porta 587 di smtp.lnf.infn.it dalla rete 192.168.99.x. Da decidere
+   dall'utente.

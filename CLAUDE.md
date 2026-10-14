@@ -231,6 +231,36 @@ cambiato al banco.** Qui lavorano piu' persone sulla stessa catena.
 
 ---
 
+## Le correzioni DRS4 non si accendono. Mai.
+
+Decisione esplicita, presa il 2026-09-25: `CAEN_DGTZ_EnableDRS4Correction` non
+va applicata in questo progetto, da nessuna parte.
+
+**Perche'.** Le tabelle correggono le differenze fra le celle di memoria del
+DRS4. Il comparatore del self-trigger lavora in **Transparent Mode**, dove il
+segnale raggiunge l'ADC senza attraversare quelle celle: le correzioni non
+possono cambiare la decisione del trigger, ma rendono la traccia registrata
+diversa dal segnale su cui quella decisione e' stata presa. In piu' sono
+calibrate sull'Output Mode, e applicate ai dati in Transparent Mode
+**gonfiano l'RMS di circa 40 volte** -- 0.7 conteggi diventano ~28 -- e
+quell'RMS e' esattamente il numero con cui si sceglie la soglia. Le parole
+dell'utente: *se il segnale diretto ha delle oscillazioni pazienza, ma almeno
+non aggiungiamocene noi.*
+
+- In `src/Digitizer.cpp` sono disabilitate esplicitamente subito dopo
+  `LoadDRS4CorrectionData`. Il caricamento resta solo perche' la stessa
+  chiamata porta con se' la calibrazione del PLL.
+- Si erano riaccese **di rimbalzo** dentro il ripristino che seguiva la misura
+  del piedistallo in Transparent Mode, senza che nessuno l'avesse scelto. E'
+  il modo in cui torneranno, se tornano: dentro un ripristino.
+- **Spartiacque: fino alla run 0104 compresa le correzioni erano ATTIVE, dalla
+  0105 sono spente.** Non confrontare cifre di rumore a cavallo di quel
+  cambio. La 0104 aveva 1.48 conteggi di rumore con 0.68 di struttura residua
+  agganciata all'indice di lettura; senza correzione quella struttura e' piu'
+  grande.
+
+---
+
 ## Il nome dei file e la tensione dei SiPM
 
 Dal 2026-10-12 il prefisso dei file porta la tensione misurata
@@ -331,6 +361,16 @@ riferimento a un elemento rimosso.
 **Dire quando non si sa.** Una spiegazione plausibile ma non verificata va
 dichiarata tale. È successo di proporre un meccanismo che, guardato meglio,
 prevedeva il segno opposto a quello misurato.
+
+**Si scrive per un fisico sperimentale, non per un programmatore.** Le
+spiegazioni lunghe vanno sulla *fisica* e sulla misura -- perche' un
+piedistallo per evento, perche' 2.5 GS/s invece di 1 -- non sulla meccanica
+del codice. Il software qui si giudica da quello: se un numero e' plausibile,
+se un grafico si legge, se la pagina dice la verita' su cosa sta mostrando.
+
+**Per le interfacce, prima una proposta da guardare.** Un PNG, o la pagina su
+una porta di prova, e poi si implementa su quello che e' stato approvato o
+corretto. Discutere un layout a parole costa piu' giri che mostrarlo.
 
 **Commenti e messaggi di log in italiano**, come il resto del codice.
 **Le pagine web invece sono in inglese** — monitor e controllore — perche'

@@ -131,6 +131,9 @@ def main():
 
     out = a.out or os.path.join(ROOT, "plots", os.path.basename(a.json)
                                 .replace(".json", ".png"))
+    # plots/ non e' versionata: sul Mac, dove i grafici si sono sempre solo
+    # guardati e mai fatti, non esiste.
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     fig.savefig(out, dpi=140, bbox_inches="tight")
     print(out)
 

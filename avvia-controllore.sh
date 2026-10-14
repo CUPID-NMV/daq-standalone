@@ -92,12 +92,19 @@ descrivi() {
     echo "controllore : attivo, PID $PID, in ascolto sulla $PORTA"
     echo "              da $(ps -o etime= -p "$PID" 2>/dev/null | tr -d ' ')"
     if [[ -n "$risposta" ]]; then
-        python3 - <<EOF
-import json
-d = json.loads('''$risposta''')
+        python3 - "$risposta" <<'EOF'
+import json, sys
+d = json.loads(sys.argv[1])
+c = d.get("coda") or {}
+voci = c.get("voci") or []
+# "coda" e' un DIZIONARIO con dentro la lista "voci", non la lista: contare
+# len(coda) dava 4 -- le sue chiavi -- e annunciava quattro run in attesa su
+# una coda finita. Lo stato di una voce da fare e' pending o running; done e
+# interrupted sono passato.
+da_fare = [v for v in voci if v.get("stato") in ("pending", "running")]
 print("run in corso: %s" % ("SI" if d.get("in_corso") else "no"))
-coda = d.get("coda") or []
-print("coda        : %d in attesa" % len(coda))
+print("coda        : %s, %d da fare su %d voci"
+      % ("attiva" if c.get("attiva") else "ferma", len(da_fare), len(voci)))
 EOF
     else
         echo "              ATTENZIONE: non risponde su /api/stato"
@@ -125,8 +132,9 @@ ferma() {
         occupato=$(python3 -c "
 import json,sys
 d=json.loads(sys.argv[1])
-coda=len(d.get('coda') or [])
-print('%s|%d' % ('si' if d.get('in_corso') else 'no', coda))" "$risposta")
+c=d.get('coda') or {}
+da_fare=[v for v in (c.get('voci') or []) if v.get('stato') in ('pending','running')]
+print('%s|%d' % ('si' if d.get('in_corso') else 'no', len(da_fare)))" "$risposta")
         in_corso="${occupato%%|*}"; in_coda="${occupato##*|}"
         if [[ "$in_corso" == "si" || "$in_coda" != "0" ]]; then
             echo

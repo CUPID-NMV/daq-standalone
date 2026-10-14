@@ -560,9 +560,12 @@ def elenco_misure(n=20):
             # Lo stesso fattore riferito all'ingresso del CFD. Serve quando si
             # sovrappone questo scan a uno del V812, il cui asse e' gia' in
             # millivolt misurati LI'. La pagina sceglie da sola quale usare.
-            if mv is not None:
-                mv_cfd = calibrazione.al_cfd(mv)
-                nota_cfd = calibrazione.nota_cfd(mv)
+            mv_cfd = calibrazione.al_cfd(mv)
+            # La nota si da' SEMPRE, anche -- anzi soprattutto -- quando il
+            # valore non c'e': una casella vuota senza spiegazione sembra un
+            # guasto, e chi la trova ci scrive dentro il primo numero che ha
+            # in mente.
+            nota_cfd = calibrazione.nota_cfd(mv)
         fuori.append({"nome": nome, "quando": st.st_mtime,
                       "punti": len(d.get("punti", [])),
                       "tipo": "V812 CFD" if d.get("tipo") == "v812" else "V1742 self-trigger",

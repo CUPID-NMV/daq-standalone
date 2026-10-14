@@ -46,16 +46,34 @@ PUNTI = [
 # millivolt ALL'INGRESSO DEL CFD. Per sovrapporgli uno scan del self-trigger,
 # gli offset vanno convertiti con la scala riferita allo stesso punto, se no si
 # confrontano due assi che si chiamano "mV" e non lo sono nello stesso posto.
-RAPPORTO_CATENE = {
-    "g": 0.585,                 # ampiezza al CFD / ampiezza al digitizer
-    "minimo": 0.575, "massimo": 0.597,
-    "quando": "2026-10-13",
-    "misura": "rapporto_catene_20261013.json",
-    "nota": "ricavato da due scan del self-trigger contro uno del CFD, che "
-            "danno lo stesso 0.585; da confermare al banco con un impulso e "
-            "l'oscilloscopio sui due ingressi",
-}
-
+# Il rapporto fra le ampiezze ai due ingressi NON E' MISURATO, e qui sta
+# scritto perche' non lo e': tre determinazioni dagli stessi dati danno numeri
+# incompatibili fra loro.
+#
+#   0.483   sovrapponendo lo scan del CFD delle 00:09 a quello del self-trigger
+#   0.585   sovrapponendo quello delle 09:39, 15 minuti prima del self-trigger
+#   0.85    dal BORDO BASSO delle ampiezze registrate durante gli scan del CFD
+#           (0.881 alle 00:09, 0.822 alle 09:39), che non usa i rate
+#
+# Il motivo per cui la sovrapposizione non vale: portando i due scan sulla
+# stessa grandezza -- il rate sopra una data ampiezza misurata all'ingresso del
+# digitizer -- i due strumenti NON danno lo stesso rate. Il rapporto va da 1.1
+# a 2.9 e ha un andamento a U, alto ai due estremi e basso in mezzo. Due curve
+# di forma diversa si possono sempre sovrapporre scegliendo la scala giusta in
+# un tratto, e il numero che ne esce non e' i millivolt di nessun punto della
+# catena.
+#
+# Perche' le due curve abbiano forma diversa NON si sa. Candidati non
+# verificati: il tempo morto della DAQ, che agli alti rate taglia gli scan del
+# CFD (una run per punto) diversamente dallo scan del self-trigger (una run
+# sola); un canale del CFD che non sta davvero nell'OR; un comportamento del
+# constant fraction che non e' una soglia in ampiezza.
+#
+# Finche' non e' misurato al banco -- un impulso, l'oscilloscopio prima su un
+# ingresso e poi sull'altro, dieci minuti -- la pagina non propone nessun
+# valore riferito al CFD. Chi vuole provarne uno lo scrive a mano, e il grafico
+# lo marca ASSUMED, che e' esattamente quello che e'.
+RAPPORTO_CATENE = None
 # Quanto puo' distare in larghezza un punto perche' lo si consideri
 # applicabile. Due e' gia' generoso: fra 1.8 e 96 ns, cioe' un fattore 53, il
 # fattore cambia di otto, quindi dentro un fattore due ci si aspetta una
@@ -64,20 +82,28 @@ FATTORE_MAX = 2.0
 
 
 def al_cfd(valore):
-    """Lo stesso fattore, ma riferito all'ingresso del CFD invece che a quello
-    del digitizer. Vedi RAPPORTO_CATENE: dipende dal cablaggio, non dalla
-    scheda."""
-    return None if valore is None else round(valore * RAPPORTO_CATENE["g"], 4)
+    """Il fattore riferito all'ingresso del CFD, se mai si sapra' quanto vale.
+
+    Oggi torna None: vedi RAPPORTO_CATENE. Tornare un numero qualunque
+    sarebbe peggio che non tornare niente, perche' finirebbe su un asse
+    scritto "mV".
+    """
+    return None if (valore is None or RAPPORTO_CATENE is None) else \
+        round(valore * RAPPORTO_CATENE["g"], 4)
 
 
 def nota_cfd(valore):
-    """La nota da mostrare accanto a un fattore riferito al CFD."""
-    return ("%.3f mV/offset at the CFD input: %.3f at the digitizer × %.3f, the "
-            "amplitude ratio of the two chains measured on %s. This one depends "
-            "on the CABLING — splitters, attenuators, the amplifier — so it is "
-            "only valid while nothing is moved at the bench."
-            % (al_cfd(valore), valore, RAPPORTO_CATENE["g"],
-               RAPPORTO_CATENE["quando"]))
+    """La nota da mostrare quando nella selezione c'e' anche uno scan del CFD."""
+    if RAPPORTO_CATENE is None:
+        return ("a V812 scan is in the selection, so the common axis is mV at "
+                "the CFD input — but how much of the signal the CFD sees "
+                "compared with the digitizer is NOT measured: three ways of "
+                "getting it from these data give 0.48, 0.59 and 0.85, and the "
+                "two instruments do not even give the same rate above the same "
+                "amplitude. Overlaying the curves by eye hides this. Type a "
+                "value if you want one, and the plot will label it ASSUMED.")
+    return ("%.3f mV/offset at the CFD input: %.3f at the digitizer × %.3f"
+            % (al_cfd(valore), valore, RAPPORTO_CATENE["g"]))
 
 
 def scegli(tag_frequenza=None, larghezza_ns=None):

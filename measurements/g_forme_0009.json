@@ -1,0 +1,81 @@
+{
+  "scan": "scan_v812_20261012_235318.json",
+  "quando": "2026-10-13 00:09:58",
+  "canali_digitizer": [
+    16,
+    17,
+    18
+  ],
+  "g": 0.8808295621850705,
+  "errore_g": 0.021272110593203653,
+  "intercetta_mv": -8.657034879866137,
+  "residui_mv": 5.811807027826353,
+  "punti": [
+    {
+      "soglia_cfd_mv": 5.0,
+      "eventi": 3991,
+      "minimo_mv": 5.859375,
+      "q1_mv": 6.34765625
+    },
+    {
+      "soglia_cfd_mv": 25.0,
+      "eventi": 3996,
+      "minimo_mv": 28.564453125,
+      "q1_mv": 31.25
+    },
+    {
+      "soglia_cfd_mv": 35.0,
+      "eventi": 3997,
+      "minimo_mv": 41.50390625,
+      "q1_mv": 45.4052734375
+    },
+    {
+      "soglia_cfd_mv": 40.0,
+      "eventi": 3987,
+      "minimo_mv": 47.607421875,
+      "q1_mv": 56.37939453125
+    },
+    {
+      "soglia_cfd_mv": 45.0,
+      "eventi": 3987,
+      "minimo_mv": 52.1240234375,
+      "q1_mv": 63.232421875
+    },
+    {
+      "soglia_cfd_mv": 50.0,
+      "eventi": 3995,
+      "minimo_mv": 59.814453125,
+      "q1_mv": 71.259765625
+    },
+    {
+      "soglia_cfd_mv": 70.0,
+      "eventi": 3999,
+      "minimo_mv": 85.9375,
+      "q1_mv": 98.8720703125
+    },
+    {
+      "soglia_cfd_mv": 90.0,
+      "eventi": 3997,
+      "minimo_mv": 104.3701171875,
+      "q1_mv": 119.619140625
+    },
+    {
+      "soglia_cfd_mv": 100.0,
+      "eventi": 3988,
+      "minimo_mv": 115.478515625,
+      "q1_mv": 127.685546875
+    },
+    {
+      "soglia_cfd_mv": 200.0,
+      "eventi": 1590,
+      "minimo_mv": 221.923828125,
+      "q1_mv": 233.1005859375
+    },
+    {
+      "soglia_cfd_mv": 250.0,
+      "eventi": 799,
+      "minimo_mv": 278.4423828125,
+      "q1_mv": 288.076171875
+    }
+  ]
+}

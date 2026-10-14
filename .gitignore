@@ -69,6 +69,12 @@ config/run-*.toml
 *_save
 *.weird
 *.bak
+# I backup datati che si fanno da soli: il controllore ne scrive uno a ogni
+# modifica del TOML dalla pagina, e ne sono gia' 205. Non e' pignoleria di
+# ordine: con duecento righe di rumore in "git status" le modifiche VERE non
+# si vedono, ed e' cosi' che le misure del 14 ottobre sono rimaste non
+# committate su una macchina che non puo' fare push.
+*.bak-*
 *-dev
 
 # Grafici generati da tools/plot_waveforms.py

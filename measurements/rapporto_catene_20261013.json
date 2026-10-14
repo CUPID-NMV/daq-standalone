@@ -1,0 +1,12 @@
+{
+  "calib": "measurements/calib_selftrigger_20261013_104413.json",
+  "cfd": "plots/scan_v812_20261013_092419.json",
+  "mv_per_offset_digitizer": 0.42520494752340005,
+  "g": 0.585,
+  "g_min": 0.5745,
+  "g_max": 0.597,
+  "mv_per_offset_cfd": 0.248744894301189,
+  "normalizzazione_rate": 0.9826239977137794,
+  "residui_rms_rate": 0.03248880902387399,
+  "punti_usati": 7
+}

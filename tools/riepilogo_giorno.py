@@ -24,8 +24,10 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import elog   # noqa: E402
+import efficienza   # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SIGMA_N_EFF = efficienza.SIGMA_N
 
 
 def run_del_giorno(cartelle_dati, giorno):
@@ -55,6 +57,7 @@ def run_del_giorno(cartelle_dati, giorno):
                 r = elog.riga_da_log(percorso, psu, avvii)
                 if not r or r["data"] != giorno:
                     continue
+                r["log"] = percorso
                 if in_scan:
                     n_scan += 1
                 else:
@@ -70,6 +73,50 @@ def _secondi(r):
 def _inizio_h(r):
     h, m, s = (int(x) for x in r["ora"].split(":"))
     return h + m / 60 + s / 3600
+
+
+COLORI_CANALI = ("#2a78d6", "#d9822b", "#7a4fb3", "#15603a", "#a8321f",
+                 "#1a9aa0", "#b0499b", "#6b6a65")
+
+
+def _pannello_eff(ax, righe):
+    """Efficienza per canale e per run: un segmento lungo la run, a quell'altezza.
+
+    Sotto, punteggiato e dello stesso colore, il pavimento del rumore: la
+    frazione di eventi che supererebbero la soglia anche senza impulso. Una
+    efficienza vicina al suo pavimento non dice niente.
+    """
+    canali = sorted({ch for r in righe if r.get("eff") for ch in r["eff"]["canali"]}, key=int)
+    colore = {ch: COLORI_CANALI[i % len(COLORI_CANALI)] for i, ch in enumerate(canali)}
+    for r in righe:
+        e = r.get("eff")
+        if not e:
+            continue
+        x0 = _inizio_h(r)
+        x1 = max(x0 + _secondi(r) / 3600, x0 + 0.05)
+        for ch, c in e["canali"].items():
+            ax.plot([x0, x1], [100 * c["eff"]] * 2, lw=3, color=colore[ch], solid_capstyle="butt")
+            ax.plot([x0, x1], [100 * c["pavimento_rumore"]] * 2, lw=1, ls=":", color=colore[ch])
+    for ch in canali:
+        ax.plot([], [], lw=3, color=colore[ch], label="ch%s" % ch)
+    ax.set_ylim(0, 105)
+    ax.set_ylabel("events > %g σ_ped [%%]" % righe[0]["eff"]["sigma_n"]
+                  if righe and righe[0].get("eff") else "efficiency [%]")
+    ax.grid(alpha=.3)
+    ax.legend(fontsize=7, ncol=min(8, len(canali)), loc="lower left", frameon=False)
+    ax.text(0.995, 0.03, "dotted: noise floor (fraction above threshold with no pulse)",
+            transform=ax.transAxes, ha="right", va="bottom", fontsize=7, color="#6b6a65")
+
+
+def _efficienza(r):
+    """La stima per la run, dalla cache o calcolata; None se non si puo'."""
+    f = efficienza.file_della_run(r["log"]) if r.get("log") else None
+    if not f:
+        return None
+    try:
+        return efficienza.stima_in_cache(f)
+    except Exception:
+        return None
 
 
 def leggi_rate(giorno, path=None):
@@ -124,7 +171,12 @@ def grafico_rate(righe, giorno, curve=None):
     import matplotlib.ticker  # noqa: F401
 
     curve = curve or {}
-    fig, ax = plt.subplots(figsize=(8.0, 3.0), dpi=110)
+    con_eff = any(r.get("eff") for r in righe)
+    if con_eff:
+        fig, (ax, ax2) = plt.subplots(2, 1, figsize=(8.0, 5.2), dpi=110, sharex=True,
+                                      gridspec_kw={"height_ratios": [3, 2]})
+    else:
+        fig, ax = plt.subplots(figsize=(8.0, 3.0), dpi=110)
     alto = 0.0
     for run, punti in curve.items():
         chiusa = next((r["chiusa"] for r in righe if r["run"] == run), "si")
@@ -176,7 +228,11 @@ def grafico_rate(righe, giorno, curve=None):
         1 if ax.get_xlim()[1] - ax.get_xlim()[0] <= 8 else 2))
     ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
         lambda v, _: "%02d:00" % int(round(v))))
-    ax.set_xlabel("time of day")
+    if con_eff:
+        _pannello_eff(ax2, righe)
+        ax2.set_xlabel("time of day")
+    else:
+        ax.set_xlabel("time of day")
     ax.set_ylabel("rate [Hz]")
     ax.set_title("DAQ rate, %s  (green: closed cleanly, red: not)" % giorno, fontsize=10)
     ax.text(0.995, 0.97, ("line: event count every 15 s, 2-min bins; grey band: mean of the run"
@@ -206,6 +262,8 @@ def componi_riepilogo(cartelle_dati, giorno):
     righe, n_scan = run_del_giorno(cartelle_dati, giorno)
     if isinstance(cartelle_dati, str):
         cartelle_dati = [cartelle_dati]
+    for r in righe:
+        r["eff"] = _efficienza(r)
     eventi = sum(int(r["eventi"]) for r in righe if r["eventi"] != "")
     secondi = sum(_secondi(r) for r in righe)
     byte = sum(int(r["byte"]) for r in righe if r["byte"] != "")
@@ -215,7 +273,7 @@ def componi_riepilogo(cartelle_dati, giorno):
     oggetto = "[DAQ V1742] Daily summary %s — %d runs, %s events" % (
         giorno, len(righe), format(eventi, ",").replace(",", " "))
 
-    intest = ("run", "start", "duration", "events", "rate", "HV", "closed")
+    intest = ("run", "start", "duration", "events", "rate", "HV", "closed", "eff (ch:%)")
     tab = []
     for r in righe:
         tab.append((r["run"], r["ora"][:5],
@@ -223,7 +281,9 @@ def componi_riepilogo(cartelle_dati, giorno):
                     format(int(r["eventi"]), ",").replace(",", " ") if r["eventi"] != "" else "—",
                     "%.0f Hz" % float(r["rate_hz"]) if r["rate_hz"] != "" else "—",
                     "%.1f V" % float(r["hv_v"]) if r["hv_v"] != "" else "—",
-                    {"si": "yes", "NO": "NO"}.get(r["chiusa"], r["chiusa"])))
+                    {"si": "yes", "NO": "NO"}.get(r["chiusa"], r["chiusa"]),
+                    " ".join("%s:%.0f" % (ch, 100 * c["eff"]) for ch, c in r["eff"]["canali"].items())
+                    if r.get("eff") else "—"))
 
     totale = "Total: %d runs, %s events, %s of acquisition, %s" % (
         len(righe), format(eventi, ",").replace(",", " "), _durata(secondi), _gb(byte))
@@ -235,6 +295,11 @@ def componi_riepilogo(cartelle_dati, giorno):
     note.append("Disk: %s free of %s (%.0f%%)" % (
         _gb(disco.free), _gb(disco.total), 100.0 * disco.free / disco.total))
     note.append("Generated on the DAQ PC at %s" % time.strftime("%Y-%m-%d %H:%M:%S %Z"))
+    if any(r.get("eff") for r in righe):
+        note.append("eff = fraction of recorded events in which the channel goes above %g sigma "
+                    "of its pedestal (pedestal from 10-180 ns, event by event). A rough estimate: "
+                    "noise alone passes it in a fraction of events (dotted in the plot), and the "
+                    "V1742 spurious spikes count as pulses." % SIGMA_N_EFF)
     note.append("Rates are the DAQ's own: above ~900 Hz it saturates and the true rate is higher.")
 
     larg = [max(len(intest[i]), *(len(t[i]) for t in tab)) if tab else len(intest[i])

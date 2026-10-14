@@ -1533,6 +1533,19 @@ class Controllo:
         """Una run e' appena finita: se e' finita male, lo si dice per mail."""
         if info["scan"]:
             return
+        if info["log"]:
+            # La stima dell'efficienza per il riepilogo serale si fa adesso, a
+            # run appena chiusa, e finisce in cache: dieci secondi a run qui,
+            # invece di dieci minuti tutti alle 20 per una giornata intera.
+            def stima():
+                try:
+                    import efficienza
+                    f = efficienza.file_della_run(info["log"])
+                    if f:
+                        efficienza.stima_in_cache(f)
+                except Exception as e:
+                    print("efficienza: %s" % e, flush=True)
+            threading.Thread(target=stima, daemon=True).start()
         testo = ""
         if info["log"]:
             try:

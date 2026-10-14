@@ -27,24 +27,37 @@ import elog   # noqa: E402
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def run_del_giorno(data_dir, giorno):
-    """(run fuori dagli scan, numero di run di scan) iniziate quel giorno."""
-    psu = elog.leggi_psu(os.path.join(data_dir, "psu-log.csv"))
-    avvii = elog.leggi_avvii(os.path.join(data_dir, "azioni.jsonl"))
-    righe, n_scan = [], 0
-    for radice, cartelle, files in os.walk(data_dir):
-        in_scan = os.sep + "scan" in radice[len(data_dir):]
-        for f in files:
-            if not f.endswith(".log") or f.startswith(("daq-console", "controllore",
-                                                        "monitor-console", "scan-console")):
-                continue
-            r = elog.riga_da_log(os.path.join(radice, f), psu, avvii)
-            if not r or r["data"] != giorno:
-                continue
-            if in_scan:
-                n_scan += 1
-            else:
-                righe.append(r)
+def run_del_giorno(cartelle_dati, giorno):
+    """(run fuori dagli scan, numero di run di scan) iniziate quel giorno.
+
+    Piu' cartelle e non una: OutputDir si cambia dalla pagina, e le run di
+    una giornata possono stare in data/ e altrove. Il registro
+    dell'alimentatore e delle azioni sta comunque in data/.
+    """
+    if isinstance(cartelle_dati, str):
+        cartelle_dati = [cartelle_dati]
+    base = os.path.join(ROOT, "data")
+    psu = elog.leggi_psu(os.path.join(base, "psu-log.csv"))
+    avvii = elog.leggi_avvii(os.path.join(base, "azioni.jsonl"))
+    righe, n_scan, visti = [], 0, set()
+    for cartella in cartelle_dati:
+        for radice, cartelle, files in os.walk(cartella):
+            in_scan = os.sep + "scan" in radice[len(cartella):]
+            for f in files:
+                if not f.endswith(".log") or f.startswith(("daq-console", "controllore",
+                                                            "monitor-console", "scan-console")):
+                    continue
+                percorso = os.path.realpath(os.path.join(radice, f))
+                if percorso in visti:        # una cartella dentro l'altra
+                    continue
+                visti.add(percorso)
+                r = elog.riga_da_log(percorso, psu, avvii)
+                if not r or r["data"] != giorno:
+                    continue
+                if in_scan:
+                    n_scan += 1
+                else:
+                    righe.append(r)
     righe.sort(key=lambda r: r["ora"])
     return righe, n_scan
 
@@ -128,14 +141,16 @@ def _gb(b):
     return "%.1f GB" % (b / 1e9)
 
 
-def componi_riepilogo(data_dir, giorno):
-    """(oggetto, testo, html, png) del riepilogo di quel giorno."""
-    righe, n_scan = run_del_giorno(data_dir, giorno)
+def componi_riepilogo(cartelle_dati, giorno):
+    """(oggetto, testo, html, png, numero di run) del riepilogo di quel giorno."""
+    righe, n_scan = run_del_giorno(cartelle_dati, giorno)
+    if isinstance(cartelle_dati, str):
+        cartelle_dati = [cartelle_dati]
     eventi = sum(int(r["eventi"]) for r in righe if r["eventi"] != "")
     secondi = sum(_secondi(r) for r in righe)
     byte = sum(int(r["byte"]) for r in righe if r["byte"] != "")
     male = [r for r in righe if r["chiusa"] == "NO"]
-    disco = shutil.disk_usage(data_dir)
+    disco = shutil.disk_usage(cartelle_dati[0])
 
     oggetto = "[DAQ V1742] Daily summary %s — %d runs, %s events" % (
         giorno, len(righe), format(eventi, ",").replace(",", " "))
@@ -189,7 +204,7 @@ def componi_riepilogo(data_dir, giorno):
         "".join('<td %s><b>%s</b></td>' % (td, h) for h in intest),
         righe_html, html.escape(totale), "<br>".join(html.escape(n) for n in note))
 
-    return oggetto, testo, html_, grafico_rate(righe, giorno)
+    return oggetto, testo, html_, grafico_rate(righe, giorno), len(righe)
 
 
 def main():
@@ -201,7 +216,7 @@ def main():
     ap.add_argument("--invia", nargs="+", metavar="INDIRIZZO", help="spedisce il riepilogo")
     a = ap.parse_args()
 
-    oggetto, testo, html_, png = componi_riepilogo(a.data_dir, a.giorno)
+    oggetto, testo, html_, png, _ = componi_riepilogo(a.data_dir, a.giorno)
     print(oggetto + "\n\n" + testo)
     if a.png:
         open(a.png, "wb").write(png)

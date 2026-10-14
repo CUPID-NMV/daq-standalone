@@ -58,6 +58,7 @@ import canali as canali_mod
 import nomi
 import tomledit
 import psu_control
+import notifiche
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BINARIO = os.path.join(ROOT, "build", "main", "DAQ-WC")
@@ -793,6 +794,25 @@ PSU_STORIA_S = 24 * 3600
 PSU_PASSO_V = 5.0          # rampa: volt per passo
 PSU_ATTESA_S = 0.5         # rampa: secondi fra un passo e l'altro
 
+# Il registro degli eventi (LSR1?) dei TTi: si azzera a ogni lettura e tiene
+# quello che e' successo dalla lettura precedente, quindi letto ogni 3 s non
+# perde niente. Il significato dei bit e' quello del manuale Aim-TTi e NON e'
+# stato verificato con uno scatto vero: per questo l'allarme principale e'
+# l'altro, l'uscita che si spegne senza che nessuno l'abbia chiesto, che non
+# dipende dall'interpretazione di nessun bit.
+LSR_SCATTI = {2: "over-voltage trip (OVP)", 3: "over-current trip (OCP)"}
+LSR_CC = 1                 # entrata in limite di corrente
+# Un alimentatore che non risponde per tre secondi e' un pacchetto perso; per
+# un minuto e' un guasto, o un cavo, o un indirizzo cambiato dal DHCP.
+PSU_MUTO_S = 60
+
+
+def _ampere(i):
+    """Una corrente leggibile: i SiPM tirano microampere, la scheda decimi di A."""
+    if i is None:
+        return "?"
+    return "%.2f uA" % (i * 1e6) if abs(i) < 1e-3 else "%.3f A" % i
+
 
 class Alimentatore:
     """Un alimentatore TTi sulla rete. Ce n'e' piu' di uno.
@@ -816,6 +836,12 @@ class Alimentatore:
         self.idn = None
         self.rampa = None                 # {"da", "a", "v"} mentre sale/scende
         self._ferma_rampa = False
+        # Per gli allarmi. `notifica(chiave, titolo, dettagli)` la imposta il
+        # controllore; finche' e' None l'alimentatore non segnala niente.
+        self.notifica = None
+        self._spento_comandato = 0.0      # ultimo "Output OFF" chiesto da qui
+        self._muto_da = None              # da quando non risponde
+        self._muto_segnalato = False
         self.storia = self._carica_storia()
         threading.Thread(target=self._ciclo, daemon=True).start()
 
@@ -823,12 +849,55 @@ class Alimentatore:
     def _leggi(self, psu):
         if self.idn is None:
             self.idn = psu.idn()
-        return {"t": time.time(), "v_set": psu.vset(), "v_out": psu.vout(),
-                "i_out": psu.iout(), "i_lim": psu.iset(), "uscita": psu.output(),
-                "ovp": psu._num(psu.query("OVP1?")),
-                "ocp": psu._num(psu.query("OCP1?"))}
+        l = {"t": time.time(), "v_set": psu.vset(), "v_out": psu.vout(),
+             "i_out": psu.iout(), "i_lim": psu.iset(), "uscita": psu.output(),
+             "ovp": psu._num(psu.query("OVP1?")),
+             "ocp": psu._num(psu.query("OCP1?"))}
+        try:
+            l["lsr"] = int(psu._num(psu.query("LSR1?")))
+        except (TypeError, ValueError):
+            l["lsr"] = None
+        return l
+
+    def _controlla(self, prima, l):
+        """Gli allarmi: confronta la lettura nuova con la precedente."""
+        if not self.notifica or not prima:
+            return
+        lsr = l.get("lsr") or 0
+        scatti = [nome for bit, nome in LSR_SCATTI.items() if lsr & (1 << bit)]
+        spenta_da_sola = (prima["uscita"] and not l["uscita"]
+                          and time.time() - self._spento_comandato > 15)
+        if spenta_da_sola or scatti:
+            titolo = ("%s: %s, output %s" % (self.descrizione, " + ".join(scatti) or
+                                             "output switched off by itself",
+                                             "ON" if l["uscita"] else "OFF"))
+            self.notifica(self, "scatto", titolo,
+                          "Before: V = %.2f V  I = %s  (limit %s)\n"
+                          "Now:    V = %.2f V  output %s\n"
+                          "Event register LSR1 = %s\n\n"
+                          "Nobody pressed Output OFF in the control page. A trip, the\n"
+                          "front panel, or another program talking to the supply.\n"
+                          "To restore: find out why, then reset the trip (TRIPRST,\n"
+                          "tools/psu_control.py tripreset) and switch the output on."
+                          % (prima["v_out"], _ampere(prima["i_out"]), _ampere(prima["i_lim"]),
+                             l["v_out"], "ON" if l["uscita"] else "OFF", l.get("lsr")))
+        # Il limite di corrente: il bit da solo scatta anche nel transitorio di
+        # ogni accensione e di ogni rampa, quindi vale solo se la corrente LETTA
+        # e' davvero al limite.
+        elif (l["uscita"] and not self.rampa and lsr & (1 << LSR_CC)
+              and l["i_lim"] and l["i_out"] >= 0.95 * l["i_lim"]):
+            self.notifica(self, "limite", "%s: in current limit" % self.descrizione,
+                          "I = %s with a limit of %s: the supply is limiting the current,\n"
+                          "so the voltage at the output is no longer the one set\n"
+                          "(set %.2f V, read %.2f V)."
+                          % (_ampere(l["i_out"]), _ampere(l["i_lim"]), l["v_set"], l["v_out"]))
 
     def _registra(self, l):
+        try:
+            self._controlla(self.ultima, l)
+        except Exception:
+            pass                # un allarme rotto non deve fermare le letture
+        self._muto_da, self._muto_segnalato = None, False
         self.ultima, self.errore = l, None
         self.storia.append((l["t"], l["v_out"], l["i_out"]))
         limite = l["t"] - PSU_STORIA_S
@@ -878,7 +947,26 @@ class Alimentatore:
                         psu.close()
                 except Exception as e:
                     self.errore = "%s: %s" % (self.host, e)
+                    self._muto(str(e))
             time.sleep(PSU_PERIODO_S)
+
+    def _muto(self, perche):
+        adesso = time.time()
+        if self._muto_da is None:
+            self._muto_da = adesso
+        elif (adesso - self._muto_da > PSU_MUTO_S and not self._muto_segnalato
+              and self.notifica):
+            self._muto_segnalato = True
+            l = self.ultima
+            self.notifica(self, "muto", "%s: not answering" % self.descrizione,
+                          "No reading from %s for %d s: %s\n\n"
+                          "Last good reading (%s): V = %s, output %s.\n"
+                          "The supply may be off, its network cable out, or DHCP may\n"
+                          "have given it a new address."
+                          % (self.host, adesso - self._muto_da, perche,
+                             time.strftime("%H:%M:%S", time.localtime(l["t"])) if l else "never",
+                             "%.2f V" % l["v_out"] if l else "?",
+                             ("ON" if l["uscita"] else "OFF") if l else "?"))
 
     # -- per la pagina -----------------------------------------------------
     def stato(self):
@@ -973,6 +1061,9 @@ class Alimentatore:
             # Spegnere deve funzionare SEMPRE, anche a meta' rampa: e' il
             # pulsante che si preme quando qualcosa non va.
             self._ferma_rampa = True
+            # Prima di spegnere, non dopo: la lettura che segue vede l'uscita
+            # spenta, e non deve scambiarla per uno scatto.
+            self._spento_comandato = time.time()
             with self.lock:
                 try:
                     psu = psu_control.PLH(self.host, timeout=2.0)
@@ -1052,7 +1143,8 @@ class Alimentatore:
 # ---------------------------------------------------------------------------
 class Controllo:
     def __init__(self, toml, log_path, porta_monitor=PORTA_MONITOR,
-                 args_monitor=None, psu_host=None, psu_ampli_host=None):
+                 args_monitor=None, psu_host=None, psu_ampli_host=None,
+                 notifiche_cfg=None, porta=8766):
         self.toml = os.path.abspath(toml)
         self.log_path = log_path
         # Rientrante: avvia() tiene il lock e dentro ci sta una scrittura del
@@ -1068,6 +1160,10 @@ class Controllo:
         # e chi guarda da fuori crede che la run non sia finita. Succedeva una
         # volta per run.
         self.figli = []
+        self.uscite = {}          # pid -> codice d'uscita delle run figlie finite
+        self._run_viva = None     # cosa si sa della run in corso, per quando finisce
+        self.notifiche = notifiche.Notifiche(notifiche_cfg, self._cartelle_dati, porta,
+                                             log=lambda t: print(t, flush=True))
         self._daq_prima = trova_daq() is not None   # per vedere la FINE di una run
         # Un filo che guarda la fine delle run per conto suo. Non basta
         # accorgersene dentro stato(): quello gira solo quando qualcuno ha la
@@ -1091,6 +1187,9 @@ class Controllo:
         if self.psu and self.psu_ampli:
             self.psu.altro = self.psu_ampli
             self.psu_ampli.altro = self.psu
+        for a in (self.psu, self.psu_ampli):
+            if a:
+                a.notifica = self._allarme_psu
 
     # -- configurazione ----------------------------------------------------
     def config(self):
@@ -1316,13 +1415,148 @@ class Controllo:
         """Vede finire le run anche se nessuno sta guardando la pagina."""
         while True:
             try:
-                vivo = trova_daq() is not None
+                pid = trova_daq()
+                vivo = pid is not None
+                if vivo:
+                    self._segui_run(pid)
                 if self._daq_prima and not vivo:
                     self._versa_elog()
+                    info, self._run_viva = self._run_viva, None
+                    if info:
+                        try:
+                            self._fine_run(info)
+                        except Exception as e:
+                            print("notifiche: fine run: %s" % e, flush=True)
                 self._daq_prima = vivo
             except Exception:
                 pass            # un errore qui non deve fermare il controllore
             time.sleep(2.0)
+
+    def _segui_run(self, pid):
+        """Annota, a run viva, dove scrive: quando sara' morta non si potra' piu'.
+
+        Il log della run si trova fra i file che il processo tiene aperti --
+        Log::OpenFile lo apre e lo chiude solo a fine run -- e cosi' si trova
+        chiunque l'abbia lanciata: la pagina, la coda, uno scan, un terminale.
+        Il nome dedotto dall'uscita della console varrebbe solo per le prime.
+        """
+        info = self._run_viva
+        if info is None or info["pid"] != pid:
+            info = self._run_viva = {"pid": pid, "log": None, "console": None,
+                                     "inizio": avvio_processo(pid) or time.time(),
+                                     "scan": False}
+        if trova_scan():
+            # Basta averlo visto una volta: i punti di uno scan si chiudono col
+            # timeout e senza riepilogo, e non sono run finite male.
+            info["scan"] = True
+        if info["log"] is None:
+            try:
+                for fd in os.listdir("/proc/%d/fd" % pid):
+                    dove = os.readlink("/proc/%d/fd/%s" % (pid, fd))
+                    if dove.endswith(".log") and fd not in ("1", "2"):
+                        info["log"] = dove
+                    elif fd == "1" and os.path.isfile(dove):
+                        info["console"] = dove
+            except OSError:
+                pass
+            if info["log"] and os.sep + "scan" + os.sep in info["log"]:
+                info["scan"] = True
+
+    def _cartelle_dati(self):
+        """Dove cercare le run del giorno: data/ e l'OutputDir di adesso."""
+        cartelle = [os.path.join(ROOT, "data")]
+        dove = (self.config() or {}).get("cartella_dati")
+        if dove:
+            dove = dove if os.path.isabs(dove) else os.path.join(os.path.dirname(BINARIO), dove)
+            if os.path.isdir(dove):
+                cartelle.append(dove)
+        return cartelle
+
+    def _fine_run(self, info):
+        """Una run e' appena finita: se e' finita male, lo si dice per mail."""
+        if info["scan"]:
+            return
+        testo = ""
+        if info["log"]:
+            try:
+                testo = ANSI.sub("", open(info["log"], errors="replace").read())
+            except OSError:
+                pass
+        # L'uscita della console va letta ADESSO: la si sovrascrive alla run
+        # dopo, ed e' l'unico posto dove resta il motivo di una DAQ morta prima
+        # di aprire il log della run (un VME che non risponde, per esempio).
+        console = []
+        if info["console"]:
+            try:
+                with open(info["console"], "rb") as f:
+                    f.seek(0, os.SEEK_END)
+                    f.seek(max(0, f.tell() - 20000))
+                    console = righe_terminale(f.read().decode("utf-8", "replace"))[-40:]
+            except OSError:
+                pass
+        self._raccogli_figli()
+        codice = self.uscite.pop(info["pid"], None)
+        fermata = any(a.get("azione") == "ferma" and
+                      time.mktime(time.strptime(a["quando"], "%Y-%m-%d %H:%M:%S")) > info["inizio"]
+                      for a in ultime_azioni(30))
+        pulita, tipo, motivo = notifiche.esito_run(testo, console, fermata, codice)
+        if pulita:
+            return
+
+        nome = "(no run file: the DAQ died before opening it)"
+        if info["log"]:
+            nome = os.path.splitext(os.path.basename(info["log"]))[0]
+        num = lambda patt: (re.search(patt, testo).group(1) if re.search(patt, testo) else "?")
+        durata = time.time() - info["inizio"]
+        coda = self.leggi_coda()
+        da_coda = ""
+        if coda.get("attiva"):
+            voci = coda.get("voci", [])
+            fatte = sum(1 for v in voci if v.get("stato") in ("done", "interrupted", "failed"))
+            da_coda = "queue, entry %d of %d \u2014 the queue goes on" % (fatte + 1, len(voci))
+        ultime = (testo.splitlines()[-15:] if testo else console[-15:])
+        corpo = ("Run %s ended at %s, and not cleanly.\n\n"
+                 "Reason: %s\n\n"
+                 "Events written: %s   (asked: %s)\n"
+                 "Duration:       %d min %02d s\n"
+                 "%s"
+                 "Bias supply:    %s\n"
+                 "Run log:        %s\n\n"
+                 "Last lines of the %s:\n  %s\n\n"
+                 "Controller: %s\n"
+                 % (nome, time.strftime("%H:%M:%S"), motivo,
+                    num(r"Events written to file:\s*(\d+)"), num(r"NEvents\s*=\s*(\d+)"),
+                    durata // 60, durata % 60,
+                    "Started by:     %s\n" % da_coda if da_coda else "",
+                    self.psu.riassunto() if self.psu else "not monitored",
+                    info["log"] or "none",
+                    "run log" if testo else "DAQ console output",
+                    "\n  ".join(ultime) or "(nothing)",
+                    notifiche.indirizzo_pagina(self.notifiche.porta)))
+        etichetta = "HARDWARE" if tipo == "hw" else "ERROR"
+        # Un guasto dell'hardware che ha fatto cadere la run interessa a chi
+        # segue le run E a chi segue l'hardware.
+        tipi = ("hw", "errori") if tipo == "hw" else ("errori",)
+        self.notifiche.manda(tipi, "[DAQ V1742] %s \u2014 run %s: %s"
+                             % (etichetta, nome, motivo[:90]), corpo)
+
+    def _allarme_psu(self, alim, chiave, titolo, dettagli):
+        """Un alimentatore segnala qualcosa: si aggiunge cosa stava facendo la DAQ."""
+        pid = trova_daq()
+        if pid:
+            ev, tot, runfile = self.eventi_correnti()
+            run = ("%s \u2014 still acquiring (%s of %s events)"
+                   % (os.path.basename(runfile or "?"), ev, tot))
+        else:
+            run = "none"
+        corpo = ("%s\n\nAt %s, supply %s (%s, %s).\n\n%s\n\n"
+                 "Run in progress: %s\n\n"
+                 "The same alarm is held back for %d min.\nController: %s\n"
+                 % (titolo, time.strftime("%H:%M:%S"), alim.descrizione, alim.idn or "?",
+                    alim.host, dettagli, run, self.notifiche.cfg["ripeti_hw_min"],
+                    notifiche.indirizzo_pagina(self.notifiche.porta)))
+        self.notifiche.manda(("hw",), "[DAQ V1742] HARDWARE \u2014 " + titolo, corpo,
+                             chiave="%s/%s" % (alim.nome, chiave))
 
     def _versa_elog(self):
         """Aggiorna il foglio e-log, senza far aspettare nessuno.
@@ -1353,8 +1587,20 @@ class Controllo:
             pass
 
     def _raccogli_figli(self):
-        """Raccoglie le run gia' finite, cosi' non restano zombie."""
-        self.figli = [p for p in self.figli if p.poll() is None]
+        """Raccoglie le run gia' finite, cosi' non restano zombie.
+
+        Il codice d'uscita si tiene: dice se la DAQ e' stata uccisa da un
+        segnale, e lo legge la mail di fine run.
+        """
+        vivi = []
+        for p in self.figli:
+            if p.poll() is None:
+                vivi.append(p)
+            else:
+                self.uscite[p.pid] = p.returncode
+        self.figli = vivi
+        if len(self.uscite) > 50:
+            self.uscite = dict(list(self.uscite.items())[-20:])
 
     def stato(self):
         self._raccogli_figli()
@@ -1370,6 +1616,7 @@ class Controllo:
              "scan_log": self.coda_scan(12) if not scan else None,
              "psu": self.psu.stato() if self.psu else None,
              "psu_ampli": self.psu_ampli.stato() if self.psu_ampli else None,
+             "notifiche": self.notifiche.stato(),
              "versione": VERSIONE_PAGINA}
         if scan:
             s["scan"] = {
@@ -2112,6 +2359,7 @@ PAGINA = r"""<!doctype html>
  .hvf button.sel{background:#1a1a19;color:#fff}
  input{font:inherit;padding:6px 9px;border:1px solid #d5d5d0;border-radius:6px}
  a{color:#2a78d6}
+ button.nb{padding:3px 10px;font-size:12px;background:#ececea}
 </style></head><body>
 <h1>DAQ Control</h1>
 
@@ -2352,6 +2600,56 @@ PAGINA = r"""<!doctype html>
   <img id="gimg" style="margin-top:10px;max-width:100%;border:1px solid #e2e2de;border-radius:6px;display:none">
 </div>
 
+<!-- Le mail. La lista si ridisegna a ogni giro di polling solo se e' cambiata:
+     ridisegnarla sempre farebbe sparire la casella sotto il dito mentre la si
+     clicca. Le impostazioni invece si scrivono una volta sola, come il form
+     della configurazione: il polling non deve riscrivere quello che stai
+     scrivendo. -->
+<div class="box" id="b_notifiche" style="margin-top:12px"><h2>Notifications<span class="qm" data-aiuto="aiutonot">?</span><span class="riass"></span></h2>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <span id="n_stato" class="alim spento">&hellip;</span>
+    <span id="n_statod" class="az"></span>
+    <button id="n_prova" class="nb">Send test mail</button>
+    <button id="n_riep" class="nb">Send today's summary now</button>
+  </div>
+  <div class="sezh" style="margin-top:12px;cursor:default">Recipients</div>
+  <table class="az" style="font-size:13px">
+    <thead><tr><td class="k">Address</td><td class="k" style="text-align:center">Daily summary</td>
+      <td class="k" style="text-align:center">Run errors</td><td class="k" style="text-align:center">Hardware</td><td></td></tr></thead>
+    <tbody id="n_dest"></tbody>
+    <tbody><tr><td><input id="n_nuovo" placeholder="name@lnf.infn.it" style="width:220px"></td>
+      <td style="text-align:center"><input type="checkbox" id="n_nriep" checked></td>
+      <td style="text-align:center"><input type="checkbox" id="n_nerr" checked></td>
+      <td style="text-align:center"><input type="checkbox" id="n_nhw" checked></td>
+      <td><button id="n_agg" class="nb">add</button></td></tr></tbody>
+  </table>
+  <div class="sezh" style="margin-top:12px;cursor:default">Settings</div>
+  <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:13px">
+    <span><span class="k">Daily summary at</span> <input id="n_ora" style="width:64px"></span>
+    <span><label><input type="checkbox" id="n_salta"> skip it on days with no runs</label></span>
+    <span><span class="k">Same hardware alarm at most every</span> <input id="n_ripeti" style="width:48px"> <span class="k">min</span></span>
+    <button id="n_salva" class="nb">Save</button>
+  </div>
+  <div class="sezh" style="margin-top:12px;cursor:default">Last notifications</div>
+  <div id="n_storico" class="az"></div>
+  <div id="aiutonot" class="aiuto">
+    Mails sent by this controller from the DAQ PC. <b>Only @lnf.infn.it addresses
+    can be reached</b>: from the DAQ network the LNF outgoing server is closed, and
+    the incoming servers used instead deliver only to LNF mailboxes. The first mail
+    to a new address can take a few minutes (the server makes unknown senders retry).<br><br>
+    <b>Daily summary</b>: the runs of the day, with the rate plot, at the time set
+    below. Scan runs are counted, not listed.<br>
+    <b>Run errors</b>: a run that ends without its end-of-run summary, that stops
+    before its number of events with nobody asking, or that logs errors. Read from
+    the run log, not from the exit code: a lost link still exits with 0. Points of a
+    threshold scan are not checked, since they end on a timeout by design.<br>
+    <b>Hardware</b>: a supply whose output switches off with nobody pressing Output OFF
+    here (a trip, the front panel, or another program), a trip in its event register,
+    current limit, a supply not answering for a minute; and runs that fail on the VME
+    or on the digitizer link, which also go to Run errors.
+  </div>
+</div>
+
 <div class="box" id="b_azioni" style="margin-top:12px"><h2>Recent actions<span class="riass"></span></h2><div id="azioni" class="az"></div></div>
 <p style="color:#6b6a65;font-size:12px">Plots and DQM are in the monitor, linked at the top of this page.</p>
 
@@ -2486,6 +2784,86 @@ $("ferma").onclick = () => azione("ferma",
   "Stop the running acquisition?\n\nThe DAQ closes the file and resets the board: " +
   "nothing already acquired is lost.");
 
+// --- notifiche ---------------------------------------------------------------
+const NOMI_NOT = {riepilogo: "Daily summary", errori: "Run error", hw: "Hardware", prova: "Test"};
+const escH = t => String(t).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let notDisegnata = "", notImpostata = false;
+
+async function notAzione(par, conferma){
+  if(conferma && !confirm(conferma)) return;
+  try{
+    const q = new URLSearchParams(Object.assign({chi: $("chi").value, token: TOKEN}, par));
+    const d = await (await fetch("/api/notifiche?" + q, {method: "POST"})).json();
+    msg(d.messaggio, d.esito);
+    return d.esito;
+  }catch(e){ msg("Request failed: " + e, false); }
+  finally{ aggiorna(); }
+}
+
+function disegnaNotifiche(n){
+  const u = n.ultima;
+  const st = $("n_stato");
+  if(!u){ st.className = "alim spento"; st.textContent = "NO MAIL SENT YET"; $("n_statod").textContent = ""; }
+  else if(u.esito === "ok"){
+    st.className = "alim bene"; st.textContent = "MAIL OK";
+    $("n_statod").textContent = "last delivered " + u.quando.slice(5, 16) + ": " + u.oggetto;
+  } else {
+    st.className = "alim male"; st.textContent = "LAST MAIL NOT DELIVERED";
+    $("n_statod").textContent = u.quando.slice(5, 16) + " — " + (u.dettaglio || "");
+  }
+  riass("b_notifiche", n.destinatari.length + " recipients · summary at " + n.ora_riepilogo);
+
+  const firma = JSON.stringify(n.destinatari);
+  if(firma !== notDisegnata){
+    notDisegnata = firma;
+    $("n_dest").innerHTML = n.destinatari.map((d, i) =>
+      `<tr><td>${escH(d.indirizzo)}</td>` +
+      ["riepilogo", "errori", "hw"].map(t =>
+        `<td style="text-align:center"><input type="checkbox" data-i="${i}" data-t="${t}" ${d[t] ? "checked" : ""}></td>`
+      ).join("") +
+      `<td><button class="nb" data-rm="${i}">remove</button></td></tr>`
+    ).join("") || `<tr><td colspan="5" style="color:#9a9a94">nobody yet</td></tr>`;
+    $("n_dest").querySelectorAll("input[data-t]").forEach(c => c.onchange = () =>
+      notAzione({azione: "imposta", indirizzo: n.destinatari[c.dataset.i].indirizzo,
+                 tipo: c.dataset.t, valore: c.checked ? "1" : "0"}));
+    $("n_dest").querySelectorAll("button[data-rm]").forEach(b => b.onclick = () => {
+      const a = n.destinatari[b.dataset.rm].indirizzo;
+      notAzione({azione: "rimuovi", indirizzo: a}, "Remove " + a + " from the notifications?");
+    });
+  }
+  if(!notImpostata){
+    notImpostata = true;
+    $("n_ora").value = n.ora_riepilogo;
+    $("n_salta").checked = n.salta_vuoti;
+    $("n_ripeti").value = n.ripeti_hw_min;
+  }
+  const esiti = {ok: v => `<span style="color:#15603a">sent to ${v.consegnate}</span>`,
+                 ko: v => `<span style="color:#8a2a18" title="${escH(v.dettaglio || "")}">not delivered</span>`,
+                 trattenuta: v => `<span style="color:#9a9a94">held back (${escH(v.dettaglio)})</span>`,
+                 nessuno: v => `<span style="color:#9a9a94">not sent: ${escH(v.dettaglio)}</span>`};
+  $("n_storico").innerHTML = n.storico.slice().reverse().map(v =>
+    `${escH(v.quando.slice(5, 16))} &middot; ${NOMI_NOT[v.tipo] || v.tipo} &middot; ` +
+    `${escH(v.oggetto)} &rarr; ${(esiti[v.esito] || (() => escH(v.esito)))(v)}`
+  ).join("<br>") || "none yet";
+}
+
+$("n_agg").onclick = async () => {
+  const ok = await notAzione({azione: "aggiungi", indirizzo: $("n_nuovo").value,
+                              riepilogo: $("n_nriep").checked ? "1" : "0",
+                              errori: $("n_nerr").checked ? "1" : "0",
+                              hw: $("n_nhw").checked ? "1" : "0"});
+  if(ok) $("n_nuovo").value = "";
+};
+$("n_salva").onclick = async () => {
+  await notAzione({azione: "impostazioni", ora: $("n_ora").value,
+                   salta: $("n_salta").checked ? "1" : "0", ripeti: $("n_ripeti").value});
+  notImpostata = false;
+};
+$("n_prova").onclick = () => notAzione({azione: "prova"},
+  "Send a test mail to everybody in the list?");
+$("n_riep").onclick = () => notAzione({azione: "riepilogo"},
+  "Send today's summary now to the daily-summary recipients?");
+
 async function aggiorna(){
   let s;
   try{ s = await (await fetch("/api/stato?token=" + TOKEN)).json(); }
@@ -2582,6 +2960,7 @@ async function aggiorna(){
   $("azioni").innerHTML = (s.azioni || []).slice().reverse().map(a =>
     `${a.quando} &middot; <b>${a.chi}</b> from ${a.da}: ${a.azione} &rarr; ${a.esito}`
   ).join("<br>") || "no actions recorded";
+  if(s.notifiche) disegnaNotifiche(s.notifiche);
 }
 
 // --- configurazione -------------------------------------------------------
@@ -3625,6 +4004,40 @@ def crea_handler(ctrl, token):
                 esito, messaggio = ctrl.soglie_a_caldo(qs.get("offsets", [""])[0])
                 registra(chi, da, "soglie a caldo", messaggio)
 
+            elif parti.path == "/api/notifiche":
+                n = ctrl.notifiche
+                azione = qs.get("azione", [""])[0]
+                indirizzo = qs.get("indirizzo", [""])[0].strip()
+                if azione == "aggiungi":
+                    tipi = [t for t in notifiche.TIPI if qs.get(t, ["1"])[0] == "1"]
+                    esito, messaggio = n.aggiungi(indirizzo, tipi)
+                elif azione == "rimuovi":
+                    esito, messaggio = n.rimuovi(indirizzo)
+                elif azione == "imposta":
+                    esito, messaggio = n.imposta(indirizzo, qs.get("tipo", [""])[0],
+                                                 qs.get("valore", ["0"])[0] == "1")
+                elif azione == "impostazioni":
+                    try:
+                        ripeti = int(qs.get("ripeti", ["0"])[0])
+                    except ValueError:
+                        ripeti = 0
+                    esito, messaggio = n.impostazioni(qs.get("ora", [""])[0].strip(),
+                                                      qs.get("salta", ["1"])[0] == "1", ripeti)
+                elif azione == "prova":
+                    esito, messaggio = n.prova(indirizzo or None)
+                elif azione == "riepilogo":
+                    # Il riepilogo di oggi, subito, a chi lo riceve: per vedere
+                    # com'e' fatto senza aspettare sera.
+                    if not n.destinatari(("riepilogo",)):
+                        esito, messaggio = False, "Nobody receives the daily summary."
+                    else:
+                        k = n.riepilogo()
+                        esito, messaggio = True, ("Today's summary (%d runs) queued for %s."
+                                                  % (k, ", ".join(n.destinatari(("riepilogo",)))))
+                else:
+                    return self._manda(404, "text/plain", b"not found")
+                registra(chi, da, "notifiche/" + azione, messaggio)
+
             else:
                 return self._manda(404, "text/plain", b"not found")
 
@@ -3663,6 +4076,10 @@ def main():
     ap.add_argument("--psu-ampli-host", default=AMPLI_HOST,
                     help="alimentatore della scheda di amplificazione "
                          "(CPX400SP); vuoto per non usarlo")
+    ap.add_argument("--notifiche", default=os.path.join(ROOT, "data", "notifiche.json"),
+                    help="lista delle persone e impostazioni delle mail: una prova "
+                         "su un'altra porta deve usarne una sua, se no manda le "
+                         "mail vere a tutta la lista")
     ap.add_argument("--psu-log", default=PSU_LOG,
                     help="CSV delle letture: una prova su un'altra porta deve "
                          "scriverne uno suo, non mescolarsi a quello vero")
@@ -3675,7 +4092,7 @@ def main():
         args_mon += ["-p", str(args.monitor_port)]
     PSU_LOG = args.psu_log
     ctrl = Controllo(args.config, args.log, args.monitor_port, args_mon,
-                     args.psu_host, args.psu_ampli_host)
+                     args.psu_host, args.psu_ampli_host, args.notifiche, args.port)
     stampa = lambda s: print(s, flush=True)
     stampa("Configurazione : %s" % ctrl.toml)
     stampa("Binario        : %s%s" % (BINARIO, "" if os.path.exists(BINARIO) else "   NON ESISTE"))
@@ -3684,6 +4101,8 @@ def main():
                                     if args.psu_host else "nessuno"))
     stampa("Ampli (CPX)    : %s" % ("%s, letture in %s" % (args.psu_ampli_host, AMPLI_LOG)
                                     if args.psu_ampli_host else "nessuno"))
+    stampa("Notifiche      : %s (%d destinatari)" % (args.notifiche,
+                                                      len(ctrl.notifiche.cfg["destinatari"])))
     if args.token:
         stampa("Token          : attivo")
     pid = trova_daq()

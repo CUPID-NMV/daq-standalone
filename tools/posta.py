@@ -85,8 +85,13 @@ def _un_tentativo(m, destinatari):
                     s.quit()
                 except smtplib.SMTPException:
                     pass
-            temp = {a: r for a, r in rifiuti.items() if 400 <= r[0] < 500}
-            defi = {a: r for a, r in rifiuti.items() if r[0] >= 500}
+            # "Relay access denied" arriva con 454, un codice da rifiuto
+            # temporaneo, ma non cambiera' mai: riprovare un quarto d'ora un
+            # indirizzo fuori da LNF sarebbe solo tempo perso (2026-10-14).
+            definitivo = lambda r: r[0] >= 500 or b"relay access denied" in (
+                r[1] if isinstance(r[1], bytes) else str(r[1]).encode()).lower()
+            temp = {a: r for a, r in rifiuti.items() if 400 <= r[0] < 500 and not definitivo(r)}
+            defi = {a: r for a, r in rifiuti.items() if definitivo(r)}
             ok = [a for a in destinatari if a not in rifiuti]
             return ok, temp, defi, ""
         except (OSError, smtplib.SMTPException) as e:

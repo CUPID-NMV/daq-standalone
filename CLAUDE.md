@@ -347,14 +347,19 @@ per tipo, gestita dal riquadro *Notifications* della pagina e salvata in
 giornata col grafico del rate, all'ora scelta; le **run finite male**; i
 guasti dell'**hardware**.
 
-- **Si raggiungono solo indirizzi @lnf.infn.it.** Dalla rete 192.168.99.x le
-  porte di invio di `smtp.lnf.infn.it` (25/587/465) sono chiuse, e anche
-  Gmail. La posta esce dai server di posta in ingresso dei Laboratori,
-  `pmg1`/`pmg2` porta 25, senza autenticazione, che consegnano solo alle
-  caselle LNF ("Relay access denied" per il resto). Aprire la 587 da questa
-  rete non e' possibile (detto dall'utente il 2026-10-14): gli indirizzi
-  esterni restano fuori, e la pagina li rifiuta spiegando perche'.
-- **Greylisting**: il primo invio a una coppia mittente/destinatario nuova
+- **Due strade, scelte da `tools/posta.py` da solo.** Con le credenziali in
+  `~/.config/daq-notify/smtp.json` sul PC DAQ (permessi 600, se no le
+  ignora), il server di invio `smtp.lnf.infn.it`, porta 587, STARTTLS e
+  login: qualunque indirizzo. Senza, i server di posta in ingresso
+  `pmg1`/`pmg2`, porta 25, senza login: solo caselle @lnf.infn.it ("Relay
+  access denied" per il resto, con un 454 che sembra temporaneo e non lo e').
+  La pagina dice in cima al riquadro quale strada e' in uso.
+- **Le porte si provano parlando SMTP, non contando byte.** Il 2026-10-14 ho
+  dato `smtp.lnf.infn.it` per chiuso dal PC DAQ: la prova aspettava 120 byte
+  di benvenuto e il server ne manda una cinquantina, quindi scadeva il
+  timeout su una porta aperta. Da li' sono venuti per un'ora un limite "solo
+  LNF" che non esisteva e una richiesta al Servizio Calcolo inutile.
+- **Greylisting** (solo pmg1/pmg2): il primo invio a una coppia mittente/destinatario nuova
   prende "450 try later" e passa dopo ~5 minuti. `posta.invia` riprova da sola
   per un quarto d'ora. Una volta accettata, la posta arriva in pochi secondi.
 - **Una run finita male si riconosce dal log, non dal codice di uscita.** Se

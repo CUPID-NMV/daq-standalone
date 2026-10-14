@@ -4,21 +4,29 @@ Spedizione delle mail della DAQ: riepilogo giornaliero, errori, allarmi.
 
     python3 tools/posta.py --prova luigi.benussi@lnf.infn.it
 
-Dalla rete del PC DAQ (192.168.99.x) le porte di invio dei Laboratori
-(smtp.lnf.infn.it 25/587/465) sono chiuse, verificato il 2026-10-14. Restano
-aperti i server di posta IN INGRESSO, pmg1 e pmg2, sulla porta 25 e senza
-autenticazione: consegnano a qualunque casella @lnf.infn.it e rifiutano tutto
-il resto ("Relay access denied"). Quindi oggi si scrive solo a indirizzi LNF.
-Se un giorno il Servizio Calcolo apre la 587, basta cambiare SERVER e
-aggiungere il login: il resto non cambia.
+Due strade, e si sceglie da sola:
 
-I due server fanno greylisting: la prima volta che vedono una coppia
+- CON le credenziali in ~/.config/daq-notify/smtp.json (permessi 600): il
+  server di invio dei Laboratori, smtp.lnf.infn.it porta 587, STARTTLS e
+  login. Si scrive a qualunque indirizzo.
+- SENZA: i server di posta IN INGRESSO, pmg1 e pmg2, porta 25, senza login.
+  Consegnano solo a caselle @lnf.infn.it ("Relay access denied" per il resto).
+
+Tutte e due le porte sono aperte dal PC DAQ, verificato il 2026-10-14. Una
+prima prova aveva dato smtp.lnf.infn.it per chiuso: aspettava 120 byte di
+benvenuto e il server ne manda una cinquantina, quindi andava in timeout su
+una porta aperta. Per sapere se una porta risponde si parla SMTP (smtplib),
+non si contano byte.
+
+pmg1 e pmg2 fanno greylisting: la prima volta che vedono una coppia
 mittente/destinatario rispondono 450 "try later" e accettano solo chi riprova
 qualche minuto dopo. Per questo `invia` RIPROVA da sola sui rifiuti temporanei
 invece di dichiarare fallito l'invio -- un allarme perso perche' il server ha
 detto "riprova" sarebbe il peggiore dei guasti, perche' non lo vede nessuno.
 """
 import argparse
+import json
+import os
 import smtplib
 import socket
 import time
@@ -30,6 +38,45 @@ PORTA = 25
 MITTENTE = "DAQ V1742 <daq@lnf.infn.it>"
 DOMINI_RAGGIUNGIBILI = ("lnf.infn.it",)
 
+SERVER_AUT = ("smtp.lnf.infn.it", 587)
+# Fuori dal repo e con permessi 600, come la chiave dell'e-log: in un repo ci
+# finirebbe dentro al primo "git add -A". Contiene una password personale.
+CREDENZIALI = os.path.expanduser("~/.config/daq-notify/smtp.json")
+
+
+def credenziali():
+    """{"utente", "password", "mittente"} se il file c'e' ed e' privato, se no None.
+
+    Un file leggibile da altri non si usa: su una macchina condivisa vorrebbe
+    dire una password personale alla portata di chiunque abbia un account.
+    """
+    try:
+        if os.stat(CREDENZIALI).st_mode & 0o077:
+            return None
+        with open(CREDENZIALI) as f:
+            c = json.load(f)
+        return c if c.get("utente") and c.get("password") else None
+    except (OSError, ValueError):
+        return None
+
+
+def via():
+    """Una riga per la pagina: da dove esce la posta, e verso chi."""
+    c = credenziali()
+    if c:
+        return "via %s as %s: any address" % (SERVER_AUT[0], c["utente"])
+    if os.path.exists(CREDENZIALI):
+        return ("credentials file ignored (readable by others: chmod 600 it); "
+                "via pmg1/pmg2: @lnf.infn.it only")
+    return "via pmg1/pmg2 without login: @lnf.infn.it addresses only"
+
+
+def mittente():
+    c = credenziali()
+    # Con il login il server vuole come mittente la casella di chi si e'
+    # autenticato; il nome resta quello della DAQ.
+    return "DAQ V1742 <%s>" % c.get("mittente", c["utente"]) if c else MITTENTE
+
 # Il greylisting accetta dopo ~5 minuti (misurato: rifiuto alle 15:20, accettato
 # alle 15:26). Si riprova per un quarto d'ora abbondante prima di arrendersi.
 ATTESE_S = (60, 120, 240, 480)
@@ -37,6 +84,8 @@ ATTESE_S = (60, 120, 240, 480)
 
 def raggiungibile(indirizzo):
     """Vero se l'indirizzo e' in un dominio a cui i server sanno consegnare."""
+    if credenziali():
+        return True
     dominio = indirizzo.rsplit("@", 1)[-1].lower()
     return any(dominio == d or dominio.endswith("." + d)
                for d in DOMINI_RAGGIUNGIBILI)
@@ -49,7 +98,7 @@ def componi(oggetto, testo, destinatari, html=None, immagini=(), rispondi_a=None
     un grafico che va scaricato per vederlo non lo guarda nessuno.
     """
     m = EmailMessage()
-    m["From"] = MITTENTE
+    m["From"] = mittente()
     m["To"] = ", ".join(destinatari)
     if rispondi_a:
         m["Reply-To"] = rispondi_a
@@ -69,13 +118,23 @@ def componi(oggetto, testo, destinatari, html=None, immagini=(), rispondi_a=None
 def _un_tentativo(m, destinatari):
     """Prova i server in fila. Ritorna (consegnati, rifiutati_temp, rifiutati_def, ultimo_errore)."""
     ultimo = ""
-    for host in SERVER:
+    c = credenziali()
+    for host, porta in ([SERVER_AUT] if c else [(h, PORTA) for h in SERVER]):
         try:
-            s = smtplib.SMTP(host, PORTA, timeout=30)
+            s = smtplib.SMTP(host, porta, timeout=30)
             s.ehlo()
             if s.has_extn("starttls"):
                 s.starttls()
                 s.ehlo()
+            if c:
+                # Un login rifiutato e' definitivo: riprovare con la stessa
+                # password puo' solo far bloccare l'account.
+                try:
+                    s.login(c["utente"], c["password"])
+                except smtplib.SMTPAuthenticationError as e:
+                    s.quit()
+                    return [], {}, {a: (535, "login refused for %s: %s" % (c["utente"], e))
+                                    for a in destinatari}, ""
             try:
                 rifiuti = s.send_message(m, to_addrs=destinatari)
             except smtplib.SMTPRecipientsRefused as e:
@@ -107,7 +166,7 @@ def invia(m, destinatari, attese=ATTESE_S, log=print):
     chi non puo' aspettare (il controllore) la chiama in un thread.
     """
     da_fare = [a for a in destinatari if raggiungibile(a)]
-    falliti = {a: "dominio non raggiungibile da questa rete (solo @lnf.infn.it)"
+    falliti = {a: "fuori da LNF: senza credenziali si raggiungono solo indirizzi @lnf.infn.it"
                for a in destinatari if not raggiungibile(a)}
     consegnati = []
     for k in range(len(attese) + 1):

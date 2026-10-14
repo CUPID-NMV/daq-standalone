@@ -93,9 +93,9 @@ class Notifiche:
         if not RE_INDIRIZZO.match(indirizzo):
             return False, "'%s' is not a mail address." % indirizzo
         if not posta.raggiungibile(indirizzo):
-            return False, ("Only @lnf.infn.it addresses can be reached from the DAQ network: "
-                           "the LNF outgoing server is closed from here, and the incoming "
-                           "servers deliver only to LNF mailboxes.")
+            return False, ("Without SMTP credentials on the DAQ PC only @lnf.infn.it addresses "
+                           "can be reached: the LNF incoming servers deliver only to LNF "
+                           "mailboxes. See the ? of this panel.")
         with self.lock:
             if any(d["indirizzo"].lower() == indirizzo.lower() for d in self.cfg["destinatari"]):
                 return False, "%s is already in the list." % indirizzo
@@ -172,7 +172,8 @@ class Notifiche:
                 "ora_riepilogo": self.cfg["ora_riepilogo"],
                 "salta_vuoti": self.cfg["salta_vuoti"],
                 "ripeti_hw_min": self.cfg["ripeti_hw_min"],
-                "storico": st, "ultima": tentate[-1] if tentate else None}
+                "storico": st, "ultima": tentate[-1] if tentate else None,
+                "via": posta.via()}
 
     # -- invio ---------------------------------------------------------------
     def manda(self, tipi, oggetto, testo, html=None, immagini=(), chiave=None, a=None):

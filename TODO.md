@@ -239,6 +239,3 @@ Riavviare il monitor NON tocca la presa dati: si fa da *Stop monitor* /
    l'HDF5 non registra l'istante di ogni evento. Scrivere il trigger time tag
    del V1742 per evento darebbe una curva continua -- e servirebbe anche
    all'analisi.
-4. **Indirizzi fuori da LNF**: chiedere al Servizio Calcolo di aprire la
-   porta 587 di smtp.lnf.infn.it dalla rete 192.168.99.x. Da decidere
-   dall'utente.

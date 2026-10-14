@@ -351,9 +351,9 @@ guasti dell'**hardware**.
   porte di invio di `smtp.lnf.infn.it` (25/587/465) sono chiuse, e anche
   Gmail. La posta esce dai server di posta in ingresso dei Laboratori,
   `pmg1`/`pmg2` porta 25, senza autenticazione, che consegnano solo alle
-  caselle LNF ("Relay access denied" per il resto). Per scrivere fuori serve
-  che il Servizio Calcolo apra la 587: allora si cambia `SERVER` in
-  `tools/posta.py` e si aggiunge il login, nient'altro.
+  caselle LNF ("Relay access denied" per il resto). Aprire la 587 da questa
+  rete non e' possibile (detto dall'utente il 2026-10-14): gli indirizzi
+  esterni restano fuori, e la pagina li rifiuta spiegando perche'.
 - **Greylisting**: il primo invio a una coppia mittente/destinatario nuova
   prende "450 try later" e passa dopo ~5 minuti. `posta.invia` riprova da sola
   per un quarto d'ora. Una volta accettata, la posta arriva in pochi secondi.

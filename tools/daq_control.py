@@ -82,6 +82,14 @@ GRAFICI = os.path.join(ROOT, "plots")
 # una coda che non c'e'.
 CODA = os.path.join(ROOT, "data", "coda.json")
 
+# Il rate nel tempo, per il riepilogo di fine giornata: ogni RATE_PASSO_S
+# secondi quanti eventi ha la run in corso. Lo tiene il controllore e non il
+# monitor, che la stessa curva la disegna ma la tiene in memoria: la perde
+# quando lo si ferma, e di una giornata in cui non e' stato acceso non sa
+# niente. Il nome deve restare questo: lo legge tools/riepilogo_giorno.py.
+RATE_LOG = os.path.join(ROOT, "data", "rate-log.csv")
+RATE_PASSO_S = 15.0
+
 # E-log su Google: si versa da soli alla fine di ogni run. La chiave di
 # servizio sta FUORI dal repo, con permessi 600 -- in un repo ci finirebbe
 # dentro al primo "git add -A".
@@ -1419,6 +1427,10 @@ class Controllo:
                 vivo = pid is not None
                 if vivo:
                     self._segui_run(pid)
+                    try:
+                        self._campiona_rate()
+                    except Exception:
+                        pass
                 if self._daq_prima and not vivo:
                     self._versa_elog()
                     info, self._run_viva = self._run_viva, None
@@ -1461,6 +1473,51 @@ class Controllo:
                 pass
             if info["log"] and os.sep + "scan" + os.sep in info["log"]:
                 info["scan"] = True
+
+    def _campiona_rate(self):
+        """Annota quanti eventi ha la run in corso, ogni RATE_PASSO_S secondi.
+
+        Dal file HDF5, letto in SWMR mentre la DAQ scrive: vale per qualunque
+        run, chiunque l'abbia lanciata. Se il file non si apre -- una run con
+        LiveMonitoring = false -- dal contatore che la DAQ stampa sulla sua
+        uscita, quando quella e' un file.
+        """
+        info = self._run_viva
+        adesso = time.time()
+        if not info or not info["log"] or adesso - info.get("campione", 0) < RATE_PASSO_S:
+            return
+        info["campione"] = adesso
+        eventi = None
+        h5 = os.path.splitext(info["log"])[0] + ".h5"
+        if os.path.exists(h5):
+            try:
+                import daqio
+                eventi = daqio.count_events(h5, live=True)
+            except Exception:
+                eventi = None
+        if eventi is None and info["console"]:
+            try:
+                with open(info["console"], "rb") as f:
+                    f.seek(0, os.SEEK_END)
+                    f.seek(max(0, f.tell() - 4000))
+                    coda = f.read().decode("utf-8", "replace")
+                m = re.findall(r"Events decoded:\s*(\d+)", coda)
+                eventi = int(m[-1]) if m else None
+            except OSError:
+                pass
+        if eventi is None:
+            return
+        try:
+            nuovo = not os.path.exists(RATE_LOG)
+            with open(RATE_LOG, "a") as f:
+                if nuovo:
+                    f.write("unix_time,ora,run,eventi,scan\n")
+                f.write("%.1f,%s,%s,%d,%d\n" % (
+                    adesso, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(adesso)),
+                    os.path.splitext(os.path.basename(info["log"]))[0], eventi,
+                    1 if info["scan"] else 0))
+        except OSError:
+            pass
 
     def _cartelle_dati(self):
         """Dove cercare le run del giorno: data/ e l'OutputDir di adesso."""

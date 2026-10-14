@@ -8,10 +8,11 @@ Il riepilogo di fine giornata: le run prese, gli eventi, il rate.
 Legge i .log delle run come fa l'e-log (tools/elog.py), non gli HDF5: sono gli
 stessi numeri e si leggono in un istante.
 
-Il grafico del rate ha UN segmento per run, all'altezza del suo rate medio.
-Dentro una run non si vede come varia, e non per scelta: il file HDF5 non
-registra l'istante di ogni evento, e il log ne dichiara solo il totale e la
-durata. Per una curva continua serve che la DAQ scriva il tempo dell'evento.
+Il grafico del rate ha due strati. La CURVA viene da data/rate-log.csv, dove
+il controllore annota ogni 15 s quanti eventi ha la run in corso: c'e' solo
+per le run prese da quando esiste quel registro (2026-10-14) e a controllore
+acceso. Sotto, un SEGMENTO per run all'altezza del rate medio dichiarato dal
+suo log: c'e' sempre, ed e' l'unica cosa che si vede delle run senza curva.
 """
 import argparse
 import html
@@ -71,15 +72,66 @@ def _inizio_h(r):
     return h + m / 60 + s / 3600
 
 
-def grafico_rate(righe, giorno):
-    """PNG del rate medio di ogni run sull'asse delle ore del giorno."""
+def leggi_rate(giorno, path=None):
+    """{run: [(ora_del_giorno_h, rate_hz), ...]} dal registro del controllore.
+
+    Il rate si ricava dalla differenza di CONTEGGI fra bordi di intervallo
+    interpolati, come fa il monitor, e non mediando i rate fra campioni
+    consecutivi: cosi' un campione saltato pesa per il tempo che copre. Le
+    run degli scan restano fuori, come dal resto del riepilogo.
+    """
+    import numpy as np
+    path = path or os.path.join(ROOT, "data", "rate-log.csv")
+    campioni = {}
+    try:
+        with open(path) as f:
+            for riga in f:
+                c = riga.rstrip("\n").split(",")
+                if len(c) < 5 or not c[1].startswith(giorno) or c[4] == "1":
+                    continue
+                try:
+                    campioni.setdefault(c[2], []).append((float(c[0]), int(c[3])))
+                except ValueError:
+                    continue
+    except OSError:
+        return {}
+    curve = {}
+    for run, v in campioni.items():
+        v.sort()
+        t = np.array([x[0] for x in v])
+        n = np.array([x[1] for x in v], dtype=float)
+        if len(t) < 3 or t[-1] - t[0] < 60:
+            continue
+        # Intervalli da ~2 minuti: su una giornata di 24 h fanno 700 punti al
+        # piu', che e' gia' piu' di quanto un grafico largo 8 pollici mostri.
+        larg = 120.0 if t[-1] - t[0] > 600 else 30.0
+        bordi = np.arange(t[0], t[-1] + 1e-6, larg)
+        if len(bordi) < 2:
+            continue
+        cont = np.interp(bordi, t, n)
+        rate = np.diff(cont) / np.diff(bordi)
+        centri = (bordi[:-1] + bordi[1:]) / 2
+        mezzanotte = time.mktime(time.strptime(giorno, "%Y-%m-%d"))
+        curve[run] = [((x - mezzanotte) / 3600, r) for x, r in zip(centri, rate)]
+    return curve
+
+
+def grafico_rate(righe, giorno, curve=None):
+    """PNG del rate sull'asse delle ore del giorno: curva se c'e', media per run sempre."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import matplotlib.ticker  # noqa: F401
 
+    curve = curve or {}
     fig, ax = plt.subplots(figsize=(8.0, 3.0), dpi=110)
     alto = 0.0
+    for run, punti in curve.items():
+        chiusa = next((r["chiusa"] for r in righe if r["run"] == run), "si")
+        x = [p[0] for p in punti]
+        y = [p[1] for p in punti]
+        alto = max(alto, max(y))
+        ax.plot(x, y, "-", lw=1.2, color="#15603a" if chiusa != "NO" else "#a8321f")
     for r in righe:
         x0 = _inizio_h(r)
         x1 = x0 + _secondi(r) / 3600
@@ -92,7 +144,11 @@ def grafico_rate(righe, giorno):
         rate = float(r["rate_hz"])
         alto = max(alto, rate)
         colore = "#15603a" if r["chiusa"] == "si" else "#a8321f"
-        if x1 - x0 < 0.08:
+        if r["run"] in curve:
+            # La curva c'e': la media resta come riferimento, grigia e sotto.
+            ax.plot([x0, x1], [rate, rate], lw=5, color="#d5d5d0", zorder=0,
+                    solid_capstyle="butt")
+        elif x1 - x0 < 0.08:
             # Sotto i cinque minuti il segmento sarebbe un trattino largo un
             # pixel: un punto si vede, e dice lo stesso.
             ax.plot([(x0 + x1) / 2], [rate], "o", ms=3.5, color=colore)
@@ -109,9 +165,10 @@ def grafico_rate(righe, giorno):
     # Lo zero sempre sull'asse: un rate dimezzato e uno intatto devono essere
     # due immagini diverse, e con l'autoscala sui soli punti non lo sono.
     ax.set_ylim(0, alto * 1.25 if alto > 0 else 1)
-    if righe:
-        a = min(_inizio_h(r) for r in righe)
-        b = max(_inizio_h(r) + _secondi(r) / 3600 for r in righe)
+    estremi = ([_inizio_h(r) for r in righe] + [_inizio_h(r) + _secondi(r) / 3600 for r in righe]
+               + [p[0] for punti in curve.values() for p in punti])
+    if estremi:
+        a, b = min(estremi), max(estremi)
         ax.set_xlim(max(0, int(a) - 0.25), min(24, int(b) + 1.25))
     else:
         ax.set_xlim(0, 24)
@@ -120,8 +177,11 @@ def grafico_rate(righe, giorno):
     ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
         lambda v, _: "%02d:00" % int(round(v))))
     ax.set_xlabel("time of day")
-    ax.set_ylabel("mean rate per run [Hz]")
+    ax.set_ylabel("rate [Hz]")
     ax.set_title("DAQ rate, %s  (green: closed cleanly, red: not)" % giorno, fontsize=10)
+    ax.text(0.995, 0.97, ("line: event count every 15 s, 2-min bins; grey band: mean of the run"
+                          if curve else "mean rate of each run (no 15-s record for this day)"),
+            transform=ax.transAxes, ha="right", va="top", fontsize=7, color="#6b6a65")
     ax.grid(alpha=.3)
     fig.tight_layout()
     buf = io.BytesIO()
@@ -204,7 +264,7 @@ def componi_riepilogo(cartelle_dati, giorno):
         "".join('<td %s><b>%s</b></td>' % (td, h) for h in intest),
         righe_html, html.escape(totale), "<br>".join(html.escape(n) for n in note))
 
-    return oggetto, testo, html_, grafico_rate(righe, giorno), len(righe)
+    return oggetto, testo, html_, grafico_rate(righe, giorno, leggi_rate(giorno)), len(righe)
 
 
 def main():

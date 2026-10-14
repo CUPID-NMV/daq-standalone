@@ -23,6 +23,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import daqio
+import calibrazione
 
 import matplotlib
 matplotlib.use("Agg")
@@ -215,9 +216,35 @@ def leggi(path, mv_per_offset_forzato):
             _canali(d.get("canali")), leggibile(tag))
         return "v1742", dist, y, lim, nota, d, "offset"
 
-    nota = "V1742 self-trigger   %s   (%.1f mV/offset at %s)" % (
+    # %.3f, non %.1f: con %.1f il fattore 0.246 si leggeva "0.2 mV/offset",
+    # che e' proprio il valore stimato a occhio da cui questo lavoro e'
+    # partito. Un arrotondamento che riproduce un numero sbagliato noto e'
+    # peggio di nessun numero.
+    nota = "V1742 self-trigger   %s   (%.3f mV/offset at %s)" % (
         _canali(d.get("canali")), k, leggibile(tag))
     return "v1742", dist * k, y, lim, nota, d, "mV"
+
+
+def _assunto(k, tutte):
+    """True se k non e' nessuno dei valori misurati per questi scan.
+
+    Si confronta con tutti e due i punti di riferimento -- ingresso del
+    digitizer e ingresso del CFD -- perche' sovrapponendo uno scan del V812
+    quello giusto e' il secondo, e marcarlo ASSUMED insegnerebbe a ignorare
+    l'avvertimento proprio quando e' corretto.
+    """
+    for t in tutte:
+        d = t[5]
+        if d.get("tipo") == "v812":
+            continue
+        tag = next((x for x in TAG_FREQUENZA if x in str(d.get("file", ""))), None)
+        v, _ = calibrazione.scegli(tag, d.get("larghezza_fwhm_ns"))
+        if v is None:
+            continue
+        for atteso in (v, calibrazione.al_cfd(v)):
+            if atteso and abs(k - atteso) <= 0.005 * max(atteso, 1e-9) + 1e-4:
+                return False
+    return True
 
 
 def main():
@@ -380,9 +407,7 @@ def main():
         dove = ("the CFD input" if any(t[0] == "v812" for t in tutte)
                 else "the digitizer input")
         if args.mv_per_offset:
-            misurata = (MV_PER_OFFSET.get(frequenza(tutte[0][5].get("file", "")))
-                        if tutte else None)
-            come = "measured" if misurata == args.mv_per_offset else "ASSUMED"
+            come = "ASSUMED" if _assunto(args.mv_per_offset, tutte) else "measured"
             ax.set_xlabel("threshold  [mV at %s]"
                           "      (%.3f mV per offset unit, %s)"
                           % (dove, args.mv_per_offset, come))

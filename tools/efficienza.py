@@ -5,7 +5,16 @@ Stima rozza dell'efficienza di una run, canale per canale.
     python3 tools/efficienza.py data/test_52-0V_0162_750Ms_50PT.h5.gz
     python3 tools/efficienza.py FILE --sigma 5
 
-Per ogni canale:
+Per ogni canale, sulle forme d'onda FILTRATE con un passa-basso a 50 MHz
+(Butterworth del 4o ordine, avanti e indietro), lo stesso dell'analisi
+offline in tools/SiPM_Characterization_DC_Study.ipynb: toglie le righe di
+rumore a ~98 e ~188 MHz e non tocca l'impulso dei SiPM, che sta sotto ~30 MHz.
+Misurato il 2026-10-15 sulle run 0057-0066: sigma_ped vale 4.7, 4.1 e 12.6
+conteggi sulle tracce grezze di ch16-18, 1.5 su tutti e tre dopo il filtro.
+Il rumore di ch18 e' quasi tutto pick-up sopra i 50 MHz. Filtrare serve anche
+a parlare la stessa lingua dell'analisi offline. Il comparatore del
+self-trigger invece vede il segnale NON filtrato: per il rumore che arriva al
+trigger conta la sigma grezza (--grezzo).
 
 1. il piedistallo di ogni evento e' la mediana dei campioni nella finestra
    10-180 ns, la stessa del monitor: prima dell'impulso, e non la mediana di
@@ -46,6 +55,7 @@ import re
 import sys
 
 import numpy as np
+from scipy.signal import butter, sosfiltfilt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import daqio   # noqa: E402
@@ -59,6 +69,11 @@ MARGINE_NS = 60.0
 MIN_CAMPIONI_PED = 20
 RICERCA_NS = 50.0          # semiampiezza della finestra di ricerca attorno all'impulso
 TAG_MV = 30.0              # soglia sugli ALTRI canali per eff_tag
+LP_MHZ = 50.0              # passa-basso: lo stesso del notebook DC_Study
+LP_ORDINE = 4
+# Il filtro lavora in float64: con 32 canali un blocco da 2000 eventi
+# sarebbero 500 MB. Il blocco si dimensiona sul numero di campioni.
+CAMPIONI_PER_BLOCCO = 3e7
 SIGMA_N = 4.0
 BLOCCO = 2000            # eventi letti per volta: 32 canali x 1024 campioni x 4 byte = 260 MB
 MV_PER_CONTEGGIO = 1000.0 / 4096
@@ -93,7 +108,7 @@ def sigma_robusta(x, k=3.5, giri=5):
     return max(float(s), 0.3)
 
 
-def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None):
+def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None, filtro=True):
     """{"run", "eventi", "sigma_n", "ped_ns", "canali": {ch: {...}}} per un file."""
     if segno is None:
         base = path[:-3] if path.endswith(".gz") else path
@@ -114,13 +129,19 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None):
         if totale == 0:
             raise daqio.DaqFileError("nessun evento")
         t = np.arange(ns) * dt
+        if filtro:
+            sos = butter(LP_ORDINE, LP_MHZ * 1e6, btype="low", fs=1e9 / dt, output="sos")
+            filtra = lambda x: sosfiltfilt(sos, x, axis=2)
+        else:
+            filtra = lambda x: x
+        blocco = int(max(100, min(BLOCCO, CAMPIONI_PER_BLOCCO // (nch * ns))))
 
         # Dove sta l'impulso. Con PostTriggerSize alto il self-trigger lo mette
         # presto: il 2026-10-13 a 70% cadeva a 115 ns, DENTRO 10-180, e la
         # stima dava efficienza 0 e pavimento 100%. Si misura con la mediana di
         # tutta la traccia, che non dipende dalla finestra: e' solo per sapere
         # DOVE, non per misurare il piedistallo.
-        prova = np.asarray(ds[0:min(totale, 1000)], dtype=np.float32).reshape(-1, nch, ns)
+        prova = filtra(np.asarray(ds[0:min(totale, 1000)], dtype=np.float32).reshape(-1, nch, ns))
         prova = prova - np.median(prova, axis=2)[:, :, None]
         if segno is None:
             su = np.median(prova.max(axis=2), axis=0)
@@ -162,9 +183,9 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None):
         sopra_fondo = np.zeros(nch, dtype=np.int64)
         n_tag = np.zeros(nch, dtype=np.int64)
         sopra_tag = np.zeros(nch, dtype=np.int64)
-        for a in range(0, totale, BLOCCO):
-            b = min(totale, a + BLOCCO)
-            x = np.asarray(ds[a:b], dtype=np.float32).reshape(b - a, nch, ns)
+        for a in range(0, totale, blocco):
+            b = min(totale, a + blocco)
+            x = filtra(np.asarray(ds[a:b], dtype=np.float32).reshape(b - a, nch, ns))
             ped = np.median(x[:, :, i0:i1], axis=2)
             corr = x - ped[:, :, None]
             del x
@@ -216,7 +237,10 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None):
             "picco_ns": round(picco_ns, 1),
             "ricerca_ns": [round(float(t[j0]), 1), round(float(t[j1 - 1]), 1)],
             "fondo_larghezza_ns": round(larg_fondo * dt, 1), "tag_mv": TAG_MV,
-            "polarita_da": fonte_segno, "canali": fuori}
+            "polarita_da": fonte_segno,
+            "filtro": ("passa-basso %g MHz, Butterworth ordine %d, avanti e indietro"
+                       % (LP_MHZ, LP_ORDINE)) if filtro else "nessuno",
+            "canali": fuori}
 
 
 def nome_run(path):
@@ -237,7 +261,8 @@ def stima_in_cache(path, **kw):
     """
     os.makedirs(CACHE, exist_ok=True)
     cache = os.path.join(CACHE, nome_run(path) + ".json")
-    chiave = {"versione": 3, "mtime": os.path.getmtime(path), "sigma_n": kw.get("sigma_n", SIGMA_N),
+    chiave = {"versione": 4, "mtime": os.path.getmtime(path), "sigma_n": kw.get("sigma_n", SIGMA_N),
+              "filtro": kw.get("filtro", True),
               "ped_ns": list(kw.get("ped_ns", PED_NS))}
     try:
         with open(cache) as f:
@@ -270,15 +295,16 @@ def main():
     ap.add_argument("file")
     ap.add_argument("--sigma", type=float, default=SIGMA_N, help="soglia in sigma_ped (4)")
     ap.add_argument("-n", "--max-eventi", type=int, default=None)
+    ap.add_argument("--grezzo", action="store_true", help="senza il passa-basso a 50 MHz")
     a = ap.parse_args()
-    r = stima(a.file, sigma_n=a.sigma, max_eventi=a.max_eventi)
+    r = stima(a.file, sigma_n=a.sigma, max_eventi=a.max_eventi, filtro=not a.grezzo)
     print("%s: %d eventi, soglia %.1f sigma_ped, polarita' dal %s"
           % (r["file"], r["eventi"], r["sigma_n"], r["polarita_da"]))
     print("impulso a %.0f ns, piedistallo in %.0f-%.0f ns%s"
           % (r["picco_ns"], r["ped_ns"][0], r["ped_ns"][1],
              "  (RISTRETTA: l'impulso cadeva nella finestra dichiarata)" if r["ped_ristretta"] else ""))
-    print("ricerca in %.0f-%.0f ns, fondo su %.0f ns di solo piedistallo"
-          % (r["ricerca_ns"][0], r["ricerca_ns"][1], r["fondo_larghezza_ns"]))
+    print("ricerca in %.0f-%.0f ns, fondo su %.0f ns di solo piedistallo; filtro: %s"
+          % (r["ricerca_ns"][0], r["ricerca_ns"][1], r["fondo_larghezza_ns"], r["filtro"]))
     print("%4s %4s %9s %17s %9s %8s %7s %18s" % ("ch", "pol", "sigma_ped", "soglia", "sopra", "eff",
                                                  "fondo", "eff_tag (n tag)"))
     for ch, c in r["canali"].items():

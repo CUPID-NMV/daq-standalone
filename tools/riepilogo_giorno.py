@@ -298,7 +298,8 @@ def componi_riepilogo(cartelle_dati, giorno):
     note.append("Generated on the DAQ PC at %s" % time.strftime("%Y-%m-%d %H:%M:%S %Z"))
     if any(r.get("eff") for r in righe):
         note.append("eff = fraction of recorded events in which the channel goes above %g sigma "
-                    "of its pedestal (pedestal from 10-180 ns, event by event), searching +-50 ns "
+                    "of its pedestal, on waveforms low-passed at 50 MHz as in the offline analysis "
+                    "(pedestal from 10-180 ns, event by event), searching +-50 ns "
                     "around the trigger time. A rough estimate: the dotted line in the plot is the "
                     "same count in a pedestal-only window, and the V1742 spurious spikes count as "
                     "pulses. Where the pulse falls inside 10-180 ns "

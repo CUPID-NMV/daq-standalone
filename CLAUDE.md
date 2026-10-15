@@ -397,27 +397,34 @@ guasti dell'**hardware**.
 ## La stima dell'efficienza nel riepilogo
 
 Una stima, non un'analisi: le analisi si fanno offline. `tools/efficienza.py`,
-per canale: eventi con l'impulso sopra 4 sigma_ped, cercato in +-50 ns
-attorno all'istante del trigger, diviso eventi totali. Misurato il
-2026-10-15 su run intere (SiPM su ch16-18, 52 V):
+per canale, sulle forme d'onda **filtrate a 50 MHz** (lo stesso passa-basso
+del notebook `SiPM_Characterization_DC_Study`): eventi con l'impulso sopra
+4 sigma_ped, cercato in +-50 ns attorno all'istante del trigger, diviso
+eventi totali. Misurato il 2026-10-15 su run intere (SiPM su ch16-18, 52 V):
 
 | | ch16 | ch17 | ch18 |
 |---|---|---|---|
-| 0057-0066, CFD in maggioranza 2 (cavo giusto) | 94.1% | 99.7% | 92.4% |
-| idem, sui soli eventi con gli altri due > 30 mV (`eff_tag`) | 93.5% | 99.6% | 91.8% |
-| 0158-0162, self-trigger OR a offset 300 | 88.2% | 84.3% | 78.9% |
-| idem, `eff_tag` | 92.5% | 99.3% | 89.2% |
+| sigma_ped grezza / filtrata [conteggi] | 4.7 / 1.5 | 4.1 / 1.5 | 12.6 / 1.5 |
+| 0062, CFD in maggioranza 2 (cavo giusto) | 94.5% | 99.7% | 93.8% |
+| idem, sui soli eventi con gli altri due > 30 mV (`eff_tag`) | 94.0% | 99.6% | 93.3% |
+| 0160, self-trigger OR a offset 300 | 88.5% | 85.7% | 82.0% |
+| idem, `eff_tag` | 92.7% | 99.5% | 91.4% |
 
+- **Sotto i 50 MHz i tre canali hanno lo stesso rumore**, 1.5 conteggi
+  (0.37 mV), confermato dall'analisi offline sulle 0057-0066 (1.51, 1.50,
+  1.56). Il resto e' pick-up sopra i 50 MHz (righe a ~98 e ~188 MHz): su ch18
+  e' quasi tutto il rumore. Il comparatore del self-trigger vede il segnale
+  NON filtrato, quindi per il rumore al trigger conta la sigma grezza.
 - **La frazione semplice dipende da com'e' fatto il trigger**: in OR entrano
   eventi con un canale solo, e gli altri due risultano "inefficienti". La
-  frazione sui tag (`eff_tag`) no, e le due serie concordano entro 1-2.5%.
+  frazione sui tag (`eff_tag`) no, e le due serie concordano entro 2%.
   Stabile entro lo 0.3% su cinque ore. Comprende la geometria: non e'
   l'efficienza intrinseca dei rivelatori.
 - **sigma_ped non con la MAD**: su campioni interi la MAD e' intera e
   sigma_ped saltava fra 2.97 e 4.45 conteggi da una run all'altra; con essa il
   "pavimento" estrapolato ballava fra 2% e 96%. Ora deviazione standard con
   esclusione a 3.5 sigma, e il fondo si MISURA in una finestra di solo
-  piedistallo larga quanto la ricerca: 0.0-0.9%.
+  piedistallo larga quanto la ricerca: 0.3-0.6%.
 - **Le run con l'impulso prima di 180 ns non sono stimabili** (0155-0156,
   self-trigger a PostTrigger 70%, impulso a 115 ns): la finestra del
   piedistallo si restringe, ma il fondo esce quanto l'efficienza (~79%).

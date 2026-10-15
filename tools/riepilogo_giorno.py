@@ -71,8 +71,10 @@ def _secondi(r):
 
 
 def _inizio_h(r):
+    """Ora di inizio in ore. `off_h` sposta le run del giorno dopo oltre le 24,
+    per le sequenze che passano la mezzanotte."""
     h, m, s = (int(x) for x in r["ora"].split(":"))
-    return h + m / 60 + s / 3600
+    return h + m / 60 + s / 3600 + r.get("off_h", 0)
 
 
 COLORI_CANALI = ("#2a78d6", "#d9822b", "#7a4fb3", "#15603a", "#a8321f",
@@ -273,6 +275,22 @@ def componi_riepilogo(cartelle_dati, giorno):
     oggetto = "[DAQ V1742] Daily summary %s — %d runs, %s events" % (
         giorno, len(righe), format(eventi, ",").replace(",", " "))
 
+    intest, tab = _tabella(righe)
+    totale = "Total: %d runs, %s events, %s of acquisition, %s" % (
+        len(righe), format(eventi, ",").replace(",", " "), _durata(secondi), _gb(byte))
+    note = []
+    if male:
+        note.append("Not closed cleanly: %d (%s)" % (len(male), ", ".join(r["run"] for r in male)))
+    if n_scan:
+        note.append("Threshold scan runs: %d (in data/scan/, not listed)" % n_scan)
+    note += _note_comuni(righe, disco)
+    titolo = "Runs started on %s (data/, scan runs excluded)" % giorno
+    testo, html_ = _impagina(titolo, "Runs started on <b>%s</b> (data/, scan runs excluded)" % giorno,
+                             intest, tab, totale, note)
+    return oggetto, testo, html_, grafico_rate(righe, giorno, leggi_rate(giorno)), len(righe)
+
+
+def _tabella(righe):
     intest = ("run", "start", "duration", "events", "rate", "HV", "closed", "eff (ch:%)")
     tab = []
     for r in righe:
@@ -282,17 +300,14 @@ def componi_riepilogo(cartelle_dati, giorno):
                     "%.0f Hz" % float(r["rate_hz"]) if r["rate_hz"] != "" else "—",
                     "%.1f V" % float(r["hv_v"]) if r["hv_v"] != "" else "—",
                     {"si": "yes", "NO": "NO"}.get(r["chiusa"], r["chiusa"]),
-                    (" ".join("%s:%.0f" % (ch, 100 * c["eff"]) for ch, c in r["eff"]["canali"].items())
+                    (" ".join("%s:%.1f" % (ch, 100 * c["eff"]) for ch, c in r["eff"]["canali"].items())
                      + (" (ped %.0f-%.0f ns)" % tuple(r["eff"]["ped_ns"]) if r["eff"].get("ped_ristretta") else ""))
                     if r.get("eff") else "—"))
+    return intest, tab
 
-    totale = "Total: %d runs, %s events, %s of acquisition, %s" % (
-        len(righe), format(eventi, ",").replace(",", " "), _durata(secondi), _gb(byte))
+
+def _note_comuni(righe, disco):
     note = []
-    if male:
-        note.append("Not closed cleanly: %d (%s)" % (len(male), ", ".join(r["run"] for r in male)))
-    if n_scan:
-        note.append("Threshold scan runs: %d (in data/scan/, not listed)" % n_scan)
     note.append("Disk: %s free of %s (%.0f%%)" % (
         _gb(disco.free), _gb(disco.total), 100.0 * disco.free / disco.total))
     note.append("Generated on the DAQ PC at %s" % time.strftime("%Y-%m-%d %H:%M:%S %Z"))
@@ -306,11 +321,15 @@ def componi_riepilogo(cartelle_dati, giorno):
                     "(high PostTriggerSize) the pedestal window ends 60 ns before it, and the "
                     "table says so; '—' means no estimate." % SIGMA_N_EFF)
     note.append("Rates are the DAQ's own: above ~900 Hz it saturates and the true rate is higher.")
+    return note
 
+
+def _impagina(titolo, titolo_html, intest, tab, totale, note, testa=()):
+    """(testo, html) con titolo, righe di testa, grafico, tabella, totale e note."""
     larg = [max(len(intest[i]), *(len(t[i]) for t in tab)) if tab else len(intest[i])
             for i in range(len(intest))]
     fmt = "  ".join("%%-%ds" % w for w in larg)
-    testo = "Runs started on %s (data/, scan runs excluded)\n\n" % giorno
+    testo = titolo + "\n" + "".join(t + "\n" for t in testa) + "\n"
     if tab:
         testo += fmt % intest + "\n" + "\n".join(fmt % t for t in tab) + "\n\n"
     else:
@@ -324,17 +343,81 @@ def componi_riepilogo(cartelle_dati, giorno):
             for c in t)
         for t in tab)
     html_ = """<html><body style="font:14px/1.45 system-ui,sans-serif;color:#1a1a19">
-<p>Runs started on <b>%s</b> (data/, scan runs excluded)</p>
+<p>%s%s</p>
 <img src="cid:rate" alt="rate per run" style="max-width:100%%">
 <table style="border-collapse:collapse;font-size:13px;margin-top:10px">
 <tr>%s</tr>%s</table>
 <p><b>%s</b><br>%s</p>
 </body></html>""" % (
-        giorno,
+        titolo_html, "".join("<br>" + html.escape(t) for t in testa),
         "".join('<td %s><b>%s</b></td>' % (td, h) for h in intest),
         righe_html, html.escape(totale), "<br>".join(html.escape(n) for n in note))
+    return testo, html_
 
-    return oggetto, testo, html_, grafico_rate(righe, giorno, leggi_rate(giorno)), len(righe)
+
+def componi_sequenza(log_run, come, inizio, chi="", allarmi=()):
+    """(oggetto, testo, html, png) della mail di fine sequenza.
+
+    `log_run` sono i log delle run della coda, in ordine; `come` la frase con
+    cui la coda si e' chiusa; `allarmi` le mail di errore e di hardware partite
+    durante la sequenza, come righe gia' pronte.
+    """
+    base = os.path.join(ROOT, "data")
+    psu = elog.leggi_psu(os.path.join(base, "psu-log.csv"))
+    avvii = elog.leggi_avvii(os.path.join(base, "azioni.jsonl"))
+    righe = []
+    for p in log_run:
+        r = elog.riga_da_log(p, psu, avvii) if p else None
+        if r:
+            r["log"] = p
+            r["eff"] = _efficienza(r)
+            righe.append(r)
+    adesso = time.strftime("%H:%M")
+    if not righe:
+        oggetto = "[DAQ V1742] Sequence finished — no runs: %s" % come
+        testo = "The run queue ended at %s without completing any run: %s\n" % (adesso, come)
+        return oggetto, testo, None, None
+    giorno = righe[0]["data"]
+    g0 = time.mktime(time.strptime(giorno, "%Y-%m-%d"))
+    for r in righe:
+        r["off_h"] = round((time.mktime(time.strptime(r["data"], "%Y-%m-%d")) - g0) / 3600)
+
+    eventi = sum(int(r["eventi"]) for r in righe if r["eventi"] != "")
+    secondi = sum(_secondi(r) for r in righe)
+    byte = sum(int(r["byte"]) for r in righe if r["byte"] != "")
+    male = [r for r in righe if r["chiusa"] == "NO"]
+    breve = come.rstrip(".").split(":")[0].lower()
+    oggetto = "[DAQ V1742] Sequence finished — %d runs, %s events, %s" % (
+        len(righe), format(eventi, ",").replace(",", " "), breve)
+
+    p0 = righe[0]
+    conf = "Configuration (first run): trigger %s%s%s · %s · PostTrigger %s%% · HV %s V" % (
+        p0["trigger"], (" " + p0["soglie"]) if p0["soglie"] else "",
+        (", majority %s" % p0["maggioranza"]) if p0["maggioranza"] != "" else "",
+        p0["campionamento"] or "?", p0["post_trigger_pc"], p0["hv_v"] or "?")
+    testa = ["Queue started %s%s, finished %s: %s" % (
+                 time.strftime("%H:%M", time.localtime(inizio)) if inizio else "?",
+                 (" by %s" % chi) if chi else "", adesso, come),
+             conf]
+
+    intest, tab = _tabella(righe)
+    totale = "Total: %d runs, %s events, %s of acquisition, %s" % (
+        len(righe), format(eventi, ",").replace(",", " "), _durata(secondi), _gb(byte))
+    note = []
+    canali = sorted({ch for r in righe if r.get("eff") for ch in r["eff"]["canali"]}, key=int)
+    if canali:
+        pezzi = []
+        for ch in canali:
+            v = [100 * r["eff"]["canali"][ch]["eff"] for r in righe
+                 if r.get("eff") and ch in r["eff"]["canali"]]
+            pezzi.append("ch%s %.1f%% (%.1f-%.1f)" % (ch, sum(v) / len(v), min(v), max(v)))
+        note.append("Efficiency over the sequence, mean (min-max): " + "  ".join(pezzi))
+    note.append("Not closed cleanly: %s" % (", ".join(r["run"] for r in male) if male else "none"))
+    note.append("Alarms during the sequence: %s" % ("; ".join(allarmi) if allarmi else "none"))
+    note += _note_comuni(righe, shutil.disk_usage(os.path.dirname(righe[0]["log"])))
+    testo, html_ = _impagina("Run queue finished", "<b>Run queue finished</b>",
+                             intest, tab, totale, note, testa)
+    return oggetto, testo, html_, grafico_rate(righe, giorno, leggi_rate(giorno))
 
 
 def main():

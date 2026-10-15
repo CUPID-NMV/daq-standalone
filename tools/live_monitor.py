@@ -38,6 +38,7 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import daqio
 from daqio import load, baseline_amplitude, DaqFileError, parse_channels
+import efficienza
 
 
 def _mila(n):
@@ -120,6 +121,11 @@ class Monitor:
         # rate basso due aggiornamenti possono non contenere alcun evento, e il
         # numero mostrato sarebbe zero pur stando acquisendo.
         self._hist = collections.deque(maxlen=4000)
+        # L'efficienza nel tempo, con lo stesso stimatore del riepilogo
+        # serale (tools/efficienza.py): (istante, eventi, sopra[], fondo[]).
+        self._eff = None                  # efficienza.StimaInCorso della run
+        self._eff_canali = None
+        self._eff_hist = collections.deque(maxlen=4000)
         self._ultimo_conteggio = -1       # per capire se il file cresce ancora
         self.file_mtime = None            # ultimo mtime visto del file seguito
         self._cresciuto = 0.0             # ultimo istante in cui e' cresciuto
@@ -343,6 +349,8 @@ class Monitor:
         if path != self.path:
             self._prev = None
             self._hist.clear()
+            self._eff = None
+            self._eff_hist.clear()
             self.rate = 0.0
             self.origin = 0
             self.cumulati = {}
@@ -392,6 +400,10 @@ class Monitor:
         self._ana = None          # ricalcolata sotto, una volta sola
 
         res = self.analysis()
+        try:
+            self._aggiorna_eff(data, primo, now)
+        except Exception as exc:          # l'efficienza non deve fermare il resto
+            self._eff_errore = "%s: %s" % (type(exc).__name__, exc)
         if res is None:
             return
         _, _, _, amp, _, _, q = res
@@ -439,6 +451,20 @@ class Monitor:
 
         self.offsets = {int(c["ch"]): c.get("offset")
                         for c in st.get("channels", [])}
+
+    def _aggiorna_eff(self, data, primo, now):
+        canali = [int(c) for c in self.hdr["ChannelList"]]
+        if self._eff is None or canali != self._eff_canali:
+            # Cambiare i canali mostrati cambia le colonne dei dati: si
+            # riparte, perche' le soglie sono per colonna.
+            dt_ns = float(self.hdr.get("SamplingTime", 1e-9)) * 1e9
+            self._eff = efficienza.StimaInCorso(dt_ns)
+            self._eff_canali = canali
+            self._eff_hist.clear()
+        self._eff_errore = self._eff.errore
+        r = self._eff.aggiungi(data, primo, segno=getattr(self, "segno", None))
+        if r is not None:
+            self._eff_hist.append((now, r[0], r[1].copy(), r[2].copy()))
 
     # -- analisi -------------------------------------------------------
 
@@ -1022,6 +1048,62 @@ class Monitor:
         plt.close(fig)
         return buf.getvalue()
 
+    # L'efficienza nel tempo, sotto il rate e con gli stessi intervalli. Le
+    # definizioni sono quelle del riepilogo serale (tools/efficienza.py): un
+    # punto qui e una riga della mail devono voler dire la stessa cosa.
+    def _figura_eff(self, scala, binw, zoom=False):
+        k = self.SCALE.get(str(scala).upper(), 1.0)
+        fig, ax = plt.subplots(figsize=(LARG_PX * k / DPI_FIG, 2.0 * k))
+        h = list(self._eff_hist)
+        stima = self._eff
+        if not h or stima is None or not stima.pronta:
+            perche = (getattr(self, "_eff_errore", None)
+                      or "collecting: the estimate starts after %d events"
+                      % efficienza.StimaInCorso.MIN_EVENTI)
+            ax.text(.5, .5, perche, ha="center", va="center", transform=ax.transAxes,
+                    color="#888", fontsize=10)
+            ax.set_xticks([]); ax.set_yticks([])
+        else:
+            t = np.array([x[0] for x in h])
+            n = np.array([x[1] for x in h], dtype=float)
+            sopra = np.array([x[2] for x in h], dtype=float)
+            fondo = np.array([x[3] for x in h], dtype=float)
+            t0 = self.start_time if self.start_time else t[0]
+            idx = ((t - t[0]) // binw).astype(int)
+            nb = idx.max() + 1
+            n_b = np.bincount(idx, weights=n, minlength=nb)
+            ok = n_b > 0
+            centri = (t[0] + (np.arange(nb) + 0.5) * binw)[ok]
+            minuti = (centri[-1] - t0) > 900 if len(centri) else False
+            x = (centri - t0) / (60.0 if minuti else 1.0)
+            minimo = 100.0
+            for j, ch in enumerate(self._eff_canali):
+                col = PALETTE[j % len(PALETTE)]
+                e = 100 * np.bincount(idx, weights=sopra[:, j], minlength=nb)[ok] / n_b[ok]
+                f = 100 * np.bincount(idx, weights=fondo[:, j], minlength=nb)[ok] / n_b[ok]
+                ax.plot(x, e, "-o", ms=2.5, lw=1, color=col, label="ch%d" % ch)
+                ax.plot(x, f, ":", lw=1, color=col)
+                minimo = min(minimo, float(np.min(e)))
+            # Da 0 a 100 di serie, come il rate ha sempre lo zero: un canale
+            # che crolla deve sembrare crollato. Con "zoom" l'asse parte poco
+            # sotto il minimo, per vedere le variazioni di un punto.
+            ax.set_ylim((max(0.0, minimo - 3), 100.5) if zoom else (0, 105))
+            ax.set_xlabel("time since start of run [%s]" % ("min" if minuti else "s"))
+            ax.legend(fontsize=7, ncol=min(8, len(self._eff_canali)), loc="lower left",
+                      frameon=False)
+            if not zoom:
+                ax.text(0.99, 0.06, "dotted: same count in a pedestal-only window",
+                        transform=ax.transAxes, ha="right", fontsize=7, color="#6b6a65")
+        ax.set_ylabel("above %g\u03c3_ped [%%]" % efficienza.SIGMA_N)
+        ax.grid(alpha=.3)
+        ax.set_title("Efficiency vs time \u00b7 %g s per point \u00b7 50 MHz low-pass, "
+                     "\u00b150 ns around the trigger" % binw, fontsize=9)
+        fig.tight_layout()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=DPI_FIG)
+        plt.close(fig)
+        return buf.getvalue()
+
     # Moltiplicatore delle figure. La dimensione giusta dipende dallo schermo
     # di chi guarda -- un portatile in laboratorio e un monitor grande non
     # vogliono la stessa cosa -- quindi la sceglie la pagina invece di essere
@@ -1030,9 +1112,11 @@ class Monitor:
 
     def figure(self, kind, n_show=1, xlim=(None, None), ylim=(None, None),
                hset=None, bw=None, qcut=None, qset=None, gate=None, scala="M",
-               dettagli=False, solo=None, rbin=10.0):
+               dettagli=False, solo=None, rbin=10.0, ezoom=False):
         if kind == "rate":
             return self._figura_rate(scala, max(1.0, float(rbin or 10.0)))
+        if kind == "eff":
+            return self._figura_eff(scala, max(1.0, float(rbin or 10.0)), ezoom)
         if kind == "panoramica":
             # Non passa dall'analisi di dettaglio: quella riguarda i soli
             # canali selezionati e puo' mancare, mentre la panoramica deve
@@ -1771,6 +1855,8 @@ PAGE = """<!DOCTYPE html>
   <label>channels<input id="canali" value="" placeholder="all  e.g. 8,9,12-15" style="width:150px"></label>
   <label>threshold [offset]<input id="qcut" value="" placeholder="whole spectrum" style="width:110px"></label>
   <label title="one point every N seconds, from the history of event counts">rate bin [s]<input id="rbin" value="10" style="width:60px"></label>
+  <label class="chk" title="efficiency plot: axis from just below the lowest point instead of 0-100%">
+    <input type="checkbox" id="ezoom"> zoom eff.</label>
   <label>plot size<select id="scala" style="font:13px inherit;padding:5px 7px">
     <option>S</option><option selected>M</option><option>L</option></select></label>
   <label class="chk" title="gate, baseline window, calibration, noise floor and the
@@ -1822,6 +1908,7 @@ Open the browser console to see the error.</div>
   <div class="gr"><a class="apri" data-img="pano">&#8599;</a><img id="pano" alt="per-channel overview"></div>
   <div class="colonna">
     <div class="gr"><a class="apri" data-img="r">&#8599;</a><img id="r" alt="rate vs time"></div>
+    <div class="gr"><a class="apri" data-img="e">&#8599;</a><img id="e" alt="efficiency vs time"></div>
     <div class="muro"><img id="mw" alt="waveform wall"><div class="celle" data-muro="wf"></div></div>
   </div>
 </div>
@@ -2149,6 +2236,9 @@ function params() {
   const det = document.getElementById('det').checked;
   try { localStorage.setItem('daqmon.det', det ? '1' : '0'); } catch (e) {}
   p.set('det', det ? '1' : '0');
+  const ezoom = document.getElementById('ezoom').checked;
+  try { localStorage.setItem('daqmon.ezoom', ezoom ? '1' : '0'); } catch (e) {}
+  p.set('ezoom', ezoom ? '1' : '0');
   for (const f of FIELDS) {
     const v = document.getElementById(f).value.trim();
     try { localStorage.setItem('daqmon.' + f, v); } catch (e) {}
@@ -2281,11 +2371,11 @@ async function giro() {
     const ora = Date.now();
     for (const [id, name] of [['w','waveforms'],['h','amplitudes'],
                               ['q','integrals'],
-                              ['r','rate'],['mw','muro_wf'],
+                              ['r','rate'],['e','eff'],['mw','muro_wf'],
                               ['ma','muro_amp'],['mc','muro_car'],
                               ['pano','panoramica']]) {
       const el = document.getElementById(id);
-      const lento = (id === 'pano' || id === 'r' || id.startsWith('m'));
+      const lento = (id === 'pano' || id === 'r' || id === 'e' || id.startsWith('m'));
       if (lento && el.dataset.t && (ora - el.dataset.t) < LENTI) continue;
       el.dataset.t = ora;
       await carica(el, name + '.png?' + p.toString());
@@ -2316,6 +2406,16 @@ try {
     document.getElementById('det').checked = true;
 } catch (e) {}
 document.getElementById('det').addEventListener('change', tick);
+try {
+  if (localStorage.getItem('daqmon.ezoom') === '1')
+    document.getElementById('ezoom').checked = true;
+} catch (e) {}
+// Il grafico dell'efficienza e' fra i lenti (uno ogni 5 s): senza azzerarne
+// l'istante il cambio di scala si vedrebbe solo al giro dopo.
+document.getElementById('ezoom').addEventListener('change', () => {
+  document.getElementById('e').dataset.t = '';
+  tick();
+});
 
 tick(); setInterval(tick, REFRESH);
 </script></body></html>"""
@@ -2516,6 +2616,7 @@ def make_handler(monitor, refresh, defaults):
 
                 kinds = {"panoramica.png": "panoramica",
                          "rate.png": "rate",
+                         "eff.png": "eff",
                          "waveforms.png": "waveforms",
                          "average.png": "average",
                          "amplitudes.png": "amplitudes",
@@ -2557,7 +2658,8 @@ def make_handler(monitor, refresh, defaults):
                                                      qs.get("scala", ["M"])[0],
                                                      qs.get("det", ["0"])[0] == "1",
                                                      self._num(qs, "solo", None),
-                                                     self._num(qs, "rbin", 10.0)))
+                                                     self._num(qs, "rbin", 10.0),
+                                                     qs.get("ezoom", ["0"])[0] == "1"))
 
             self._send(404, "text/plain", b"not found")
 

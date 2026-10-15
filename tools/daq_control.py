@@ -1907,6 +1907,11 @@ class Controllo:
             d["attiva"] = True
             d["backup_toml"] = backup
             d["messaggio"] = "running"
+            # Per la mail di fine sequenza: quali voci fanno parte di QUESTA
+            # partenza, e quando. Le voci gia' fatte in una partenza
+            # precedente restano nella lista, ma non sono di questa sequenza.
+            d["sessione"] = [v["id"] for v in da_fare]
+            d["avviata"] = time.time()
             self._scrivi_coda(d)
 
         threading.Thread(target=self._lavoratore, daemon=True).start()
@@ -1932,7 +1937,33 @@ class Controllo:
                 except OSError:
                     d["messaggio"] += "  (WARNING: could not restore the TOML)"
             d["backup_toml"] = None
+            sessione, avviata = d.get("sessione") or [], d.get("avviata")
+            d["sessione"] = []
             self._scrivi_coda(d)
+        if sessione:
+            try:
+                self._mail_sequenza(d, sessione, avviata, messaggio)
+            except Exception as e:
+                print("notifiche: fine sequenza: %s" % e, flush=True)
+
+    def _mail_sequenza(self, d, sessione, avviata, messaggio):
+        """Raccoglie i log delle run di questa sequenza e passa la mail alle notifiche."""
+        nomi = [os.path.splitext(v["run"])[0] for v in d["voci"]
+                if v["id"] in sessione and v.get("run")]
+        dove = {}
+        for cartella in self._cartelle_dati():
+            for radice, _, files in os.walk(cartella):
+                for f in files:
+                    if f.endswith(".log") and f[:-4] in nomi:
+                        dove.setdefault(f[:-4], os.path.join(radice, f))
+        chi = ""
+        for a in reversed(ultime_azioni(60)):
+            if a.get("azione") == "coda/avvia":
+                chi = a.get("chi", "")
+                break
+        fatte = sum(1 for v in d["voci"] if v["id"] in sessione and v["stato"] == "done")
+        come = "%s (%d of %d entries done)" % (messaggio.rstrip("."), fatte, len(sessione))
+        self.notifiche.fine_sequenza([dove.get(n) for n in nomi], come, avviata, chi)
 
     def coda_ferma(self):
         d = self.leggi_coda()
@@ -2685,10 +2716,12 @@ PAGINA = r"""<!doctype html>
   <div class="sezh" style="margin-top:12px;cursor:default">Recipients</div>
   <table class="az" style="font-size:13px">
     <thead><tr><td class="k">Address</td><td class="k" style="text-align:center">Daily summary</td>
+      <td class="k" style="text-align:center">Sequence end</td>
       <td class="k" style="text-align:center">Run errors</td><td class="k" style="text-align:center">Hardware</td><td></td></tr></thead>
     <tbody id="n_dest"></tbody>
     <tbody><tr><td><input id="n_nuovo" placeholder="name@lnf.infn.it" style="width:220px"></td>
       <td style="text-align:center"><input type="checkbox" id="n_nriep" checked></td>
+      <td style="text-align:center"><input type="checkbox" id="n_nseq" checked></td>
       <td style="text-align:center"><input type="checkbox" id="n_nerr" checked></td>
       <td style="text-align:center"><input type="checkbox" id="n_nhw" checked></td>
       <td><button id="n_agg" class="nb">add</button></td></tr></tbody>
@@ -2709,6 +2742,9 @@ PAGINA = r"""<!doctype html>
     to a new address can take a few minutes (the server makes unknown senders retry).<br><br>
     <b>Daily summary</b>: the runs of the day, with the rate plot, at the time set
     below. Scan runs are counted, not listed.<br>
+    <b>Sequence end</b>: when a run queue ends (completed, stopped by hand, or
+    interrupted by a controller restart), its runs with the same plot and table.
+    Threshold scans are not queues and send nothing.<br>
     <b>Run errors</b>: a run that ends without its end-of-run summary, that stops
     before its number of events with nobody asking, or that logs errors. Read from
     the run log, not from the exit code: a lost link still exits with 0. Points of a
@@ -2855,7 +2891,8 @@ $("ferma").onclick = () => azione("ferma",
   "nothing already acquired is lost.");
 
 // --- notifiche ---------------------------------------------------------------
-const NOMI_NOT = {riepilogo: "Daily summary", errori: "Run error", hw: "Hardware", prova: "Test"};
+const NOMI_NOT = {riepilogo: "Daily summary", sequenza: "Sequence end", errori: "Run error",
+                  hw: "Hardware", prova: "Test"};
 // Le virgolette come \x22 e non nude: tools/check_page.py, che toglie le
 // stringhe prima di cercare le chiamate, si confonde con una virgoletta dentro
 // un'espressione regolare e da li' in poi legge i testi come codice.
@@ -2893,11 +2930,11 @@ function disegnaNotifiche(n){
     notDisegnata = firma;
     $("n_dest").innerHTML = n.destinatari.map((d, i) =>
       `<tr><td>${escH(d.indirizzo)}</td>` +
-      ["riepilogo", "errori", "hw"].map(t =>
+      ["riepilogo", "sequenza", "errori", "hw"].map(t =>
         `<td style="text-align:center"><input type="checkbox" data-i="${i}" data-t="${t}" ${d[t] ? "checked" : ""}></td>`
       ).join("") +
       `<td><button class="nb" data-rm="${i}">remove</button></td></tr>`
-    ).join("") || `<tr><td colspan="5" style="color:#9a9a94">nobody yet</td></tr>`;
+    ).join("") || `<tr><td colspan="6" style="color:#9a9a94">nobody yet</td></tr>`;
     $("n_dest").querySelectorAll("input[data-t]").forEach(c => c.onchange = () =>
       notAzione({azione: "imposta", indirizzo: n.destinatari[c.dataset.i].indirizzo,
                  tipo: c.dataset.t, valore: c.checked ? "1" : "0"}));
@@ -2925,6 +2962,7 @@ function disegnaNotifiche(n){
 $("n_agg").onclick = async () => {
   const ok = await notAzione({azione: "aggiungi", indirizzo: $("n_nuovo").value,
                               riepilogo: $("n_nriep").checked ? "1" : "0",
+                              sequenza: $("n_nseq").checked ? "1" : "0",
                               errori: $("n_nerr").checked ? "1" : "0",
                               hw: $("n_nhw").checked ? "1" : "0"});
   if(ok) $("n_nuovo").value = "";

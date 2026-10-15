@@ -5,6 +5,7 @@ diagnosi di come e' finita una run.
 Tre tipi, e ognuno ha la sua lista di persone:
 
     riepilogo   le run della giornata, una mail all'ora scelta
+    sequenza    le run di una coda, quando la coda finisce (non gli scan)
     errori      una run finita male, con il motivo letto dal suo log
     hw          un guasto dell'hardware: alimentatori, VME, collegamento
                 col digitizer
@@ -25,8 +26,9 @@ import posta
 import riepilogo_giorno
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TIPI = ("riepilogo", "errori", "hw")
-NOMI_TIPI = {"riepilogo": "Daily summary", "errori": "Run error", "hw": "Hardware"}
+TIPI = ("riepilogo", "sequenza", "errori", "hw")
+NOMI_TIPI = {"riepilogo": "Daily summary", "sequenza": "Sequence end",
+             "errori": "Run error", "hw": "Hardware"}
 RE_INDIRIZZO = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 
 PREDEFINITO = {
@@ -252,6 +254,37 @@ class Notifiche:
         self.manda(("riepilogo",), oggetto, testo, html=html_,
                    immagini=[("rate", png)], a=a)
         return n_run
+
+    def fine_sequenza(self, log_run, come, inizio, chi=""):
+        """La mail di fine coda, composta e spedita in un thread.
+
+        Comporla vuol dire stimare l'efficienza dell'ultima run, che di solito
+        non e' ancora in cache: una ventina di secondi che il controllore non
+        deve aspettare.
+        """
+        if not self.destinatari(("sequenza",)):
+            return
+
+        def lavoro():
+            try:
+                allarmi = []
+                da = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(inizio or 0))
+                for v in self.storico(500):
+                    if v.get("tipo") in ("errori", "hw") and v.get("quando", "") >= da:
+                        allarmi.append("%s %s" % (v["quando"][11:16],
+                                                  v["oggetto"].replace("[DAQ V1742] ", "")))
+                oggetto, testo, html_, png = riepilogo_giorno.componi_sequenza(
+                    log_run, come, inizio, chi, allarmi)
+                testo += "\nController: %s\n" % indirizzo_pagina(self.porta)
+                self.manda(("sequenza",), oggetto, testo, html=html_,
+                           immagini=[("rate", png)] if png else ())
+            except Exception as e:
+                self.log("notifiche: fine sequenza: %s" % e)
+                self._annota({"quando": time.strftime("%Y-%m-%d %H:%M:%S"), "tipo": "sequenza",
+                              "oggetto": "Sequence end", "esito": "ko",
+                              "dettaglio": "could not compose: %s" % e})
+
+        threading.Thread(target=lavoro, daemon=True).start()
 
     def _pianificatore(self):
         """Il riepilogo all'ora scelta, una volta al giorno.

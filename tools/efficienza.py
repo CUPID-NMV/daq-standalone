@@ -243,6 +243,92 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None, fil
             "canali": fuori}
 
 
+class StimaInCorso:
+    """La stessa stima, un blocco di eventi per volta: per il monitor.
+
+    Il monitor rilegge a ogni giro la coda del file, e la coda contiene
+    eventi gia' visti. Qui ogni evento si conta una volta sola, ricordando
+    l'indice assoluto dell'ultimo contato. sigma_ped, polarita' e posizione
+    dell'impulso si fissano sul primo blocco abbastanza grande (MIN_EVENTI) e
+    restano quelle per tutta la run: una soglia che si muove durante la run
+    renderebbe incomparabili i punti del grafico.
+    """
+    MIN_EVENTI = 300
+
+    def __init__(self, dt_ns, sigma_n=SIGMA_N, ped_ns=PED_NS, filtro=True):
+        self.dt = float(dt_ns)
+        self.sigma_n = sigma_n
+        self.ped_ns = tuple(ped_ns)
+        self.filtro = filtro
+        self.pronta = False
+        self.ultimo = None          # indice assoluto dell'ultimo evento contato
+        self.errore = None
+
+    def _filtra(self, x):
+        if not self.filtro:
+            return x
+        sos = butter(LP_ORDINE, LP_MHZ * 1e6, btype="low", fs=1e9 / self.dt, output="sos")
+        return sosfiltfilt(sos, x, axis=2)
+
+    def _prepara(self, x, segno):
+        nch, ns = x.shape[1], x.shape[2]
+        t = np.arange(ns) * self.dt
+        prova = x - np.median(x, axis=2)[:, :, None]
+        if segno is None:
+            su = np.median(prova.max(axis=2), axis=0)
+            giu = np.median(-prova.min(axis=2), axis=0)
+            self.segni = np.where(su > giu, 1.0, -1.0)
+        else:
+            self.segni = np.full(nch, float(segno))
+        orientato = self.segni[None, :, None] * prova
+        amp_p = orientato.max(axis=2)
+        alti = amp_p >= np.median(amp_p, axis=0)[None, :]
+        self.picco_ns = float(np.median((orientato.argmax(axis=2) * self.dt)[alti]))
+        a, b = self.ped_ns
+        if self.picco_ns - MARGINE_NS < b:
+            b = self.picco_ns - MARGINE_NS
+        self.i0 = int(np.searchsorted(t, a))
+        self.i1 = int(np.searchsorted(t, b, "right"))
+        if self.i1 - self.i0 < MIN_CAMPIONI_PED:
+            self.errore = "pulse at %.0f ns: too little pedestal before it" % self.picco_ns
+            return
+        self.j0 = max(self.i1, int(np.searchsorted(t, self.picco_ns - RICERCA_NS)))
+        self.j1 = min(ns, int(np.searchsorted(t, self.picco_ns + RICERCA_NS, "right")))
+        self.larg_fondo = min(self.j1 - self.j0, self.i1 - self.i0)
+        corr = x - np.median(x[:, :, self.i0:self.i1], axis=2)[:, :, None]
+        self.sigma = np.array([sigma_robusta(corr[:, k, self.i0:self.i1]) for k in range(nch)])
+        self.soglia = self.sigma_n * self.sigma
+        self.pronta = True
+
+    def aggiungi(self, dati, primo, segno=None):
+        """Conta gli eventi nuovi di `dati` (n, canali, campioni), il cui primo
+        ha indice assoluto `primo`. Ritorna (n, sopra[canali], fondo[canali])
+        oppure None se non c'e' niente di nuovo o la stima non e' ancora pronta."""
+        n_tot = dati.shape[0]
+        if self.ultimo is None:
+            if n_tot < self.MIN_EVENTI:
+                return None
+            x = self._filtra(np.asarray(dati, dtype=np.float32))
+            self._prepara(x, segno)
+            if not self.pronta:
+                return None
+            nuovi = x              # il primo blocco si conta tutto
+        else:
+            da = self.ultimo + 1 - primo
+            if da >= n_tot:
+                return None
+            # Se fra due giri sono arrivati piu' eventi della coda letta, i
+            # mancanti non si contano: e' un rapporto, perde statistica non
+            # correttezza.
+            nuovi = self._filtra(np.asarray(dati[max(da, 0):], dtype=np.float32))
+        self.ultimo = primo + n_tot - 1
+        corr = nuovi - np.median(nuovi[:, :, self.i0:self.i1], axis=2)[:, :, None]
+        amp = (self.segni[None, :, None] * corr[:, :, self.j0:self.j1]).max(axis=2)
+        fondo = (self.segni[None, :, None] * corr[:, :, self.i0:self.i0 + self.larg_fondo]).max(axis=2)
+        return (corr.shape[0], (amp > self.soglia[None, :]).sum(axis=0),
+                (fondo > self.soglia[None, :]).sum(axis=0))
+
+
 def nome_run(path):
     base = os.path.basename(path)
     for suff in (".h5.gz", ".h5"):

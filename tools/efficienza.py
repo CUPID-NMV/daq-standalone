@@ -11,18 +11,27 @@ Per ogni canale:
    10-180 ns, la stessa del monitor: prima dell'impulso, e non la mediana di
    tutta la traccia, che un impulso lungo (SiPM) sposta (CLAUDE.md);
 2. sigma_ped e' la larghezza della distribuzione dei campioni in quella
-   finestra, piedistallo tolto, su tutti gli eventi del primo blocco:
-   1.4826 x MAD, che un picco occasionale non gonfia;
+   finestra, piedistallo tolto, sugli eventi del primo blocco: deviazione
+   standard con i valori oltre 3.5 sigma esclusi, iterata. Non la MAD: su
+   campioni interi la MAD e' intera, e sigma_ped saltava fra 2.97 e 4.45
+   conteggi (1.4826 x 2 e x 3) da una run all'altra (2026-10-15);
 3. l'ampiezza dell'evento e' l'escursione massima DALLA PARTE DELL'IMPULSO,
-   cercata dopo la finestra del piedistallo;
+   cercata in +-50 ns attorno alla posizione tipica dell'impulso (l'istante
+   del trigger), non su tutta la traccia: su un SiPM una traccia di 1 us
+   contiene impulsi di buio, e la stima diventava un'occupazione;
 4. efficienza = eventi con ampiezza > N sigma_ped / eventi totali (N = 4).
 
-Quello che questa stima NON toglie, da sapere prima di leggerla:
+Accanto a questa, due numeri per leggerla:
 
-- il rumore da solo supera N sigma in una frazione degli eventi, perche'
-  l'ampiezza e' il massimo su centinaia di campioni: e' un pavimento, non zero.
-  Per questo il risultato riporta anche lo stesso conteggio fatto su una
-  finestra di SOLO piedistallo lunga quanto la ricerca, che lo misura;
+- il FONDO: la stessa frazione contata in una finestra di solo piedistallo
+  larga quanto la ricerca. E' misurato, non estrapolato;
+- "eff_tag": la frazione sugli eventi in cui TUTTI gli altri canali superano
+  30 mV. Non dipende da com'e' composto il trigger: sulle run del 2026-10-13
+  in self-trigger OR la frazione semplice di ch18 era 79%, quella sui tag
+  89%, contro 92% e 91.5% delle run in maggioranza 2 del 12.
+
+Quello che la stima NON toglie:
+
 - i picchi spuri del V1742, simultanei su tutti i canali (CLAUDE.md), contano
   come impulsi;
 - e' l'efficienza di un canale sugli eventi che la DAQ ha registrato, non
@@ -48,6 +57,8 @@ PED_NS = (10.0, 180.0)
 # impulsi al buio dei SiPM dura ~30 ns (CLAUDE.md), il doppio per sicurezza.
 MARGINE_NS = 60.0
 MIN_CAMPIONI_PED = 20
+RICERCA_NS = 50.0          # semiampiezza della finestra di ricerca attorno all'impulso
+TAG_MV = 30.0              # soglia sugli ALTRI canali per eff_tag
 SIGMA_N = 4.0
 BLOCCO = 2000            # eventi letti per volta: 32 canali x 1024 campioni x 4 byte = 260 MB
 MV_PER_CONTEGGIO = 1000.0 / 4096
@@ -68,6 +79,18 @@ def polarita_dal_log(path_log):
     if not m:
         return None
     return 1 if m.group(1) == "0" else -1
+
+
+def sigma_robusta(x, k=3.5, giri=5):
+    """Deviazione standard dei soli valori entro k sigma, iterata."""
+    x = np.asarray(x, dtype=np.float64).ravel()
+    m, s = np.median(x), x.std()
+    for _ in range(giri):
+        sel = np.abs(x - m) < k * s
+        if sel.sum() < 10:
+            break
+        m, s = x[sel].mean(), x[sel].std()
+    return max(float(s), 0.3)
 
 
 def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None):
@@ -125,9 +148,20 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None):
                 "l'impulso cade a %.0f ns: prima di lui restano %d campioni di piedistallo, "
                 "troppo pochi per stimarne la larghezza" % (picco_ns, max(lung_ped, 0)))
 
+        j0 = max(i1, int(np.searchsorted(t, picco_ns - RICERCA_NS)))
+        j1 = min(ns, int(np.searchsorted(t, picco_ns + RICERCA_NS, "right")))
+        larg = j1 - j0
+        # Il fondo si conta su una finestra di solo piedistallo LARGA QUANTO la
+        # ricerca; se il piedistallo e' piu' corto (finestra ristretta) si usa
+        # quello che c'e', e il risultato lo dice.
+        larg_fondo = min(larg, lung_ped)
+        tag_soglia = TAG_MV / MV_PER_CONTEGGIO
+
         sigma = soglia = segni = None
         sopra = np.zeros(nch, dtype=np.int64)
-        sopra_ped = np.zeros(nch, dtype=np.int64)
+        sopra_fondo = np.zeros(nch, dtype=np.int64)
+        n_tag = np.zeros(nch, dtype=np.int64)
+        sopra_tag = np.zeros(nch, dtype=np.int64)
         for a in range(0, totale, BLOCCO):
             b = min(totale, a + BLOCCO)
             x = np.asarray(ds[a:b], dtype=np.float32).reshape(b - a, nch, ns)
@@ -139,9 +173,7 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None):
                 # eventi per lung_ped campioni sono centinaia di migliaia di
                 # valori, e la MAD su tutti i blocchi costerebbe la run intera
                 # in memoria.
-                finestra = corr[:, :, i0:i1].transpose(1, 0, 2).reshape(nch, -1)
-                sigma = 1.4826 * np.median(np.abs(finestra), axis=1)
-                sigma = np.maximum(sigma, 0.5)    # sotto mezzo conteggio e' quantizzazione
+                sigma = np.array([sigma_robusta(corr[:, k, i0:i1]) for k in range(nch)])
                 soglia = sigma_n * sigma
                 if segno is None:
                     su = np.median(corr[:, :, i1:].max(axis=2), axis=0)
@@ -149,24 +181,24 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None):
                     segni = np.where(su > giu, 1.0, -1.0)
                 else:
                     segni = np.full(nch, float(segno))
-            amp = (segni[None, :, None] * corr[:, :, i1:]).max(axis=2)
-            sopra += (amp > soglia[None, :]).sum(axis=0)
-            # Il pavimento: lo stesso conteggio su tratti di solo piedistallo
-            # lunghi quanto la ricerca. La finestra 10-180 e' piu' corta della
-            # ricerca, quindi si estrapola: un massimo su L campioni di rumore
-            # indipendente supera la soglia con P_L = 1 - (1 - p)^L, e p si
-            # misura dal campione per campione nella finestra.
-            sopra_ped += (segni[None, :, None] * corr[:, :, i0:i1] > soglia[None, :, None]).sum(axis=(0, 2))
+            amp = (segni[None, :, None] * corr[:, :, j0:j1]).max(axis=2)
+            su = amp > soglia[None, :]
+            sopra += su.sum(axis=0)
+            fondo = (segni[None, :, None] * corr[:, :, i0:i0 + larg_fondo]).max(axis=2)
+            sopra_fondo += (fondo > soglia[None, :]).sum(axis=0)
+            if nch >= 2:
+                alto = amp > tag_soglia
+                for k in range(nch):
+                    tag = np.delete(alto, k, axis=1).all(axis=1)
+                    n_tag[k] += tag.sum()
+                    sopra_tag[k] += (tag & su[:, k]).sum()
             del corr
     finally:
         f.close()
         daqio._cleanup(tmp)
 
-    lung_ricerca = ns - i1
     fuori = {}
     for k, ch in enumerate(canali):
-        p = sopra_ped[k] / float(totale * lung_ped)
-        pavimento = 1.0 - (1.0 - p) ** lung_ricerca
         fuori[str(ch)] = {
             "sigma_ped": round(float(sigma[k]), 3),
             "soglia_conteggi": round(float(soglia[k]), 2),
@@ -174,14 +206,16 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None):
             "polarita": int(segni[k]),
             "sopra": int(sopra[k]),
             "eff": round(sopra[k] / float(totale), 5),
-            # Stima, non misura: suppone campioni di rumore indipendenti, e
-            # l'oscillazione a ~98 MHz vista sui SiPM li rende correlati.
-            "pavimento_rumore": round(float(pavimento), 5),
+            "fondo": round(sopra_fondo[k] / float(totale), 5),
+            "n_tag": int(n_tag[k]),
+            "eff_tag": round(sopra_tag[k] / float(n_tag[k]), 5) if n_tag[k] else None,
         }
     return {"file": os.path.basename(path), "eventi": int(totale),
             "sigma_n": sigma_n, "ped_ns": [round(x, 1) for x in ped_ns],
             "ped_ns_dichiarata": list(ped_dichiarata), "ped_ristretta": ristretta,
-            "picco_ns": round(picco_ns, 1), "ricerca_campioni": int(lung_ricerca),
+            "picco_ns": round(picco_ns, 1),
+            "ricerca_ns": [round(float(t[j0]), 1), round(float(t[j1 - 1]), 1)],
+            "fondo_larghezza_ns": round(larg_fondo * dt, 1), "tag_mv": TAG_MV,
             "polarita_da": fonte_segno, "canali": fuori}
 
 
@@ -203,7 +237,7 @@ def stima_in_cache(path, **kw):
     """
     os.makedirs(CACHE, exist_ok=True)
     cache = os.path.join(CACHE, nome_run(path) + ".json")
-    chiave = {"versione": 2, "mtime": os.path.getmtime(path), "sigma_n": kw.get("sigma_n", SIGMA_N),
+    chiave = {"versione": 3, "mtime": os.path.getmtime(path), "sigma_n": kw.get("sigma_n", SIGMA_N),
               "ped_ns": list(kw.get("ped_ns", PED_NS))}
     try:
         with open(cache) as f:
@@ -243,12 +277,15 @@ def main():
     print("impulso a %.0f ns, piedistallo in %.0f-%.0f ns%s"
           % (r["picco_ns"], r["ped_ns"][0], r["ped_ns"][1],
              "  (RISTRETTA: l'impulso cadeva nella finestra dichiarata)" if r["ped_ristretta"] else ""))
-    print("%4s %4s %9s %11s %9s %8s %9s" % ("ch", "pol", "sigma_ped", "soglia", "sopra", "eff",
-                                              "pavimento"))
+    print("ricerca in %.0f-%.0f ns, fondo su %.0f ns di solo piedistallo"
+          % (r["ricerca_ns"][0], r["ricerca_ns"][1], r["fondo_larghezza_ns"]))
+    print("%4s %4s %9s %17s %9s %8s %7s %18s" % ("ch", "pol", "sigma_ped", "soglia", "sopra", "eff",
+                                                 "fondo", "eff_tag (n tag)"))
     for ch, c in r["canali"].items():
-        print("%4s %4s %6.2f cn %5.1f cn %4.2f mV %9d %7.1f%% %8.2f%%"
+        print("%4s %4s %6.2f cn %5.1f cn %5.2f mV %9d %7.1f%% %6.2f%% %8s (%6d)"
               % (ch, "+" if c["polarita"] > 0 else "-", c["sigma_ped"], c["soglia_conteggi"],
-                 c["soglia_mv"], c["sopra"], 100 * c["eff"], 100 * c["pavimento_rumore"]))
+                 c["soglia_mv"], c["sopra"], 100 * c["eff"], 100 * c["fondo"],
+                 "%.1f%%" % (100 * c["eff_tag"]) if c["eff_tag"] is not None else "-", c["n_tag"]))
 
 
 if __name__ == "__main__":

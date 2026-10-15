@@ -82,9 +82,9 @@ COLORI_CANALI = ("#2a78d6", "#d9822b", "#7a4fb3", "#15603a", "#a8321f",
 def _pannello_eff(ax, righe):
     """Efficienza per canale e per run: un segmento lungo la run, a quell'altezza.
 
-    Sotto, punteggiato e dello stesso colore, il pavimento del rumore: la
-    frazione di eventi che supererebbero la soglia anche senza impulso. Una
-    efficienza vicina al suo pavimento non dice niente.
+    Sotto, punteggiato e dello stesso colore, il fondo: la stessa frazione
+    contata in una finestra di solo piedistallo larga quanto la ricerca. Una
+    efficienza vicina al suo fondo non dice niente.
     """
     canali = sorted({ch for r in righe if r.get("eff") for ch in r["eff"]["canali"]}, key=int)
     colore = {ch: COLORI_CANALI[i % len(COLORI_CANALI)] for i, ch in enumerate(canali)}
@@ -96,7 +96,7 @@ def _pannello_eff(ax, righe):
         x1 = max(x0 + _secondi(r) / 3600, x0 + 0.05)
         for ch, c in e["canali"].items():
             ax.plot([x0, x1], [100 * c["eff"]] * 2, lw=3, color=colore[ch], solid_capstyle="butt")
-            ax.plot([x0, x1], [100 * c["pavimento_rumore"]] * 2, lw=1, ls=":", color=colore[ch])
+            ax.plot([x0, x1], [100 * c.get("fondo", 0.0)] * 2, lw=1, ls=":", color=colore[ch])
     for ch in canali:
         ax.plot([], [], lw=3, color=colore[ch], label="ch%s" % ch)
     ax.set_ylim(0, 105)
@@ -104,7 +104,7 @@ def _pannello_eff(ax, righe):
                   if righe and righe[0].get("eff") else "efficiency [%]")
     ax.grid(alpha=.3)
     ax.legend(fontsize=7, ncol=min(8, len(canali)), loc="lower left", frameon=False)
-    ax.text(0.995, 0.03, "dotted: noise floor (fraction above threshold with no pulse)",
+    ax.text(0.995, 0.03, "dotted: same count in a pedestal-only window (background)",
             transform=ax.transAxes, ha="right", va="bottom", fontsize=7, color="#6b6a65")
 
 
@@ -298,9 +298,10 @@ def componi_riepilogo(cartelle_dati, giorno):
     note.append("Generated on the DAQ PC at %s" % time.strftime("%Y-%m-%d %H:%M:%S %Z"))
     if any(r.get("eff") for r in righe):
         note.append("eff = fraction of recorded events in which the channel goes above %g sigma "
-                    "of its pedestal (pedestal from 10-180 ns, event by event). A rough estimate: "
-                    "noise alone passes it in a fraction of events (dotted in the plot), and the "
-                    "V1742 spurious spikes count as pulses. Where the pulse falls inside 10-180 ns "
+                    "of its pedestal (pedestal from 10-180 ns, event by event), searching +-50 ns "
+                    "around the trigger time. A rough estimate: the dotted line in the plot is the "
+                    "same count in a pedestal-only window, and the V1742 spurious spikes count as "
+                    "pulses. Where the pulse falls inside 10-180 ns "
                     "(high PostTriggerSize) the pedestal window ends 60 ns before it, and the "
                     "table says so; '—' means no estimate." % SIGMA_N_EFF)
     note.append("Rates are the DAQ's own: above ~900 Hz it saturates and the true rate is higher.")

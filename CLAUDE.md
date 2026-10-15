@@ -394,6 +394,40 @@ guasti dell'**hardware**.
   `--notifiche /tmp/qualcosa.json`, se no manda le mail vere a tutta la lista.
   Le sue azioni finiscono comunque in `data/azioni.jsonl`, che e' unico.
 
+## La stima dell'efficienza nel riepilogo
+
+Una stima, non un'analisi: le analisi si fanno offline. `tools/efficienza.py`,
+per canale: eventi con l'impulso sopra 4 sigma_ped, cercato in +-50 ns
+attorno all'istante del trigger, diviso eventi totali. Misurato il
+2026-10-15 su run intere (SiPM su ch16-18, 52 V):
+
+| | ch16 | ch17 | ch18 |
+|---|---|---|---|
+| 0057-0066, CFD in maggioranza 2 (cavo giusto) | 94.1% | 99.7% | 92.4% |
+| idem, sui soli eventi con gli altri due > 30 mV (`eff_tag`) | 93.5% | 99.6% | 91.8% |
+| 0158-0162, self-trigger OR a offset 300 | 88.2% | 84.3% | 78.9% |
+| idem, `eff_tag` | 92.5% | 99.3% | 89.2% |
+
+- **La frazione semplice dipende da com'e' fatto il trigger**: in OR entrano
+  eventi con un canale solo, e gli altri due risultano "inefficienti". La
+  frazione sui tag (`eff_tag`) no, e le due serie concordano entro 1-2.5%.
+  Stabile entro lo 0.3% su cinque ore. Comprende la geometria: non e'
+  l'efficienza intrinseca dei rivelatori.
+- **sigma_ped non con la MAD**: su campioni interi la MAD e' intera e
+  sigma_ped saltava fra 2.97 e 4.45 conteggi da una run all'altra; con essa il
+  "pavimento" estrapolato ballava fra 2% e 96%. Ora deviazione standard con
+  esclusione a 3.5 sigma, e il fondo si MISURA in una finestra di solo
+  piedistallo larga quanto la ricerca: 0.0-0.9%.
+- **Le run con l'impulso prima di 180 ns non sono stimabili** (0155-0156,
+  self-trigger a PostTrigger 70%, impulso a 115 ns): la finestra del
+  piedistallo si restringe, ma il fondo esce quanto l'efficienza (~79%).
+  Il grafico lo mostra da se': linea punteggiata sulla piena.
+- **Le run 0163-0167 del 2026-10-14 sono in OR, non in maggioranza 2**, anche
+  se il log dice maggioranza 2: il cavo di TRG-IN era sull'uscita OR. Lo
+  dicono i dati: il 27% degli eventi ha un solo canale sopra 30 mV, contro
+  1 evento su 200 000 nelle 0057-0066. **Questo conteggio e' la verifica
+  della maggioranza su una run gia' presa**, senza rifarne una.
+
 ## Strumenti
 
 | | |

@@ -394,6 +394,31 @@ guasti dell'**hardware**.
   `--notifiche /tmp/qualcosa.json`, se no manda le mail vere a tutta la lista.
   Le sue azioni finiscono comunque in `data/azioni.jsonl`, che e' unico.
 
+## PMT e SiPM sulla stessa scheda
+
+Dal 2026-10-16: SiPM su ch16-20 (gruppo 2), PMT su ch24-25 (gruppo 3). Il
+gruppo 0 (ch0-7) ha problemi e non si usa. Stesso trigger per tutti.
+
+- **Frequenza 1 GS/s**, una sola per scheda: 2.5 GS/s taglierebbe la coda dei
+  SiPM (finestra 410 ns), 750 MS/s e' troppo poco per i PMT. A 1 GS/s
+  l'ampiezza dei PMT e' sottostimata del 14% e la FWHM non e' risolta; la
+  carica si'.
+- **PostTrigger 55%**: dalle run col CFD a 750 MS/s il ritardo fra trigger
+  esterno e impulso e' ~130 ns (stima da una configurazione, cavi compresi);
+  a 1 GS/s con 70% l'impulso cadrebbe a ~177 ns, dentro la finestra del
+  piedistallo 10-180 ns. Con 55% sta a ~330 ns. Da verificare sulla prima run.
+- **DCOffset per canale**, lista parallela a ChannelList: 0xC000 i SiPM
+  (piedistallo ~268, ~3800 conteggi di spazio in su), 0x7000 i PMT (~3185, in
+  giu'). A 0x8000, dove stavano i SiPM fino al 2026-10-15, restavano ~1500
+  conteggi e ch16 arrivava a 1460 al 90-esimo percentile.
+- **La pagina di controllo tratta DCOffset come un numero solo**: la lista
+  scritta nel TOML la lascia stare, ma non va modificata da li'.
+- **Il verso dell'impulso e' per canale, e lo dice il DCOffset**: sopra
+  0x9000 positivi, sotto 0x8000 negativi (`efficienza.verso_da_dcoffset`).
+  **In mezzo non dice niente** -- il piedistallo e' a meta' dinamica -- e
+  decide PulsePolarity. Monitor ed efficienza lo leggono dal log della run.
+  `run_check.py` non e' ancora stato adeguato.
+
 ## La stima dell'efficienza nel riepilogo
 
 Una stima, non un'analisi: le analisi si fanno offline. `tools/efficienza.py`,

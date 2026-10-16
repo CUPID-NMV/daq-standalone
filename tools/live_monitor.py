@@ -98,7 +98,12 @@ class Monitor:
 
         self.status = None        # live-status.json pubblicato dalla DAQ
         self.nota = None          # avviso non fatale da mostrare nella pagina
-        self.segno = -1.0         # verso dell'impulso, finche' non ci sono dati
+        # Verso dell'impulso, UNO PER CANALE (array): sulla stessa scheda
+        # possono stare PMT negativi e SiPM positivi. Finche' non ci sono dati,
+        # negativo.
+        self.segno = np.array([-1.0])
+        self._dco = None                  # {canale: DCOffset} dal log della run
+        self._dco_path = None
         # Finestra in cui si misura il piedistallo, in ns. Prima dell'impulso
         # e non dal campione zero: i primi campioni dopo la cella di trigger
         # del DRS4 non sono puliti.
@@ -351,6 +356,7 @@ class Monitor:
             self._hist.clear()
             self._eff = None
             self._eff_hist.clear()
+            self._dco_path = None
             self.rate = 0.0
             self.origin = 0
             self.cumulati = {}
@@ -462,7 +468,7 @@ class Monitor:
             self._eff_canali = canali
             self._eff_hist.clear()
         self._eff_errore = self._eff.errore
-        r = self._eff.aggiungi(data, primo, segno=getattr(self, "segno", None))
+        r = self._eff.aggiungi(data, primo, segno=self._segni(data.shape[1]))
         if r is not None:
             self._eff_hist.append((now, r[0], r[1].copy(), r[2].copy()))
 
@@ -593,8 +599,9 @@ class Monitor:
         # In unita' di offset, cioe' divisa per l'attenuazione del Transparent
         # Mode, lo spettro si legge nelle stesse unita' della soglia del
         # self-trigger e si vede cosa taglia.
-        estremo = corr.max(axis=2) if self.segno > 0 else corr.min(axis=2)
-        q = np.maximum(self.segno * estremo, 0.0) / self.attenuazione()
+        sg = self._segni(corr.shape[1])[None, :]
+        estremo = np.where(sg > 0, corr.max(axis=2), corr.min(axis=2))
+        q = np.maximum(sg * estremo, 0.0) / self.attenuazione()
         self._ana = (self.hdr, base, corr, amp, t_ns, noise, q)
         return self._ana
 
@@ -704,9 +711,47 @@ class Monitor:
         # 45.1 pC) invece di calare (32.0, 33.8, 33.3, 30.6, 24.5), e un
         # integrale che cala allargando la finestra su un impulso positivo e'
         # impossibile.
-        carica = self.segno * corr[:, :, a_i:b_i].sum(axis=2) * k_pc
+        carica = self._segni(corr.shape[1])[None, :] * corr[:, :, a_i:b_i].sum(axis=2) * k_pc
         dep = self.accumula("cariche", carica, channels, (a_i, b_i))
         return carica, a_i, b_i, nscamp, k_pc, dep
+
+    def _segni(self, n):
+        """Il verso per ognuna delle n colonne dei dati, come array."""
+        sg = np.atleast_1d(np.asarray(self.segno, dtype=float))
+        if sg.size == n:
+            return sg
+        return np.full(n, float(sg[0]) if sg.size else -1.0)
+
+    def _descrivi_segni(self):
+        sg = np.atleast_1d(self.segno)
+        if np.all(sg > 0):
+            return "positive"
+        if np.all(sg < 0):
+            return "negative"
+        canali = [int(c) for c in (self.hdr or {}).get("ChannelList", [])]
+        neg = [c for c, v in zip(canali, sg) if v < 0]
+        return "mixed (negative: %s)" % ", ".join("ch%d" % c for c in neg)
+
+    def _dcoffset_dal_log(self):
+        """{canale: DCOffset} dal log della run, letto una volta per file.
+
+        La DAQ lo scrive canale per canale ("ch24: DCOffset = 0x7000"). E' la
+        dichiarazione piu' diretta del verso: il piedistallo si mette in alto
+        per gli impulsi negativi e in basso per quelli positivi.
+        """
+        if self._dco_path == self.path:
+            return self._dco
+        self._dco_path, self._dco = self.path, None
+        base = self.path[:-3] if self.path and self.path.endswith(".gz") else self.path
+        try:
+            testo = open(os.path.splitext(base)[0] + ".log", errors="replace").read()
+        except (OSError, TypeError):
+            return None
+        import re as _re
+        trovati = {int(c): int(v, 16) for c, v in
+                   _re.findall(r"ch(\d+): DCOffset = (0x[0-9A-Fa-f]+)", testo)}
+        self._dco = trovati or None
+        return self._dco
 
     def _verso(self, corr):
         """+1 se gli impulsi vanno in su, -1 se vanno in giu'.
@@ -719,14 +764,29 @@ class Monitor:
         parti si equivalgono e la risposta e' arbitraria, ma li' non c'e'
         nessun impulso di cui sbagliare il verso.
         """
+        canali = [int(c) for c in self.hdr["ChannelList"]]
+        # Prima il DCOffset di ogni canale: con PMT e SiPM sulla stessa scheda
+        # e' l'unica dichiarazione che vale canale per canale. Il confine e'
+        # 0x9000, dove il piedistallo misurato passa per meta' dinamica
+        # (0x7000 -> 3185 conteggi, 0xA000 -> 1436): sopra, piedistallo in
+        # basso e impulsi positivi.
+        # Fra 0x8000 e 0x9000 il piedistallo sta a meta' e il DCOffset non
+        # dice niente (le run dei SiPM fino al 2026-10-15 erano a 0x8000 con
+        # impulsi positivi): li' decide chi viene dopo.
+        dco = self._dcoffset_dal_log() or {}
         pol = (self.status or {}).get("polarity")
-        if pol == "rising":
-            return 1.0
-        if pol == "falling":
-            return -1.0
-        su = float(np.median(corr.max(axis=2)))
-        giu = float(np.median(-corr.min(axis=2)))
-        return 1.0 if su > giu else -1.0
+        globale = 1.0 if pol == "rising" else (-1.0 if pol == "falling" else None)
+        su = np.median(corr.max(axis=2), axis=0)
+        giu = np.median(-corr.min(axis=2), axis=0)
+        fuori = []
+        for k, c in enumerate(canali):
+            v = efficienza.verso_da_dcoffset(dco[c]) if c in dco else None
+            if v is None:
+                v = globale
+            if v is None:
+                v = 1.0 if su[k] > giu[k] else -1.0
+            fuori.append(float(v))
+        return np.array(fuori)
 
     def effective_threshold(self, values, rms):
         """(ampiezza minima osservata, avvertimento).
@@ -1220,7 +1280,7 @@ class Monitor:
                     # il minimo, com'era, su un segnale positivo si misurava
                     # l'escursione negativa del rumore e il rapporto fra i due
                     # "picchi" non voleva dire piu' niente.
-                    picco = (lambda v: float(v.max()) if self.segno > 0
+                    picco = (lambda v: float(v.max()) if self._segni(corr.shape[1])[i] > 0
                              else float(v.min()))
                     pg, pf = picco(grezzo), picco(filtrato)
                     rg = 1.4826 * np.median(np.abs(grezzo - np.median(grezzo)))
@@ -1376,7 +1436,7 @@ class Monitor:
                     # il fondo scala di QUESTO canale: la scala comune serve a
                     # confrontare, ma da sola nasconde che uno arriva a -120 e
                     # un altro a -9
-                    ax.text(0.97, 0.78, "%.0f" % (self.segno * corr[-1, i]).max(),
+                    ax.text(0.97, 0.78, "%.0f" % (self._segni(corr.shape[1])[i] * corr[-1, i]).max(),
                             transform=ax.transAxes, fontsize=6.5, color="#888",
                             ha="right")
                 else:
@@ -1518,7 +1578,7 @@ class Monitor:
             righe_pie = ["50 \u03a9   \u00b7   gate %.0f-%.0f ns "
                          "(%d samples)   \u00b7   %s pulses"
                          % (t_ns[a_i], t_ns[b_i - 1], nscamp,
-                            "positive" if self.segno > 0 else "negative"),
+                            self._descrivi_segni()),
                          (("baseline from %.0f-%.0f ns (%d samples), per event"
                            % self.base_finestra) if self.base_finestra
                           else "baseline from the whole trace: the charge may be biased")]

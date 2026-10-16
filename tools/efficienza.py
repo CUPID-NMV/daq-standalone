@@ -80,20 +80,57 @@ MV_PER_CONTEGGIO = 1000.0 / 4096
 
 
 def polarita_dal_log(path_log):
-    """+1 impulsi positivi, -1 negativi, None se il log non lo dice.
+    """Il verso degli impulsi dichiarato dal log della run, oppure None.
 
-    PulsePolarity e' quello che la DAQ ha configurato: CAEN_DGTZ_PulsePolarity
-    vale 0 per positivo e 1 per negativo. E' una dichiarazione, quindi vince
-    sulla deduzione dai dati.
+    Prima il DCOffset di ogni canale ("ch24: DCOffset = 0x7000"), che vale
+    canale per canale: con PMT negativi e SiPM positivi sulla stessa scheda e'
+    l'unica dichiarazione giusta per tutti (verso_da_dcoffset). I canali nella
+    zona di mezzo prendono PulsePolarity. Ritorna {canale: +1/-1}.
+
+    Se il log non riporta i DCOffset, PulsePolarity (0 positivo, 1 negativo),
+    uguale per tutti: ritorna +1 o -1.
     """
     try:
         testo = open(path_log, errors="replace").read()
     except OSError:
         return None
     m = re.search(r"PulsePolarity\s*=\s*(\d)", testo)
-    if not m:
+    globale = (1 if m.group(1) == "0" else -1) if m else None
+    dco = re.findall(r"ch(\d+): DCOffset = (0x[0-9A-Fa-f]+)", testo)
+    if dco:
+        fuori = {}
+        for c, v in dco:
+            verso = verso_da_dcoffset(int(v, 16))
+            verso = verso if verso is not None else globale
+            if verso is not None:
+                fuori[int(c)] = verso
+        return fuori or None
+    return globale
+
+
+def verso_da_dcoffset(v):
+    """+1 sopra 0x9000, -1 sotto 0x8000, None in mezzo.
+
+    In mezzo il piedistallo sta a meta' dinamica e lascia spazio da tutte e
+    due le parti: il DCOffset non dichiara niente. Le run dei SiPM fino al
+    2026-10-15 erano a 0x8000 con impulsi positivi.
+    """
+    if v > 0x9000:
+        return 1
+    if v < 0x8000:
+        return -1
+    return None
+
+
+def _segni_per(canali, segno):
+    """Array di versi per i canali dati, da un dict, uno scalare o None."""
+    if segno is None:
         return None
-    return 1 if m.group(1) == "0" else -1
+    if isinstance(segno, dict):
+        if not all(c in segno for c in canali):
+            return None
+        return np.array([float(segno[c]) for c in canali])
+    return np.broadcast_to(np.asarray(segno, dtype=float), (len(canali),)).copy()
 
 
 def sigma_robusta(x, k=3.5, giri=5):
@@ -123,6 +160,9 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None, fil
         ds = f["/events/waveforms"]
         canali = [int(c) for c in hdr["ChannelList"]]
         nch = len(canali)
+        segno = _segni_per(canali, segno)
+        if segno is None:
+            fonte_segno = "data"
         ns = int(hdr["SamplesPerChannel"])
         dt = float(hdr["SamplingTime"]) * 1e9
         totale = ds.shape[0] if not max_eventi else min(ds.shape[0], max_eventi)
@@ -148,7 +188,7 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None, fil
             giu = np.median(-prova.min(axis=2), axis=0)
             segni_prova = np.where(su > giu, 1.0, -1.0)
         else:
-            segni_prova = np.full(nch, float(segno))
+            segni_prova = segno
         orientato = segni_prova[None, :, None] * prova
         amp_p = orientato.max(axis=2)
         pos_p = orientato.argmax(axis=2) * dt
@@ -201,7 +241,7 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None, fil
                     giu = np.median(-corr[:, :, i1:].min(axis=2), axis=0)
                     segni = np.where(su > giu, 1.0, -1.0)
                 else:
-                    segni = np.full(nch, float(segno))
+                    segni = segno
             amp = (segni[None, :, None] * corr[:, :, j0:j1]).max(axis=2)
             su = amp > soglia[None, :]
             sopra += su.sum(axis=0)
@@ -279,7 +319,7 @@ class StimaInCorso:
             giu = np.median(-prova.min(axis=2), axis=0)
             self.segni = np.where(su > giu, 1.0, -1.0)
         else:
-            self.segni = np.full(nch, float(segno))
+            self.segni = np.broadcast_to(np.asarray(segno, dtype=float), (nch,)).copy()
         orientato = self.segni[None, :, None] * prova
         amp_p = orientato.max(axis=2)
         alti = amp_p >= np.median(amp_p, axis=0)[None, :]

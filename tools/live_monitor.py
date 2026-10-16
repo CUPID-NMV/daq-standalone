@@ -1267,16 +1267,17 @@ class Monitor:
             # che crolla deve sembrare crollato. Con "zoom" l'asse parte poco
             # sotto il minimo, per vedere le variazioni di un punto.
             ax.set_ylim((max(0.0, minimo - 3), 100.5) if zoom else (0, 105))
-            ax.set_xlabel("time since start of run [%s]" % ("min" if minuti else "s"))
-            ax.legend(fontsize=7, ncol=min(8, len(self._eff_canali)), loc="lower left",
-                      frameon=False)
-            if not zoom:
-                ax.text(0.99, 0.06, "dotted: same count in a pedestal-only window",
-                        transform=ax.transAxes, ha="right", fontsize=7, color="#6b6a65")
+            # La legenda FUORI dal grafico, a destra: dentro finiva sopra le
+            # curve dei PMT, che stanno in basso (~25%). La nota sulla linea
+            # punteggiata va con l'etichetta dell'asse, dove non copre niente.
+            ax.set_xlabel("time since start of run [%s]   \u00b7   dotted: same count in a "
+                          "pedestal-only window" % ("min" if minuti else "s"), fontsize=8)
+            ax.legend(fontsize=7, loc="center left", bbox_to_anchor=(1.01, 0.5),
+                      frameon=False, handlelength=1.2)
         ax.set_ylabel("above %g\u03c3_ped [%%]" % efficienza.SIGMA_N)
         ax.grid(alpha=.3)
         ax.set_title("Efficiency vs time \u00b7 %g s per point \u00b7 50 MHz low-pass, "
-                     "\u00b150 ns around the trigger" % binw, fontsize=9)
+                     "\u00b150 ns around each channel's pulse" % binw, fontsize=9)
         fig.tight_layout()
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=DPI_FIG)

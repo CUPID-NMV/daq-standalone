@@ -424,6 +424,23 @@ gruppo 0 (ch0-7) ha problemi e non si usa. Stesso trigger per tutti.
   decide PulsePolarity. Monitor ed efficienza lo leggono dal log della run.
   `run_check.py` non e' ancora stato adeguato.
 
+- **Nel monitor, cancello di carica e piedistallo sono AUTOMATICI e per
+  canale** (decisione dell'utente, 2026-10-16, che supera per questo caso la
+  regola "la finestra si dichiara"). Una volta per run, sui primi 200 eventi:
+  la forma d'onda media degli eventi con impulso dice dove l'impulso supera il
+  10% del picco; il cancello va da 10 ns prima a 20 ns dopo, il piedistallo
+  finisce 20 ns prima. Il segno segue il verso del canale: tutte le
+  distribuzioni di carica stanno sull'asse positivo, come si rappresentano gli
+  ADC. Un cancello scritto a mano per il canale vince; quello comune resta per
+  i canali senza impulsi. Misurato a PostTrigger 60%: SiPM 208-632 ns, PMT
+  126-203 ns.
+- **I PMT passati dalla scheda di amplificazione hanno una coda di verso
+  opposto** lunga ~800 ns dopo l'impulso (~+4 conteggi), che ne restituisce
+  quasi tutta l'area: -19 pC nell'impulso, +16 nella coda (run 0186). Firma di
+  un accoppiamento in alternata. Un cancello che contiene la coda da' una
+  carica vicina a zero o del segno sbagliato: e' quello che succedeva col
+  cancello comune 190-1000 ns.
+
 ## La stima dell'efficienza nel riepilogo
 
 Una stima, non un'analisi: le analisi si fanno offline. `tools/efficienza.py`,

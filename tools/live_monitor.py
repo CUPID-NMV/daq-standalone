@@ -103,6 +103,10 @@ class Monitor:
         # negativo.
         self.segno = np.array([-1.0])
         self._dco = None                  # {canale: DCOffset} dal log della run
+        self._auto = None                 # cancelli e piedistalli automatici della run
+        self.gate_origine = []
+        self.base_finestre_ch = []
+        self.base_auto = False
         self._dco_path = None
         # Finestra in cui si misura il piedistallo, in ns. Prima dell'impulso
         # e non dal campione zero: i primi campioni dopo la cella di trigger
@@ -572,23 +576,46 @@ class Monitor:
         # viene presa, la vede scritta sull'asse, e la sposta se la
         # configurazione cambia -- a 5 GHz la finestra intera dura 205 ns e
         # 10-180 non e' piu' un tratto pulito.
+        #
+        # 2026-10-16, per decisione dell'utente: con PMT e SiPM sulla stessa
+        # scheda gli impulsi cadono in istanti diversi canale per canale, e
+        # cambiano a ogni PostTrigger (a 60% i PMT stavano a 136-184 ns,
+        # dentro 10-180). Quindi la finestra del piedistallo diventa PER
+        # CANALE e AUTOMATICA: finisce 20 ns prima dell'inizio dell'impulso
+        # di quel canale, misurato una volta per run (_finestre_auto). Dove
+        # la misura non si puo' fare -- canale senza impulsi, o impulso troppo
+        # presto -- resta la finestra dichiarata.
         self.base_finestra = None
         a, b = self.baseline_ns
+        n_s = d.shape[2]
+        dich = None
         if a is not None and b is not None and b > a:
             i0 = int(np.searchsorted(t_ns, a))
-            i1 = int(np.searchsorted(t_ns, b, "right"))
-            i1 = min(i1, d.shape[2])
+            i1 = min(int(np.searchsorted(t_ns, b, "right")), n_s)
             if i1 - i0 >= 5:
-                off = np.median(corr[:, :, i0:i1], axis=2)
-                corr = corr - off[:, :, None]
-                base = base + off
-                # Il rumore si rimisura li' dentro: la MAD sull'intera traccia
-                # comprende l'impulso e lo conta come fluttuazione.
-                noise = 1.4826 * np.median(
-                    np.abs(corr[:, :, i0:i1]), axis=2)
-                hi, lo = corr.max(axis=2), corr.min(axis=2)
-                amp = np.where(np.abs(lo) > np.abs(hi), lo, hi)
-                self.base_finestra = (float(t_ns[i0]), float(t_ns[i1 - 1]), i1 - i0)
+                dich = (i0, i1)
+        auto = self._finestre_auto(corr, t_ns, noise)
+        fin = [(auto.get(j) or {}).get("ped") or dich for j in range(corr.shape[1])]
+        if any(fin):
+            off = np.zeros(corr.shape[:2])
+            for j, f in enumerate(fin):
+                if f:
+                    off[:, j] = np.median(corr[:, j, f[0]:f[1]], axis=1)
+            corr = corr - off[:, :, None]
+            base = base + off
+            # Il rumore si rimisura li' dentro: la MAD sull'intera traccia
+            # comprende l'impulso e lo conta come fluttuazione.
+            for j, f in enumerate(fin):
+                if f:
+                    noise[:, j] = 1.4826 * np.median(np.abs(corr[:, j, f[0]:f[1]]), axis=1)
+            hi, lo = corr.max(axis=2), corr.min(axis=2)
+            amp = np.where(np.abs(lo) > np.abs(hi), lo, hi)
+            if dich:
+                self.base_finestra = (float(t_ns[dich[0]]), float(t_ns[dich[1] - 1]),
+                                      dich[1] - dich[0])
+        self.base_finestre_ch = [(float(t_ns[f[0]]), float(t_ns[f[1] - 1])) if f else None
+                                 for f in fin]
+        self.base_auto = any((auto.get(j) or {}).get("ped") for j in range(corr.shape[1]))
         # L'ampiezza dell'impulso e' l'escursione dalla parte DELL'IMPULSO,
         # non la maggiore in valore assoluto: quella faceva entrare nello
         # spettro anche i picchi di rumore dal lato sbagliato come se fossero
@@ -604,6 +631,62 @@ class Monitor:
         q = np.maximum(sg * estremo, 0.0) / self.attenuazione()
         self._ana = (self.hdr, base, corr, amp, t_ns, noise, q)
         return self._ana
+
+    # Eventi che servono per misurare dove sta l'impulso di ogni canale.
+    MIN_EVENTI_AUTO = 200
+
+    def _finestre_auto(self, corr, t_ns, noise):
+        """{colonna: {"gate": (da, a) ns, "ped": (i0, i1)}}, misurato una volta per run.
+
+        Per ogni canale: la forma d'onda media degli eventi in cui il canale
+        ha un impulso (il 20% piu' alto in ampiezza, orientata col suo verso)
+        dice dove l'impulso supera il 10% del suo picco. Il cancello va da 10 ns
+        prima a 20 ns dopo; per i PMT amplificati si ferma prima della coda di
+        verso opposto che segue l'impulso, che altrimenti ne cancellerebbe
+        l'area (misurato: -19 pC nell'impulso, +16 nella coda). Il piedistallo
+        finisce 20 ns prima dell'inizio. Si misura su `corr` col piedistallo
+        della traccia intera, che non dipende da nessuna finestra.
+
+        Fissato per la run: un cancello che si muove a ogni aggiornamento
+        azzererebbe a ogni giro gli spettri cumulati, che ne dipendono.
+        """
+        nch = corr.shape[1]
+        canali = tuple(int(c) for c in self.hdr["ChannelList"])
+        if (self._auto is not None and self._auto["path"] == self.path
+                and self._auto["canali"] == canali):
+            return self._auto["ch"]
+        if corr.shape[0] < self.MIN_EVENTI_AUTO:
+            return {}
+        segni = self._segni(nch)
+        dt = float(t_ns[1] - t_ns[0]) if len(t_ns) > 1 else 1.0
+        fuori = {}
+        for j in range(nch):
+            x = segni[j] * corr[:, j, :]
+            amp = x.max(axis=1)
+            sel = amp >= np.percentile(amp, 80)
+            if sel.sum() < 20:
+                continue
+            m = x[sel].mean(axis=0)
+            p = int(np.argmax(m))
+            picco = float(m[p])
+            rumore = float(np.median(noise[:, j])) if noise is not None else 0.0
+            if picco < 5 * max(rumore, 0.5):
+                continue                     # niente impulsi: resta il comune
+            a_ = p
+            while a_ > 0 and m[a_] > 0.1 * picco:
+                a_ -= 1
+            b_ = p
+            while b_ < len(m) - 1 and m[b_] > 0.1 * picco:
+                b_ += 1
+            g = (max(0.0, float(t_ns[a_]) - 10.0), min(float(t_ns[-1]), float(t_ns[b_]) + 20.0))
+            voce = {"gate": g}
+            fine_ped = int(np.searchsorted(t_ns, float(t_ns[a_]) - 20.0))
+            inizio_ped = int(np.searchsorted(t_ns, 10.0))
+            if fine_ped - inizio_ped >= max(20, int(20 / dt)):
+                voce["ped"] = (inizio_ped, fine_ped)
+            fuori[j] = voce
+        self._auto = {"path": self.path, "canali": canali, "ch": fuori}
+        return fuori
 
     # Oltre questo numero di cariche per canale si smette di accumulare. A
     # 500 Hz sono piu' di un'ora di run, e il grafico lo dichiara invece di
@@ -709,12 +792,24 @@ class Monitor:
             a = max(0, min(a, n - 1))
             return a, max(a + 1, min(b, n))
 
-        finestre = []
-        for ch in channels:
+        # Priorita': il cancello scritto a mano per il canale, poi quello
+        # automatico (_finestre_auto), poi quello comune.
+        auto = ((self._auto or {}).get("ch", {})
+                if (self._auto or {}).get("path") == self.path
+                and (self._auto or {}).get("canali") == tuple(int(c) for c in channels) else {})
+        finestre, self.gate_origine = [], []
+        for j, ch in enumerate(channels):
             g = gates_ch.get(int(ch), (None, None))
+            if g != (None, None):
+                origine = "manual"
+            elif j in auto:
+                g, origine = auto[j]["gate"], "auto"
+            else:
+                origine = "common"
             g = (g[0] if g[0] is not None else (gate[0] if gate else None),
                  g[1] if g[1] is not None else (gate[1] if gate else None))
             finestre.append(indici(g))
+            self.gate_origine.append(origine)
         a_i = np.array([f[0] for f in finestre])
         b_i = np.array([f[1] for f in finestre])
         nscamp = b_i - a_i
@@ -1598,13 +1693,16 @@ class Monitor:
                              fontsize=10, pad=16)
                 # Il cancello di QUESTO canale: con un cancello per canale il
                 # pie' di pagina non puo' dirlo per tutti.
-                gate_txt = "gate %.0f-%.0f ns" % (t_ns[a_i[i]], t_ns[b_i[i] - 1])
+                gate_txt = "%.0f-%.0f ns%s" % (
+                    t_ns[a_i[i]], t_ns[b_i[i] - 1],
+                    {"auto": " (auto)", "manual": " (set)"}.get(
+                        (self.gate_origine or [""] * (i + 1))[i], ""))
                 ax.text(0.5, 1.02,
-                        ("%s \u00b7 spread %.2f pC \u00b7 white-noise floor %.2f pC"
+                        ("%s \u00b7 spread %.1f \u00b7 floor %.1f pC"
                          % (gate_txt, sparso, bianco)) if dettagli
-                        else ("%s \u00b7 spread %.2f pC" % (gate_txt, sparso)),
+                        else ("%s \u00b7 spread %.1f pC" % (gate_txt, sparso)),
                         transform=ax.transAxes, ha="center", va="bottom",
-                        fontsize=9,
+                        fontsize=7.5,
                         color="#1a6b1a" if abs(med) > 3 * sparso else "#d62728")
 
                 if logy:
@@ -1643,9 +1741,11 @@ class Monitor:
                 testo_gate = "gate per channel, in each title"
             righe_pie = ["50 \u03a9   \u00b7   %s   \u00b7   %s pulses"
                          % (testo_gate, self._descrivi_segni()),
-                         (("baseline from %.0f-%.0f ns (%d samples), per event"
-                           % self.base_finestra) if self.base_finestra
-                          else "baseline from the whole trace: the charge may be biased")]
+                         ("baseline per channel, ending 20 ns before its pulse, per event"
+                          if self.base_auto else
+                          (("baseline from %.0f-%.0f ns (%d samples), per event"
+                            % self.base_finestra) if self.base_finestra
+                           else "baseline from the whole trace: the charge may be biased"))]
             if da:
                 righe_pie.append("   \u00b7   ".join(da))
 

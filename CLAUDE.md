@@ -407,10 +407,15 @@ gruppo 0 (ch0-7) ha problemi e non si usa. Stesso trigger per tutti.
   esterno e impulso e' ~130 ns (stima da una configurazione, cavi compresi);
   a 1 GS/s con 70% l'impulso cadrebbe a ~177 ns, dentro la finestra del
   piedistallo 10-180 ns. Con 55% sta a ~330 ns. Da verificare sulla prima run.
-- **DCOffset per canale**, lista parallela a ChannelList: 0xC000 i SiPM
-  (piedistallo ~268, ~3800 conteggi di spazio in su), 0x7000 i PMT (~3185, in
-  giu'). A 0x8000, dove stavano i SiPM fino al 2026-10-15, restavano ~1500
-  conteggi e ch16 arrivava a 1460 al 90-esimo percentile.
+- **DCOffset per canale**, lista parallela a ChannelList: **0xB000 i SiPM,
+  0x7000 i PMT**. La tabella del template (0xC000 -> piedistallo ~268) e'
+  misurata su un canale VUOTO e per i SiPM amplificati non vale: l'uscita
+  della scheda di amplificazione porta il piedistallo ~450 conteggi (~110 mV)
+  piu' in basso. Misurato il 2026-10-16: a 0xC000 ch16-18 stavano a 0-8
+  conteggi, tagliati dal fondo (run 0182, da non usare per i SiPM), mentre
+  ch19-20 vuoti stavano a 293; a 0x8000 i SiPM stavano a ~2170. La risposta
+  e' lineare, ~0.142 conteggi per unita' di DCOffset: 0xB000 da' ~420. I PMT
+  a 0x7000 stanno a 3207 (ch24) e 2788 (ch25).
 - **La pagina di controllo tratta DCOffset come un numero solo**: la lista
   scritta nel TOML la lascia stare, ma non va modificata da li'.
 - **Il verso dell'impulso e' per canale, e lo dice il DCOffset**: sopra

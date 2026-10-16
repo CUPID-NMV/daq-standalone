@@ -299,6 +299,23 @@ def coerenza(d):
     if not canali:
         errori.append("ChannelList is empty: nothing would be recorded.")
 
+    # Le liste per canale vanno in parallelo a ChannelList: una piu' corta
+    # replica l'ultimo valore, una piu' LUNGA viene troncata in silenzio. Il
+    # 2026-10-16 si sono tolti ch19 e ch20 da ChannelList lasciando sette
+    # DCOffset, e i PMT su ch24-25 hanno preso l'offset dei SiPM: piedistallo
+    # a 878 invece che a ~3200, impulsi negativi tagliati a zero.
+    dco_l = g.get("DCOffset")
+    if isinstance(dco_l, list) and len(dco_l) > 1 and len(dco_l) != len(canali):
+        avvisi.append("DCOffset has %d values for %d channels in ChannelList: the lists go "
+                      "in parallel, so %s. Channel by channel this gives: %s."
+                      % (len(dco_l), len(canali),
+                         "the extra values are ignored" if len(dco_l) > len(canali)
+                         else "the last value is repeated on the remaining channels",
+                         ", ".join("ch%s=%s" % (ch, hex(dco_l[min(i, len(dco_l) - 1)])
+                                                if isinstance(dco_l[min(i, len(dco_l) - 1)], int)
+                                                else dco_l[min(i, len(dco_l) - 1)])
+                                   for i, ch in enumerate(canali))))
+
     # La cartella di uscita: la DAQ non la crea, si rifiuta di partire con
     # "Output directory does not exist" dopo aver gia' aperto il collegamento.
     # Meglio dirlo qui, che costa una chiamata a stat.

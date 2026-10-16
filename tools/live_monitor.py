@@ -677,7 +677,7 @@ class Monitor:
         """
         return self.status is not None
 
-    def _carica(self, corr, t_ns, gate, channels):
+    def _carica(self, corr, t_ns, gate, channels, gates_ch=None):
         """Carica per evento e canale, in pC, piu' il deposito cumulato.
 
         Sta in un metodo e non dentro al disegno perche' la usano in due -- lo
@@ -691,11 +691,32 @@ class Monitor:
         # la forma d'onda si guarda intera, la carica si integra dove c'e'
         # l'impulso, e legarle costringeva a ritagliare il grafico per fissare
         # il cancello.
-        g0, g1 = gate if gate else (None, None)
-        a_i = 0 if g0 is None else int(np.searchsorted(t_ns, g0, "left"))
-        b_i = len(t_ns) if g1 is None else int(np.searchsorted(t_ns, g1, "right"))
-        a_i = max(0, min(a_i, len(t_ns) - 1))
-        b_i = max(a_i + 1, min(b_i, len(t_ns)))
+        #
+        # Un cancello per canale: PMT e SiPM sulla stessa scheda hanno impulsi
+        # a istanti e con durate diverse (2026-10-16: PMT a ~50 ns e lunghi
+        # pochi ns, SiPM da ~150 ns con una coda di centinaia), e un cancello
+        # unico pensato per i SiPM lasciava fuori i PMT, che davano -4 pC.
+        # Il cancello di un canale si dichiara nei controlli per canale; se
+        # non c'e', vale quello comune. Non si deduce dai dati: una finestra
+        # dedotta scatta sullo stesso rumore che dovrebbe escludere.
+        gates_ch = gates_ch or {}
+        n = len(t_ns)
+
+        def indici(g):
+            g0, g1 = g if g else (None, None)
+            a = 0 if g0 is None else int(np.searchsorted(t_ns, g0, "left"))
+            b = n if g1 is None else int(np.searchsorted(t_ns, g1, "right"))
+            a = max(0, min(a, n - 1))
+            return a, max(a + 1, min(b, n))
+
+        finestre = []
+        for ch in channels:
+            g = gates_ch.get(int(ch), (None, None))
+            g = (g[0] if g[0] is not None else (gate[0] if gate else None),
+                 g[1] if g[1] is not None else (gate[1] if gate else None))
+            finestre.append(indici(g))
+        a_i = np.array([f[0] for f in finestre])
+        b_i = np.array([f[1] for f in finestre])
         nscamp = b_i - a_i
 
         # In picocoulomb: l'integrale della tensione diviso l'impedenza
@@ -711,8 +732,11 @@ class Monitor:
         # 45.1 pC) invece di calare (32.0, 33.8, 33.3, 30.6, 24.5), e un
         # integrale che cala allargando la finestra su un impulso positivo e'
         # impossibile.
-        carica = self._segni(corr.shape[1])[None, :] * corr[:, :, a_i:b_i].sum(axis=2) * k_pc
-        dep = self.accumula("cariche", carica, channels, (a_i, b_i))
+        segni = self._segni(corr.shape[1])
+        carica = np.empty(corr.shape[:2])
+        for j, (a, b) in enumerate(finestre):
+            carica[:, j] = segni[j] * corr[:, j, a:b].sum(axis=1) * k_pc
+        dep = self.accumula("cariche", carica, channels, tuple(finestre))
         return carica, a_i, b_i, nscamp, k_pc, dep
 
     def _segni(self, n):
@@ -1172,7 +1196,7 @@ class Monitor:
 
     def figure(self, kind, n_show=1, xlim=(None, None), ylim=(None, None),
                hset=None, bw=None, qcut=None, qset=None, gate=None, scala="M",
-               dettagli=False, solo=None, rbin=10.0, ezoom=False):
+               dettagli=False, solo=None, rbin=10.0, ezoom=False, gates_ch=None):
         if kind == "rate":
             return self._figura_rate(scala, max(1.0, float(rbin or 10.0)))
         if kind == "eff":
@@ -1424,22 +1448,33 @@ class Monitor:
             else:
                 if kind == "muro_car":
                     carica, a_i, b_i, nscamp, k_pc, dep = self._carica(
-                        corr, t_ns, gate, channels)
+                        corr, t_ns, gate, channels, gates_ch)
                     etich = "charge [pC]"
                 else:
                     dep = self.accumula("ampiezze", q, channels, self.gen)
                     etich = "amplitude [offset units]"
                 dati = {int(c): dep["val"].get(int(c)) for c in canali_dis}
-                tutti = np.concatenate([v for v in dati.values()
-                                        if v is not None and v.size]) \
-                    if any(v is not None and v.size for v in dati.values()) \
-                    else np.zeros(1)
-                lo = float(np.percentile(tutti, 0.5))
-                hi = float(np.percentile(tutti, 99.5))
-                if not hi > lo:
-                    hi = lo + 1.0
-                bordi = np.linspace(lo, hi, 44)
-                titolo = "%s \u00b7 same bins \u00b7 click \u2192 window" % etich
+                # Intervalli comuni DENTRO ogni gruppo di canali con lo stesso
+                # verso: con PMT e SiPM sulla stessa scheda le cariche
+                # differiscono di 30-60 volte (2026-10-16: ~15 pC contro
+                # ~900), e intervalli comuni a tutti mettevano i PMT in un
+                # intervallo solo. Con un verso solo e' come prima.
+                sg_dis = self._segni(corr.shape[1])[list(idx_dis)]
+                bordi_ch, lim_ch = {}, {}
+                for verso in sorted(set(sg_dis.tolist())):
+                    gruppo = [int(c) for c, v in zip(canali_dis, sg_dis) if v == verso]
+                    vals = [dati[c] for c in gruppo if dati[c] is not None and dati[c].size]
+                    tutti = np.concatenate(vals) if vals else np.zeros(1)
+                    lo = float(np.percentile(tutti, 0.5))
+                    hi = float(np.percentile(tutti, 99.5))
+                    if not hi > lo:
+                        hi = lo + 1.0
+                    for c in gruppo:
+                        bordi_ch[c] = np.linspace(lo, hi, 44)
+                        lim_ch[c] = (lo, hi)
+                titolo = ("%s \u00b7 same bins%s \u00b7 click \u2192 window"
+                          % (etich, " for channels of the same polarity"
+                             if len(set(sg_dis.tolist())) > 1 else ""))
 
             for j, (i, ch) in enumerate(zip(idx_dis, canali_dis)):
                 ax = fig.add_axes(celle[j])
@@ -1465,9 +1500,9 @@ class Monitor:
                 else:
                     v = dati.get(int(ch))
                     if v is not None and v.size:
-                        ax.hist(v, bins=bordi, color=col, alpha=.85)
+                        ax.hist(v, bins=bordi_ch[int(ch)], color=col, alpha=.85)
                         ax.set_yscale("log")
-                    ax.set_xlim(lo, hi)
+                    ax.set_xlim(*lim_ch[int(ch)])
                 ax.text(0.04, y_etich, "ch%d" % int(ch), transform=ax.transAxes,
                         fontsize=7.5, color=col, fontweight="bold")
                 ax.set_xticks([]); ax.set_yticks([])
@@ -1482,7 +1517,7 @@ class Monitor:
 
         elif kind == "integrals":
             carica, a_i, b_i, nscamp, k_pc, dep_q = self._carica(corr, t_ns, gate,
-                                                                 channels)
+                                                                 channels, gates_ch)
 
             # Piu' alto degli altri pannelli: sotto gli assi ci vanno
             # etichetta, legenda e il pie' di pagina, e con 3.4 pollici il
@@ -1557,14 +1592,17 @@ class Monitor:
                 # linea di base e non rumore, e va stretto.
                 sparso = 1.4826 * float(np.median(np.abs(val - med)))
                 rms = float(np.median(noise[:, i]))
-                bianco = rms * np.sqrt(nscamp) * k_pc
+                bianco = rms * np.sqrt(nscamp[i]) * k_pc
 
                 ax.set_title("ch%s \u2014 median %.2f pC" % (ch, med),
                              fontsize=10, pad=16)
+                # Il cancello di QUESTO canale: con un cancello per canale il
+                # pie' di pagina non puo' dirlo per tutti.
+                gate_txt = "gate %.0f-%.0f ns" % (t_ns[a_i[i]], t_ns[b_i[i] - 1])
                 ax.text(0.5, 1.02,
-                        ("spread %.2f pC   \u00b7   white-noise floor %.2f pC"
-                         % (sparso, bianco)) if dettagli
-                        else ("spread %.2f pC" % sparso),
+                        ("%s \u00b7 spread %.2f pC \u00b7 white-noise floor %.2f pC"
+                         % (gate_txt, sparso, bianco)) if dettagli
+                        else ("%s \u00b7 spread %.2f pC" % (gate_txt, sparso)),
                         transform=ax.transAxes, ha="center", va="bottom",
                         fontsize=9,
                         color="#1a6b1a" if abs(med) > 3 * sparso else "#d62728")
@@ -1598,10 +1636,13 @@ class Monitor:
             # "charge at the 50 ohm input" era ridondante con l'etichetta
             # dell'asse, che gia' dice "charge [pC]", e a 480 px di larghezza
             # faceva uscire la riga da tutti e due i bordi.
-            righe_pie = ["50 \u03a9   \u00b7   gate %.0f-%.0f ns "
-                         "(%d samples)   \u00b7   %s pulses"
-                         % (t_ns[a_i], t_ns[b_i - 1], nscamp,
-                            self._descrivi_segni()),
+            if len(set(zip(a_i.tolist(), b_i.tolist()))) == 1:
+                testo_gate = "gate %.0f-%.0f ns (%d samples)" % (
+                    t_ns[a_i[0]], t_ns[b_i[0] - 1], nscamp[0])
+            else:
+                testo_gate = "gate per channel, in each title"
+            righe_pie = ["50 \u03a9   \u00b7   %s   \u00b7   %s pulses"
+                         % (testo_gate, self._descrivi_segni()),
                          (("baseline from %.0f-%.0f ns (%d samples), per event"
                            % self.base_finestra) if self.base_finestra
                           else "baseline from the whole trace: the charge may be biased")]
@@ -1969,6 +2010,8 @@ set-up warnings. Off during a run, on when you need to know with which numbers a
   <label>charge x max [pC]<input id="qxmax" placeholder="auto"></label>
   <label>bins<input id="qbin" placeholder="auto" style="width:60px"></label>
   <label class="chk"><input type="checkbox" id="qlog"> log y</label>
+  <label title="charge gate of this channel; empty = the common charge gate above">gate from [ns]<input id="cgfrom" placeholder="common" style="width:70px"></label>
+  <label>to [ns]<input id="cgto" placeholder="common" style="width:70px"></label>
   <button id="qreset">Autoscale</button>
   <button id="atutti" title="copy what you see here to every recorded channel">apply to all</button>
 </div>
@@ -2056,7 +2099,7 @@ function recall(k)   { try { return localStorage.getItem('daqmon.' + k); } catch
 // I valori stanno in memoria per TUTTI i canali; le caselle ne mostrano uno
 // solo, quello scelto nella tendina. A ogni giro si mandano al server quelli
 // di tutti, come prima: cambia come si scrivono, non cosa arriva.
-const CAMPI_CH = ['hxmin', 'hxmax', 'hbin', 'qxmin', 'qxmax', 'qbin'];
+const CAMPI_CH = ['hxmin', 'hxmax', 'hbin', 'qxmin', 'qxmax', 'qbin', 'cgfrom', 'cgto'];
 const FLAG_CH = ['hlog', 'qlog'];
 let valCh = {};              // {ch: {hxmin: "...", hlog: true, ...}}
 
@@ -2732,6 +2775,13 @@ def make_handler(monitor, refresh, defaults):
                         )
                     gate = (self._num(qs, "gfrom", defaults["gfrom"]),
                             self._num(qs, "gto", defaults["gto"]))
+                    gates_ch = {}
+                    for ch in (monitor.hdr or {}).get("ChannelList", []):
+                        ch = int(ch)
+                        g = (self._num(qs, f"cgfrom_{ch}", None),
+                             self._num(qs, f"cgto_{ch}", None))
+                        if g != (None, None):
+                            gates_ch[ch] = g
                     return self._send(200, "image/png",
                                       monitor.figure(kinds[route], n, xlim, ylim,
                                                      hset,
@@ -2742,7 +2792,8 @@ def make_handler(monitor, refresh, defaults):
                                                      qs.get("det", ["0"])[0] == "1",
                                                      self._num(qs, "solo", None),
                                                      self._num(qs, "rbin", 10.0),
-                                                     qs.get("ezoom", ["0"])[0] == "1"))
+                                                     qs.get("ezoom", ["0"])[0] == "1",
+                                                     gates_ch))
 
             self._send(404, "text/plain", b"not found")
 

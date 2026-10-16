@@ -396,17 +396,21 @@ guasti dell'**hardware**.
 
 ## PMT e SiPM sulla stessa scheda
 
-Dal 2026-10-16: SiPM su ch16-20 (gruppo 2), PMT su ch24-25 (gruppo 3). Il
+Dal 2026-10-16: SiPM su ch16-18 (gruppo 2), PMT su ch24-25 (gruppo 3), questi ultimi passati dalla scheda di amplificazione. Il
 gruppo 0 (ch0-7) ha problemi e non si usa. Stesso trigger per tutti.
 
 - **Frequenza 1 GS/s**, una sola per scheda: 2.5 GS/s taglierebbe la coda dei
   SiPM (finestra 410 ns), 750 MS/s e' troppo poco per i PMT. A 1 GS/s
   l'ampiezza dei PMT e' sottostimata del 14% e la FWHM non e' risolta; la
   carica si'.
-- **PostTrigger 55%**: dalle run col CFD a 750 MS/s il ritardo fra trigger
-  esterno e impulso e' ~130 ns (stima da una configurazione, cavi compresi);
-  a 1 GS/s con 70% l'impulso cadrebbe a ~177 ns, dentro la finestra del
-  piedistallo 10-180 ns. Con 55% sta a ~330 ns. Da verificare sulla prima run.
+- **PostTrigger 60%**, scelto dall'utente il 2026-10-16: SiPM a ~290 ns
+  (sopra il 10% da ~220 a ~620), PMT a ~154 ns (136-184). A 70% i PMT cadono
+  a ~50 ns e prima non resta piedistallo: la stima dell'efficienza li
+  dichiara non stimabili. Il ritardo dei PMT rispetto ai SiPM e' ~135 ns.
+- **Configurazione provvisoria**: in futuro PMT e SiPM staranno su
+  digitizer diversi. Le cose fatte per la scheda mista (verso, cancello,
+  piedistallo e finestre di efficienza per canale) restano valide anche con
+  un tipo di rivelatore per scheda.
 - **DCOffset per canale**, lista parallela a ChannelList: **0xB000 i SiPM,
   0x7000 i PMT**. La tabella del template (0xC000 -> piedistallo ~268) e'
   misurata su un canale VUOTO e per i SiPM amplificati non vale: l'uscita

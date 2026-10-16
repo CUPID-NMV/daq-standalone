@@ -1400,20 +1400,26 @@ class Monitor:
             fig = plt.figure(figsize=(larg_px * k / DPI_FIG, alt_px * k / DPI_FIG))
 
             if kind == "muro_wf":
-                # Scala y comune: i canali si confrontano a occhio. Prima si
-                # usavano i percentili 0.2-99.8 di tutti i campioni, perche' un
-                # impulso grande non schiacciasse gli altri; ma l'impulso di un
-                # PMT dura 2-3 campioni su 1000 e restava FUORI dalla scala
-                # (2026-10-16, ch24-25 tagliati). Ora la scala contiene
-                # l'estremo vero di ogni canale mostrato, da tutte e due le
-                # parti: con PMT negativi e SiPM positivi si divide fra su e
-                # giu'. Il numero in alto a destra di ogni cella da'
-                # l'ampiezza di QUEL canale, anche quando sembra piccolo.
+                # Scala y comune -- gli stessi conteggi per pixel in tutte le
+                # celle, cosi' i canali si confrontano a occhio -- ma ORIENTATA
+                # secondo il verso di ogni canale: piedistallo in basso per gli
+                # impulsi positivi, in alto per quelli negativi (i PMT). Cosi'
+                # il verso si legge a colpo d'occhio e la scala copre una sola
+                # direzione invece di due.
+                #
+                # L'ampiezza e' l'estremo vero di ogni canale dalla parte del
+                # suo impulso. Prima si usavano i percentili 0.2-99.8 di tutti
+                # i campioni, e l'impulso di un PMT -- 2-3 campioni su 1000 --
+                # restava fuori scala (2026-10-16). Il numero in alto a destra
+                # di ogni cella da' l'ampiezza di QUEL canale.
                 ultimo = corr[-1][list(idx_dis)]
-                hi = max(0.0, float(ultimo.max()))
-                lo = min(0.0, float(ultimo.min()))
-                margine = 0.06 * (hi - lo) + 1.0
-                lo, hi = lo - margine, hi + margine
+                sg_dis = self._segni(corr.shape[1])[list(idx_dis)]
+                orientato = sg_dis[:, None] * ultimo
+                ampiezza = max(1.0, float(orientato.max()))
+                # dalla parte opposta: il rumore e gli eventuali rimbalzi,
+                # almeno il 6% della scala
+                contro = max(0.06 * ampiezza, float((-orientato).max()), 1.0)
+                margine = 0.06 * ampiezza
                 titolo = "waveforms \u00b7 last event, same scale \u00b7 click \u2192 window"
             else:
                 if kind == "muro_car":
@@ -1438,14 +1444,22 @@ class Monitor:
             for j, (i, ch) in enumerate(zip(idx_dis, canali_dis)):
                 ax = fig.add_axes(celle[j])
                 col = PALETTE[j % len(PALETTE)]
+                # Le scritte stanno dalla parte vuota della cella: in alto,
+                # salvo per i canali negativi, che hanno il piedistallo in alto.
+                y_etich = 0.78
                 if kind == "muro_wf":
+                    if sg_dis[j] < 0:
+                        y_etich = 0.08
                     ax.plot(t_ns, corr[-1, i], lw=0.7, color=col)
                     ax.axhline(0, color="#bbb", lw=0.5, ls=":")
-                    ax.set_ylim(lo, hi)
+                    if sg_dis[j] > 0:
+                        ax.set_ylim(-contro, ampiezza + margine)
+                    else:
+                        ax.set_ylim(-(ampiezza + margine), contro)
                     # il fondo scala di QUESTO canale: la scala comune serve a
                     # confrontare, ma da sola nasconde che uno arriva a -120 e
                     # un altro a -9
-                    ax.text(0.97, 0.78, "%.0f" % (self._segni(corr.shape[1])[i] * corr[-1, i]).max(),
+                    ax.text(0.97, y_etich, "%.0f" % (self._segni(corr.shape[1])[i] * corr[-1, i]).max(),
                             transform=ax.transAxes, fontsize=6.5, color="#888",
                             ha="right")
                 else:
@@ -1454,7 +1468,7 @@ class Monitor:
                         ax.hist(v, bins=bordi, color=col, alpha=.85)
                         ax.set_yscale("log")
                     ax.set_xlim(lo, hi)
-                ax.text(0.04, 0.78, "ch%d" % int(ch), transform=ax.transAxes,
+                ax.text(0.04, y_etich, "ch%d" % int(ch), transform=ax.transAxes,
                         fontsize=7.5, color=col, fontweight="bold")
                 ax.set_xticks([]); ax.set_yticks([])
                 for sp in ax.spines.values():

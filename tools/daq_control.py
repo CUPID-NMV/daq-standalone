@@ -133,7 +133,7 @@ CAMPI = [
     ("digitizer", "NEvents",         "events to acquire",  "intero", (1, 10**9)),
     ("digitizer", "TailCut",         "trailing samples dropped", "intero", (0, 200)),
     ("digitizer", "ChannelList",     "recorded channels",  "lista",  (0, 31)),
-    ("digitizer", "DCOffset",        "DC offset (higher = lower baseline)", "intero", (0, 65535)),
+    ("digitizer", "DCOffset",        "DC offset (higher = lower baseline)", "lista_hex", (0, 65535)),
     ("digitizer", "Connection",      "link",               "scelta", ["auto", "ETH_V4718", "USB_A4818"]),
     ("digitizer", "DRS4Correction",  "DRS4 corrections",   "booleano", None),
     ("digitizer", "OutputFile",      "file prefix",        "testo",  None),
@@ -172,6 +172,10 @@ TABELLA = {
     ("digitizer", "ChannelList"): "dig",
     ("digitizer", "SelfTriggerChannels"): "dig",
     ("digitizer", "SelfTriggerThresholdOffset"): "dig",
+    # Un DCOffset per canale: con PMT negativi e SiPM positivi sulla stessa
+    # scheda serve un valore per canale, e scritto a mano come lista il
+    # 2026-10-16 e' finito disallineato da ChannelList.
+    ("digitizer", "DCOffset"): "dig",
     ("cfd", "Channels"): "cfd",
     ("cfd", "Threshold"): "cfd",
 }
@@ -182,7 +186,7 @@ def _ui_da_toml(tipo, grezzo):
     g = grezzo.strip()
     if tipo in ("scelta", "testo"):
         return g[1:-1] if len(g) >= 2 and g[0] in "\"'" and g[-1] == g[0] else g
-    if tipo == "lista":
+    if tipo in ("lista", "lista_hex"):
         return g[1:-1].strip() if g.startswith("[") else g
     return g
 
@@ -214,6 +218,27 @@ def _toml_da_ui(tipo, valore, dettagli, etichetta):
         if not lo <= n <= hi:
             raise ValueError("%s: out of range, allowed from %d to %d" % (etichetta, lo, hi))
         return v
+    if tipo == "lista_hex":
+        # DCOffset: uno scalare se tutti i canali hanno lo stesso valore, se no
+        # una lista. In esadecimale, come lo si scrive a mano e come lo
+        # riporta il log della DAQ.
+        pezzi = [p for p in v.replace(",", " ").split() if p]
+        if not pezzi:
+            raise ValueError("%s: no value" % etichetta)
+        lo, hi = dettagli
+        uscita = []
+        for p in pezzi:
+            try:
+                n = int(p, 0)
+            except ValueError:
+                raise ValueError("%s: '%s' is not a number" % (etichetta, p))
+            if not lo <= n <= hi:
+                raise ValueError("%s: %s out of range, allowed from 0x0000 to 0xFFFF"
+                                 % (etichetta, p))
+            uscita.append("0x%04X" % n)
+        if len(set(uscita)) == 1:
+            return uscita[0]
+        return "[" + ", ".join(uscita) + "]"
     if tipo == "lista":
         pezzi = [p for p in v.replace(",", " ").split() if p]
         if not pezzi:
@@ -1536,6 +1561,54 @@ class Controllo:
         except OSError:
             pass
 
+    def piedistalli(self):
+        """Dove sta il piedistallo di ogni canale nell'ultima run, in conteggi.
+
+        Serve accanto al DCOffset nella tabella dei canali: il DCOffset dice
+        dove si e' CHIESTO il piedistallo, questo dove e' FINITO. Non sono la
+        stessa cosa: dietro la scheda di amplificazione i SiPM stanno ~450
+        conteggi piu' in basso di un canale vuoto, e a 0xC000 finivano a zero
+        (2026-10-16). A run in corso si legge dal file vivo; a run chiusa
+        dalla stima di fine run (data/efficienza/), che ha gia' letto il file.
+        """
+        logs = []
+        for cartella in self._cartelle_dati():
+            for radice, cartelle, files in os.walk(cartella):
+                cartelle[:] = [c for c in cartelle if c != "scan"]
+                for f in files:
+                    if f.endswith(".log") and not f.startswith(
+                            ("daq-console", "controllore", "monitor-console", "scan-console")):
+                        logs.append(os.path.join(radice, f))
+        if not logs:
+            return {"errore": "no runs found"}
+        log = max(logs, key=os.path.getmtime)
+        run = os.path.splitext(os.path.basename(log))[0]
+        h5 = os.path.splitext(log)[0] + ".h5"
+        try:
+            import numpy as np
+            import daqio
+            if os.path.exists(h5):
+                hdr, d = daqio.load(h5, last=50, live=True)
+                dt = float(hdr["SamplingTime"]) * 1e9
+                # 10-110 ns: prima di dove cadono gli impulsi a ogni PostTrigger
+                # usato finora; un impulso dei PMT dentro questo tratto dura
+                # pochi campioni e la mediana non lo vede.
+                a, b = int(10 / dt), max(int(110 / dt), int(10 / dt) + 5)
+                ped = {str(int(c)): round(float(np.median(d[:, k, a:b])), 0)
+                       for k, c in enumerate(hdr["ChannelList"])}
+                return {"run": run, "da": "running file", "canali": ped}
+            cache = os.path.join(ROOT, "data", "efficienza", run + ".json")
+            if os.path.exists(cache):
+                e = json.load(open(cache))
+                ped = {c: v.get("piedistallo_adc") for c, v in e.get("canali", {}).items()
+                       if v.get("piedistallo_adc") is not None}
+                if ped:
+                    return {"run": run, "da": "end-of-run estimate", "canali": ped}
+            return {"run": run, "canali": {},
+                    "errore": "closed run, pedestals not estimated yet"}
+        except Exception as e:
+            return {"run": run, "canali": {}, "errore": str(e)}
+
     def _cartelle_dati(self):
         """Dove cercare le run del giorno: data/ e l'OutputDir di adesso."""
         cartelle = [os.path.join(ROOT, "data")]
@@ -2529,6 +2602,12 @@ PAGINA = r"""<!doctype html>
     <div id="cfgfile" style="font-size:12px;color:#6b6a65;margin-bottom:8px"></div>
     <div id="cfg"></div>
     <div id="tabdig" style="margin-top:14px"></div>
+    <div style="margin-top:6px;font-size:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      set DC offset <input type="text" id="dcoval" placeholder="0xB000" style="width:70px">
+      on channels <input type="text" id="dcoch" placeholder="16-18, 24" style="width:90px">
+      <button id="dcoapp" style="padding:3px 9px;font-size:12px">apply</button>
+      <span id="dcorun" style="color:#9a9a94;margin-left:8px"></span></div>
+    <div id="dcoavvisi" class="msg ko" style="font-size:12px"></div>
     <div id="tabcfd" style="margin-top:14px"></div>
     <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button id="ricarica" style="background:#ececea">Reload file</button>
@@ -3130,6 +3209,8 @@ function tabellaCanali(dest, titolo, n, colonne, iniziale, riassunto, chiusaSeIg
       const id = "t_" + c.chiave + "_" + ch;
       if(c.tipo === "flag")
         h += `<td><input type="checkbox" id="${id}"${iniziale[c.chiave].includes(ch) ? " checked" : ""}></td>`;
+      else if(c.tipo === "info")
+        h += `<td id="${id}" style="white-space:nowrap;font-variant-numeric:tabular-nums"></td>`;
       else{
         const v = iniziale[c.chiave][ch];
         h += `<td><input type="text" id="${id}" value="${v === undefined ? "" : v}"></td>`;
@@ -3168,11 +3249,19 @@ function disegnaTabelle(){
   const rs = "record " + (reg.length ? reg.join(",") : "none") +
              "  \u00b7  self-trigger " + (self.length ? self.join(",") : "none") +
              (off.length ? ", offset " + off.join(",") : "");
+  // DCOffset in esadecimale, uno per canale registrato: nel TOML e' uno
+  // scalare (uguale per tutti) o una lista parallela a ChannelList.
+  const dco = (valoreDi("DCOffset") || "").match(/0x[0-9a-f]+|\d+/gi) || [];
   tabellaCanali("tabdig", "V1742 digitizer channels", 32, [
     {chiave: "reg",  titolo: "record",       tipo: "flag"},
     {chiave: "self", titolo: "self-trigger", tipo: "flag"},
     {chiave: "off",  titolo: "offset",       tipo: "testo"},
-  ], {reg: reg, self: self, off: srotola(self, off)}, rs, false);
+    {chiave: "dco",  titolo: "DC offset",    tipo: "testo"},
+    {chiave: "ver",  titolo: "pulses",       tipo: "info"},
+    {chiave: "ped",  titolo: "pedestal (last run)", tipo: "info"},
+  ], {reg: reg, self: self, off: srotola(self, off),
+      dco: srotola(reg, dco.map(esa)), ver: {}, ped: {}}, rs, false);
+  preparaDco();
 
   const cch = numeri(valoreDi("Channels"));
   const cth = numeri(valoreDi("Threshold"));
@@ -3190,10 +3279,88 @@ function disegnaTabelle(){
     ], {cfd: cch, cthr: srotola(cch, cth)}, cs, !cfdOn);
 }
 
-function dalleTabelle(){
-  const reg = [], self = [], off = [], cch = [], cth = [];
+// --- DC offset per canale ---------------------------------------------------
+function esa(v){
+  const n = parseInt(v);           // accetta 0x... e decimale
+  return isNaN(n) ? "" : "0x" + n.toString(16).toUpperCase().padStart(4, "0");
+}
+// Il verso dell'impulso che ne segue: e' la stessa regola che usano monitor
+// ed efficienza (efficienza.verso_da_dcoffset). Piedistallo in basso -> c'e'
+// spazio verso l'alto -> impulsi positivi.
+function versoDco(v){
+  const n = parseInt(v);
+  if(isNaN(n)) return "";
+  if(n > 0x9000) return '<span style="color:#15603a;font-weight:600">&uarr; positive</span>';
+  if(n < 0x8000) return '<span style="color:#2a5bd6;font-weight:600">&darr; negative</span>';
+  return '<span style="color:#8a6d1f;font-weight:600" title="between 0x8000 and 0x9000 the pedestal sits mid-range: the pulse direction is not defined by the DC offset, PulsePolarity decides">? mid-range</span>';
+}
+function aggiornaVersi(){
+  const avvisi = [];
   for(let ch = 0; ch < 32; ch++){
-    if(campoDi(ch, "reg") && campoDi(ch, "reg").checked) reg.push(ch);
+    const r = campoDi(ch, "reg"), d = campoDi(ch, "dco"), v = campoDi(ch, "ver");
+    if(!r || !d || !v) continue;
+    // Un canale appena acceso prende il valore del canale registrato prima di
+    // lui: una casella vuota non e' un valore, e il TOML ne vuole uno a canale.
+    if(r.checked && !d.value.trim()){
+      let prec = "";
+      for(let c = ch - 1; c >= 0 && !prec; c--)
+        if(campoDi(c, "reg").checked && campoDi(c, "dco").value.trim()) prec = campoDi(c, "dco").value.trim();
+      d.value = prec || "0x8000";
+    }
+    v.innerHTML = r.checked ? versoDco(d.value) : "";
+    const n = parseInt(d.value);
+    if(r.checked && !isNaN(n) && n >= 0x8000 && n <= 0x9000)
+      avvisi.push("ch" + ch + ": DC offset " + esa(d.value) + " is mid-range, the pulse direction is not defined by it");
+  }
+  $("dcoavvisi").textContent = avvisi.join("  \u00b7  ");
+  $("dcoavvisi").style.display = avvisi.length ? "block" : "none";
+}
+async function caricaPiedistalli(){
+  let p;
+  try{ p = await (await fetch("/api/piedistalli?token=" + TOKEN)).json(); }
+  catch(e){ return; }
+  for(let ch = 0; ch < 32; ch++){
+    const c = campoDi(ch, "ped");
+    if(c) c.textContent = (p.canali && p.canali[ch] !== undefined) ? p.canali[ch] : "";
+  }
+  $("dcorun").textContent = p.run
+    ? "pedestal (last run) from " + p.run + (p.da ? ", " + p.da : "") + (p.errore ? ": " + p.errore : "")
+    : (p.errore || "");
+}
+// Il riempimento rapido: "16-18, 24" -> 16, 17, 18, 24.
+function intervallo(testo){
+  const fuori = [];
+  const pezzi = (testo || "").split(/[\s,]+/);
+  for(const pezzo of pezzi){
+    const m = pezzo.match(/^(\d+)(?:-(\d+))?$/);
+    if(!m) continue;
+    const a = +m[1], b = m[2] !== undefined ? +m[2] : a;
+    for(let ch = Math.min(a, b); ch <= Math.max(a, b); ch++) if(ch < 32) fuori.push(ch);
+  }
+  return fuori;
+}
+function preparaDco(){
+  $("dcoapp").onclick = () => {
+    const v = $("dcoval").value.trim();
+    if(isNaN(parseInt(v))){ msg("DC offset: write a number, e.g. 0xB000.", false); return; }
+    for(const ch of intervallo($("dcoch").value)) campoDi(ch, "dco").value = esa(v);
+    aggiornaVersi(); aggiornaStatoSalva();
+  };
+  for(let ch = 0; ch < 32; ch++){
+    campoDi(ch, "dco").addEventListener("input", aggiornaVersi);
+    campoDi(ch, "reg").addEventListener("change", aggiornaVersi);
+  }
+  aggiornaVersi();
+  caricaPiedistalli();
+}
+
+function dalleTabelle(){
+  const reg = [], self = [], off = [], cch = [], cth = [], dco = [];
+  for(let ch = 0; ch < 32; ch++){
+    if(campoDi(ch, "reg") && campoDi(ch, "reg").checked){
+      reg.push(ch);
+      dco.push(esa(campoDi(ch, "dco") ? campoDi(ch, "dco").value : "") || "0x8000");
+    }
     if(campoDi(ch, "self") && campoDi(ch, "self").checked){
       self.push(ch);
       off.push((campoDi(ch, "off").value || "").trim());
@@ -3205,7 +3372,11 @@ function dalleTabelle(){
       cth.push((campoDi(ch, "cthr").value || "").trim());
     }
   }
-  return {ChannelList: reg.join(", "), SelfTriggerChannels: self.join(", "),
+  // Uno scalare se tutti uguali, come lo scriverebbe chiunque a mano; il
+  // server lo riduce comunque, e cosi' il confronto col file non vede una
+  // modifica che non c'e'.
+  const dcoTesto = new Set(dco).size <= 1 ? (dco[0] || "") : dco.join(", ");
+  return {ChannelList: reg.join(", "), SelfTriggerChannels: self.join(", "), DCOffset: dcoTesto,
           SelfTriggerThresholdOffset: off.join(", "),
           Channels: cch.join(", "), Threshold: cth.join(", ")};
 }
@@ -4004,6 +4175,10 @@ def crea_handler(ctrl, token):
                     ore = 6.0
                 return self._json(psu.serie(ore))
 
+            if parti.path == "/api/piedistalli":
+                if not self._autorizzato(qs):
+                    return self._json({"errore": "token mancante o sbagliato"}, 403)
+                return self._json(ctrl.piedistalli())
             if parti.path in ("/api/stato", "/api/config"):
                 if not self._autorizzato(qs):
                     return self._json({"errore": "token mancante o sbagliato"}, 403)

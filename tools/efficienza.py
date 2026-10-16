@@ -283,11 +283,16 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None, fil
                 # eventi per la lunghezza del piedistallo sono centinaia di
                 # migliaia di valori.
                 sigma = np.full(nch, np.nan)
+                piedistallo = np.full(nch, np.nan)
             for k in validi:
                 w = fin[k]
-                corr = x[:, k, :] - np.median(x[:, k, w["i0"]:w["i1"]], axis=1)[:, None]
+                ped_ev = np.median(x[:, k, w["i0"]:w["i1"]], axis=1)
+                corr = x[:, k, :] - ped_ev[:, None]
                 if np.isnan(sigma[k]):
                     sigma[k] = sigma_robusta(corr[:, w["i0"]:w["i1"]])
+                    # dove sta il piedistallo, in conteggi: lo mostra la pagina
+                    # di controllo accanto al DCOffset
+                    piedistallo[k] = float(np.median(ped_ev))
                 amp[:, k] = (segni[k] * corr[:, w["j0"]:w["j1"]]).max(axis=1)
                 fondo[:, k] = (segni[k] * corr[:, w["i0"]:w["i0"] + w["larg_fondo"]]).max(axis=1)
             del x
@@ -323,6 +328,7 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None, fil
             "ricerca_ns": [round(float(t[w["j0"]]), 1), round(float(t[w["j1"] - 1]), 1)],
             "ha_impulsi": w["ha_impulsi"],
             "sigma_ped": round(float(sigma[k]), 3),
+            "piedistallo_adc": round(float(piedistallo[k]), 0),
             "soglia_conteggi": round(float(soglia[k]), 2),
             "soglia_mv": round(float(soglia[k]) * MV_PER_CONTEGGIO, 3),
             "polarita": int(segni[k]),
@@ -444,7 +450,7 @@ def stima_in_cache(path, **kw):
     """
     os.makedirs(CACHE, exist_ok=True)
     cache = os.path.join(CACHE, nome_run(path) + ".json")
-    chiave = {"versione": 5, "mtime": os.path.getmtime(path), "sigma_n": kw.get("sigma_n", SIGMA_N),
+    chiave = {"versione": 6, "mtime": os.path.getmtime(path), "sigma_n": kw.get("sigma_n", SIGMA_N),
               "filtro": kw.get("filtro", True),
               "ped_ns": list(kw.get("ped_ns", PED_NS))}
     try:

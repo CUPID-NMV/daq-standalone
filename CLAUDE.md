@@ -420,8 +420,12 @@ gruppo 0 (ch0-7) ha problemi e non si usa. Stesso trigger per tutti.
   ch19-20 vuoti stavano a 293; a 0x8000 i SiPM stavano a ~2170. La risposta
   e' lineare, ~0.142 conteggi per unita' di DCOffset: 0xB000 da' ~420. I PMT
   a 0x7000 stanno a 3207 (ch24) e 2788 (ch25).
-- **La pagina di controllo tratta DCOffset come un numero solo**: la lista
-  scritta nel TOML la lascia stare, ma non va modificata da li'.
+- **Nella pagina di controllo il DCOffset e' una colonna della tabella dei
+  canali**, accanto al verso che ne segue e al piedistallo misurato
+  nell'ultima run (dal file vivo, o dalla stima di fine run in
+  `data/efficienza/`). La pagina lo scrive gia' in parallelo a ChannelList:
+  uno scalare se tutti uguali, se no una lista. Sotto la tabella, "set DC
+  offset ... on channels 16-18, 24" per piu' canali insieme.
 - **Il verso dell'impulso e' per canale, e lo dice il DCOffset**: sopra
   0x9000 positivi, sotto 0x8000 negativi (`efficienza.verso_da_dcoffset`).
   **In mezzo non dice niente** -- il piedistallo e' a meta' dinamica -- e

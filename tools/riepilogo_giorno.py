@@ -97,6 +97,8 @@ def _pannello_eff(ax, righe):
         x0 = _inizio_h(r)
         x1 = max(x0 + _secondi(r) / 3600, x0 + 0.05)
         for ch, c in e["canali"].items():
+            if c.get("eff") is None:
+                continue
             ax.plot([x0, x1], [100 * c["eff"]] * 2, lw=3, color=colore[ch], solid_capstyle="butt")
             ax.plot([x0, x1], [100 * c.get("fondo", 0.0)] * 2, lw=1, ls=":", color=colore[ch])
     for ch in canali:
@@ -300,8 +302,9 @@ def _tabella(righe):
                     "%.0f Hz" % float(r["rate_hz"]) if r["rate_hz"] != "" else "—",
                     "%.1f V" % float(r["hv_v"]) if r["hv_v"] != "" else "—",
                     {"si": "yes", "NO": "NO"}.get(r["chiusa"], r["chiusa"]),
-                    (" ".join("%s:%.1f" % (ch, 100 * c["eff"]) for ch, c in r["eff"]["canali"].items())
-                     + (" (ped %.0f-%.0f ns)" % tuple(r["eff"]["ped_ns"]) if r["eff"].get("ped_ristretta") else ""))
+                    (" ".join("%s:%s" % (ch, "%.1f" % (100 * c["eff"]) if c.get("eff") is not None else "—")
+                              for ch, c in r["eff"]["canali"].items())
+                     + (" (ped shortened)" if r["eff"].get("ped_ristretta") else ""))
                     if r.get("eff") else "—"))
     return intest, tab
 
@@ -315,7 +318,7 @@ def _note_comuni(righe, disco):
         note.append("eff = fraction of recorded events in which the channel goes above %g sigma "
                     "of its pedestal, on waveforms low-passed at 50 MHz as in the offline analysis "
                     "(pedestal from 10-180 ns, event by event), searching +-50 ns "
-                    "around the trigger time. A rough estimate: the dotted line in the plot is the "
+                    "around each channel's own pulse. A rough estimate: the dotted line in the plot is the "
                     "same count in a pedestal-only window, and the V1742 spurious spikes count as "
                     "pulses. Where the pulse falls inside 10-180 ns "
                     "(high PostTriggerSize) the pedestal window ends 60 ns before it, and the "
@@ -409,7 +412,10 @@ def componi_sequenza(log_run, come, inizio, chi="", allarmi=()):
         pezzi = []
         for ch in canali:
             v = [100 * r["eff"]["canali"][ch]["eff"] for r in righe
-                 if r.get("eff") and ch in r["eff"]["canali"]]
+                 if r.get("eff") and ch in r["eff"]["canali"]
+                 and r["eff"]["canali"][ch].get("eff") is not None]
+            if not v:
+                continue
             pezzi.append("ch%s %.1f%% (%.1f-%.1f)" % (ch, sum(v) / len(v), min(v), max(v)))
         note.append("Efficiency over the sequence, mean (min-max): " + "  ".join(pezzi))
     note.append("Not closed cleanly: %s" % (", ".join(r["run"] for r in male) if male else "none"))

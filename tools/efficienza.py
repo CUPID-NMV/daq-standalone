@@ -145,6 +145,76 @@ def sigma_robusta(x, k=3.5, giri=5):
     return max(float(s), 0.3)
 
 
+def finestre_per_canale(prova, dt, segni, ped_ns=PED_NS):
+    """Finestre di piedistallo, ricerca e fondo, UNA PER CANALE.
+
+    `prova` sono eventi filtrati col piedistallo della traccia intera tolto
+    (serve solo a sapere DOVE sta l'impulso, e non dipende da nessuna
+    finestra). Per ogni canale, la forma d'onda media del 20% di eventi piu'
+    alti -- orientata col verso del canale -- ha il picco dove sta l'impulso.
+    Il 20% e non la meta': i PMT hanno un impulso in ~un evento su quattro, e
+    la meta' piu' alta conteneva soprattutto rumore.
+
+    Per canale e non comune, dal 2026-10-16: con PMT e SiPM sulla stessa
+    scheda gli impulsi cadevano a ~150 e ~290 ns, e una finestra comune
+    cercava i PMT dove non c'erano. Un canale senza impulsi (picco medio sotto
+    5 volte il rumore) prende la posizione mediana dei canali dello stesso
+    verso che li hanno.
+
+    Ritorna una lista di dict con i0, i1 (piedistallo), j0, j1 (ricerca),
+    larg_fondo, picco_ns, ristretta; oppure con "errore" se il piedistallo
+    prima dell'impulso e' troppo corto.
+    """
+    nch, ns = prova.shape[1], prova.shape[2]
+    t = np.arange(ns) * dt
+    picchi, inizi, ha_impulsi = [], [], []
+    for k in range(nch):
+        x = segni[k] * prova[:, k, :]
+        amp = x.max(axis=1)
+        sel = amp >= np.percentile(amp, 80)
+        m = x[sel].mean(axis=0) if sel.sum() >= 5 else x.mean(axis=0)
+        p = int(np.argmax(m))
+        a_ = p
+        while a_ > 0 and m[a_] > 0.1 * m[p]:
+            a_ -= 1
+        rumore = 1.4826 * float(np.median(np.abs(x - np.median(x))))
+        picchi.append(float(t[p]))
+        inizi.append(float(t[a_]))
+        ha_impulsi.append(float(m[p]) > 5 * max(rumore, 0.5))
+    for k in range(nch):
+        if not ha_impulsi[k]:
+            altri = [picchi[j] for j in range(nch) if ha_impulsi[j] and segni[j] == segni[k]] \
+                or [picchi[j] for j in range(nch) if ha_impulsi[j]]
+            if altri:
+                picchi[k] = float(np.median(altri))
+                vicini = [inizi[j] for j in range(nch) if ha_impulsi[j] and picchi[j] in altri]
+                inizi[k] = float(np.median(vicini)) if vicini else picchi[k] - MARGINE_NS
+    fuori = []
+    for k in range(nch):
+        picco = picchi[k]
+        a, b = ped_ns
+        ristretta = False
+        # Il piedistallo finisce 20 ns prima di dove l'impulso COMINCIA (10%
+        # del picco), non a una distanza fissa dal picco: i PMT salgono in
+        # pochi ns, i SiPM in ~70, e un margine unico di 60 ns dal picco
+        # lasciava i PMT senza piedistallo a PostTrigger 70%.
+        fine = inizi[k] - 20.0
+        if fine < b:
+            b, ristretta = fine, True
+        i0 = int(np.searchsorted(t, a))
+        i1 = int(np.searchsorted(t, b, "right"))
+        if i1 - i0 < MIN_CAMPIONI_PED or i1 >= ns - 5:
+            fuori.append({"errore": "pulse at %.0f ns: %d samples of pedestal before it"
+                          % (picco, max(i1 - i0, 0)), "picco_ns": picco})
+            continue
+        j0 = max(i1, int(np.searchsorted(t, picco - RICERCA_NS)))
+        j1 = min(ns, int(np.searchsorted(t, picco + RICERCA_NS, "right")))
+        fuori.append({"i0": i0, "i1": i1, "j0": j0, "j1": j1, "picco_ns": picco,
+                      "larg_fondo": min(j1 - j0, i1 - i0), "ristretta": ristretta,
+                      "ha_impulsi": ha_impulsi[k]})
+    return fuori
+
+
 def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None, filtro=True):
     """{"run", "eventi", "sigma_n", "ped_ns", "canali": {ch: {...}}} per un file."""
     if segno is None:
@@ -189,36 +259,15 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None, fil
             segni_prova = np.where(su > giu, 1.0, -1.0)
         else:
             segni_prova = segno
-        orientato = segni_prova[None, :, None] * prova
-        amp_p = orientato.max(axis=2)
-        pos_p = orientato.argmax(axis=2) * dt
-        alti = amp_p >= np.median(amp_p, axis=0)[None, :]
-        picco_ns = float(np.median(pos_p[alti]))
-        del prova, orientato
-
-        ped_dichiarata = tuple(ped_ns)
-        ristretta = False
-        if picco_ns - MARGINE_NS < ped_ns[1]:
-            ped_ns = (ped_ns[0], picco_ns - MARGINE_NS)
-            ristretta = True
-        i0 = int(np.searchsorted(t, ped_ns[0]))
-        i1 = int(np.searchsorted(t, ped_ns[1], "right"))
-        lung_ped = i1 - i0
-        if lung_ped < MIN_CAMPIONI_PED or i1 >= ns - 5:
-            raise daqio.DaqFileError(
-                "l'impulso cade a %.0f ns: prima di lui restano %d campioni di piedistallo, "
-                "troppo pochi per stimarne la larghezza" % (picco_ns, max(lung_ped, 0)))
-
-        j0 = max(i1, int(np.searchsorted(t, picco_ns - RICERCA_NS)))
-        j1 = min(ns, int(np.searchsorted(t, picco_ns + RICERCA_NS, "right")))
-        larg = j1 - j0
-        # Il fondo si conta su una finestra di solo piedistallo LARGA QUANTO la
-        # ricerca; se il piedistallo e' piu' corto (finestra ristretta) si usa
-        # quello che c'e', e il risultato lo dice.
-        larg_fondo = min(larg, lung_ped)
+        fin = finestre_per_canale(prova, dt, segni_prova, ped_ns)
+        del prova
+        validi = [k for k in range(nch) if "errore" not in fin[k]]
+        if not validi:
+            raise daqio.DaqFileError(fin[0]["errore"])
         tag_soglia = TAG_MV / MV_PER_CONTEGGIO
+        segni = segni_prova
 
-        sigma = soglia = segni = None
+        sigma = soglia = None
         sopra = np.zeros(nch, dtype=np.int64)
         sopra_fondo = np.zeros(nch, dtype=np.int64)
         n_tag = np.zeros(nch, dtype=np.int64)
@@ -226,41 +275,53 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None, fil
         for a in range(0, totale, blocco):
             b = min(totale, a + blocco)
             x = filtra(np.asarray(ds[a:b], dtype=np.float32).reshape(b - a, nch, ns))
-            ped = np.median(x[:, :, i0:i1], axis=2)
-            corr = x - ped[:, :, None]
-            del x
+            m = b - a
+            amp = np.full((m, nch), -np.inf)
+            fondo = np.full((m, nch), -np.inf)
             if sigma is None:
                 # La larghezza del piedistallo si prende sul primo blocco: 2000
-                # eventi per lung_ped campioni sono centinaia di migliaia di
-                # valori, e la MAD su tutti i blocchi costerebbe la run intera
-                # in memoria.
-                sigma = np.array([sigma_robusta(corr[:, k, i0:i1]) for k in range(nch)])
-                soglia = sigma_n * sigma
-                if segno is None:
-                    su = np.median(corr[:, :, i1:].max(axis=2), axis=0)
-                    giu = np.median(-corr[:, :, i1:].min(axis=2), axis=0)
-                    segni = np.where(su > giu, 1.0, -1.0)
-                else:
-                    segni = segno
-            amp = (segni[None, :, None] * corr[:, :, j0:j1]).max(axis=2)
+                # eventi per la lunghezza del piedistallo sono centinaia di
+                # migliaia di valori.
+                sigma = np.full(nch, np.nan)
+            for k in validi:
+                w = fin[k]
+                corr = x[:, k, :] - np.median(x[:, k, w["i0"]:w["i1"]], axis=1)[:, None]
+                if np.isnan(sigma[k]):
+                    sigma[k] = sigma_robusta(corr[:, w["i0"]:w["i1"]])
+                amp[:, k] = (segni[k] * corr[:, w["j0"]:w["j1"]]).max(axis=1)
+                fondo[:, k] = (segni[k] * corr[:, w["i0"]:w["i0"] + w["larg_fondo"]]).max(axis=1)
+            del x
+            soglia = sigma_n * sigma
             su = amp > soglia[None, :]
             sopra += su.sum(axis=0)
-            fondo = (segni[None, :, None] * corr[:, :, i0:i0 + larg_fondo]).max(axis=2)
             sopra_fondo += (fondo > soglia[None, :]).sum(axis=0)
             if nch >= 2:
                 alto = amp > tag_soglia
-                for k in range(nch):
-                    tag = np.delete(alto, k, axis=1).all(axis=1)
+                for k in validi:
+                    altri = [j for j in validi if j != k]
+                    if not altri:
+                        continue
+                    tag = alto[:, altri].all(axis=1)
                     n_tag[k] += tag.sum()
                     sopra_tag[k] += (tag & su[:, k]).sum()
-            del corr
     finally:
         f.close()
         daqio._cleanup(tmp)
 
     fuori = {}
     for k, ch in enumerate(canali):
+        w = fin[k]
+        if "errore" in w:
+            fuori[str(ch)] = {"errore": w["errore"], "picco_ns": round(w["picco_ns"], 1),
+                              "polarita": int(segni[k]), "eff": None, "fondo": None,
+                              "eff_tag": None, "n_tag": 0}
+            continue
         fuori[str(ch)] = {
+            "picco_ns": round(w["picco_ns"], 1),
+            "ped_ns": [round(float(t[w["i0"]]), 1), round(float(t[w["i1"] - 1]), 1)],
+            "ped_ristretta": w["ristretta"],
+            "ricerca_ns": [round(float(t[w["j0"]]), 1), round(float(t[w["j1"] - 1]), 1)],
+            "ha_impulsi": w["ha_impulsi"],
             "sigma_ped": round(float(sigma[k]), 3),
             "soglia_conteggi": round(float(soglia[k]), 2),
             "soglia_mv": round(float(soglia[k]) * MV_PER_CONTEGGIO, 3),
@@ -272,11 +333,9 @@ def stima(path, sigma_n=SIGMA_N, ped_ns=PED_NS, max_eventi=None, segno=None, fil
             "eff_tag": round(sopra_tag[k] / float(n_tag[k]), 5) if n_tag[k] else None,
         }
     return {"file": os.path.basename(path), "eventi": int(totale),
-            "sigma_n": sigma_n, "ped_ns": [round(x, 1) for x in ped_ns],
-            "ped_ns_dichiarata": list(ped_dichiarata), "ped_ristretta": ristretta,
-            "picco_ns": round(picco_ns, 1),
-            "ricerca_ns": [round(float(t[j0]), 1), round(float(t[j1 - 1]), 1)],
-            "fondo_larghezza_ns": round(larg_fondo * dt, 1), "tag_mv": TAG_MV,
+            "sigma_n": sigma_n, "ped_ns_dichiarata": list(ped_ns),
+            "ped_ristretta": any(fuori[str(c)].get("ped_ristretta") for c in canali),
+            "finestre": "per channel", "tag_mv": TAG_MV,
             "polarita_da": fonte_segno,
             "filtro": ("passa-basso %g MHz, Butterworth ordine %d, avanti e indietro"
                        % (LP_MHZ, LP_ORDINE)) if filtro else "nessuno",
@@ -320,23 +379,16 @@ class StimaInCorso:
             self.segni = np.where(su > giu, 1.0, -1.0)
         else:
             self.segni = np.broadcast_to(np.asarray(segno, dtype=float), (nch,)).copy()
-        orientato = self.segni[None, :, None] * prova
-        amp_p = orientato.max(axis=2)
-        alti = amp_p >= np.median(amp_p, axis=0)[None, :]
-        self.picco_ns = float(np.median((orientato.argmax(axis=2) * self.dt)[alti]))
-        a, b = self.ped_ns
-        if self.picco_ns - MARGINE_NS < b:
-            b = self.picco_ns - MARGINE_NS
-        self.i0 = int(np.searchsorted(t, a))
-        self.i1 = int(np.searchsorted(t, b, "right"))
-        if self.i1 - self.i0 < MIN_CAMPIONI_PED:
-            self.errore = "pulse at %.0f ns: too little pedestal before it" % self.picco_ns
+        self.fin = finestre_per_canale(prova, self.dt, self.segni, self.ped_ns)
+        self.validi = [k for k in range(nch) if "errore" not in self.fin[k]]
+        if not self.validi:
+            self.errore = self.fin[0]["errore"]
             return
-        self.j0 = max(self.i1, int(np.searchsorted(t, self.picco_ns - RICERCA_NS)))
-        self.j1 = min(ns, int(np.searchsorted(t, self.picco_ns + RICERCA_NS, "right")))
-        self.larg_fondo = min(self.j1 - self.j0, self.i1 - self.i0)
-        corr = x - np.median(x[:, :, self.i0:self.i1], axis=2)[:, :, None]
-        self.sigma = np.array([sigma_robusta(corr[:, k, self.i0:self.i1]) for k in range(nch)])
+        self.sigma = np.full(nch, np.nan)
+        for k in self.validi:
+            w = self.fin[k]
+            corr = x[:, k, :] - np.median(x[:, k, w["i0"]:w["i1"]], axis=1)[:, None]
+            self.sigma[k] = sigma_robusta(corr[:, w["i0"]:w["i1"]])
         self.soglia = self.sigma_n * self.sigma
         self.pronta = True
 
@@ -362,11 +414,16 @@ class StimaInCorso:
             # correttezza.
             nuovi = self._filtra(np.asarray(dati[max(da, 0):], dtype=np.float32))
         self.ultimo = primo + n_tot - 1
-        corr = nuovi - np.median(nuovi[:, :, self.i0:self.i1], axis=2)[:, :, None]
-        amp = (self.segni[None, :, None] * corr[:, :, self.j0:self.j1]).max(axis=2)
-        fondo = (self.segni[None, :, None] * corr[:, :, self.i0:self.i0 + self.larg_fondo]).max(axis=2)
-        return (corr.shape[0], (amp > self.soglia[None, :]).sum(axis=0),
-                (fondo > self.soglia[None, :]).sum(axis=0))
+        m, nch = nuovi.shape[0], nuovi.shape[1]
+        sopra = np.zeros(nch, dtype=np.int64)
+        fondo = np.zeros(nch, dtype=np.int64)
+        for k in self.validi:
+            w = self.fin[k]
+            corr = nuovi[:, k, :] - np.median(nuovi[:, k, w["i0"]:w["i1"]], axis=1)[:, None]
+            sopra[k] = ((self.segni[k] * corr[:, w["j0"]:w["j1"]]).max(axis=1) > self.soglia[k]).sum()
+            fondo[k] = ((self.segni[k] * corr[:, w["i0"]:w["i0"] + w["larg_fondo"]]).max(axis=1)
+                        > self.soglia[k]).sum()
+        return (m, sopra, fondo)
 
 
 def nome_run(path):
@@ -387,7 +444,7 @@ def stima_in_cache(path, **kw):
     """
     os.makedirs(CACHE, exist_ok=True)
     cache = os.path.join(CACHE, nome_run(path) + ".json")
-    chiave = {"versione": 4, "mtime": os.path.getmtime(path), "sigma_n": kw.get("sigma_n", SIGMA_N),
+    chiave = {"versione": 5, "mtime": os.path.getmtime(path), "sigma_n": kw.get("sigma_n", SIGMA_N),
               "filtro": kw.get("filtro", True),
               "ped_ns": list(kw.get("ped_ns", PED_NS))}
     try:
@@ -426,18 +483,23 @@ def main():
     r = stima(a.file, sigma_n=a.sigma, max_eventi=a.max_eventi, filtro=not a.grezzo)
     print("%s: %d eventi, soglia %.1f sigma_ped, polarita' dal %s"
           % (r["file"], r["eventi"], r["sigma_n"], r["polarita_da"]))
-    print("impulso a %.0f ns, piedistallo in %.0f-%.0f ns%s"
-          % (r["picco_ns"], r["ped_ns"][0], r["ped_ns"][1],
-             "  (RISTRETTA: l'impulso cadeva nella finestra dichiarata)" if r["ped_ristretta"] else ""))
-    print("ricerca in %.0f-%.0f ns, fondo su %.0f ns di solo piedistallo; filtro: %s"
-          % (r["ricerca_ns"][0], r["ricerca_ns"][1], r["fondo_larghezza_ns"], r["filtro"]))
-    print("%4s %4s %9s %17s %9s %8s %7s %18s" % ("ch", "pol", "sigma_ped", "soglia", "sopra", "eff",
-                                                 "fondo", "eff_tag (n tag)"))
+    print("finestre per canale; filtro: %s" % r["filtro"])
+    print("%4s %4s %9s %13s %13s %9s %17s %9s %8s %7s %16s" % (
+        "ch", "pol", "picco", "piedistallo", "ricerca", "sigma_ped", "soglia", "sopra", "eff",
+        "fondo", "eff_tag (n tag)"))
     for ch, c in r["canali"].items():
-        print("%4s %4s %6.2f cn %5.1f cn %5.2f mV %9d %7.1f%% %6.2f%% %8s (%6d)"
-              % (ch, "+" if c["polarita"] > 0 else "-", c["sigma_ped"], c["soglia_conteggi"],
-                 c["soglia_mv"], c["sopra"], 100 * c["eff"], 100 * c["fondo"],
+        if c.get("errore"):
+            print("%4s %4s %6.0f ns   non stimabile: %s" % (
+                ch, "+" if c["polarita"] > 0 else "-", c["picco_ns"], c["errore"]))
+            continue
+        print("%4s %4s %6.0f ns %5.0f-%-4.0f ns%s %5.0f-%-4.0f ns %6.2f cn %5.1f cn %5.2f mV %9d %7.1f%% %6.2f%% %8s (%6d)"
+              % (ch, "+" if c["polarita"] > 0 else "-", c["picco_ns"], c["ped_ns"][0], c["ped_ns"][1],
+                 "*" if c["ped_ristretta"] else " ", c["ricerca_ns"][0], c["ricerca_ns"][1],
+                 c["sigma_ped"], c["soglia_conteggi"], c["soglia_mv"], c["sopra"], 100 * c["eff"],
+                 100 * c["fondo"],
                  "%.1f%%" % (100 * c["eff_tag"]) if c["eff_tag"] is not None else "-", c["n_tag"]))
+    if r["ped_ristretta"]:
+        print("* piedistallo accorciato: l'impulso del canale cadeva nella finestra dichiarata")
 
 
 if __name__ == "__main__":

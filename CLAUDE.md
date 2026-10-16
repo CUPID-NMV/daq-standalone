@@ -72,6 +72,12 @@ aggiorna. Le chiavi nuove vanno aggiunte lì a parte, con un backup, dicendolo.
 
 ## Cose misurate, da non ri-derivare
 
+- **Il fattore fra offset del self-trigger e soglia del CFD e' 0.2 mV per
+  unita' di offset**, ricavato dall'utente sovrapponendo gli scan del V812 e
+  del self-trigger. Questione CHIUSA per decisione dell'utente il
+  2026-10-16: non riaprirla. Non va confuso con la calibrazione del
+  self-trigger all'ingresso del digitizer (0.42 per gli impulsi larghi,
+  sotto), che e' un'altra grandezza.
 - **La calibrazione della soglia dipende dalla larghezza dell'impulso**, e
   molto: 0.46 mV per unità di offset a 96 ns, **3.93 a 1.6 ns**.
   L'attenuazione del Transparent Mode passa da 1.9 a 16.1. Usare la

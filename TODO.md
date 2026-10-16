@@ -38,44 +38,6 @@ Procedura, la stessa di venerdi:
 Seconda ampiezza (meta') per la linearita', come a settembre: due punti che
 concordano entro il 3% sono quello che dice che non c'e' un errore grossolano.
 
-## Il fattore fra offset del self-trigger e soglia del CFD — aperto
-
-Aggiunto il 2026-10-14. L'idea: sovrapporre uno scan del CFD (V812, asse in
-mV al suo ingresso) a uno del self-trigger (asse in offset) e leggerne il
-fattore di conversione. Sovrapposte a occhio danno **0.2 mV/offset**; il fit
-a due parametri (scala e normalizzazione in rate) da' 0.199 contro lo scan
-del CFD delle 00:09 del 2026-10-13 e 0.246 contro quello delle 09:39. I due
-scan del CFD differiscono fra loro come se il guadagno fosse cresciuto del
-18% nella notte.
-
-Perche' nessuno dei due numeri e' stato adottato:
-
-- portati sulla stessa grandezza fisica -- rate sopra una data ampiezza
-  misurata sulle tracce al digitizer, senza fattori ne' normalizzazioni --
-  i due strumenti danno rate diversi da 1.1 a 2.9 volte, con andamento a U
-  (coincidono solo a 110-125 mV). Due curve di forma diversa si sovrappongono
-  sempre in un tratto, e la scala che ne esce non sono i mV di nessun punto
-  della catena;
-- il rapporto fra le ampiezze viste da CFD e digitizer, g, esce 0.48, 0.59 o
-  0.85 a seconda del metodo. Quello diretto (bordo basso delle ampiezze
-  registrate a ogni soglia del CFD) da' 0.881 +- 0.021 e 0.822 +- 0.027 sui
-  due scan, compatibili fra loro.
-
-Resta valida la calibrazione all'ingresso del digitizer, 0.42 mV/offset, che
-non usa il CFD (CLAUDE.md). Nella pagina degli scan la casella resta vuota
-quando c'e' uno scan del V812; un valore scritto a mano e' marcato ASSUMED.
-
-Al banco, ed e' quello che decide:
-
-1. **g con un impulso e l'oscilloscopio** sui due ingressi, CFD e digitizer.
-2. **Quanti canali ci sono davvero nell'OR del CFD**: run da 30 s con
-   `Majority = 20`, come il 2026-10-12.
-
-Perche' le due curve abbiano forma diversa non e' capito. Candidati non
-verificati: il tempo morto della DAQ negli scan del CFD (una run per punto),
-che spiegherebbe solo il lato sinistro della U; un canale fuori dall'OR; un
-constant fraction che non si comporta come una soglia in ampiezza.
-
 ## SiPM al buio: scan in soglia e run col trigger cieco — al banco
 
 Aggiunto il 2026-10-14. Le run al buio del 2026-10-06 dicono che con offset 3

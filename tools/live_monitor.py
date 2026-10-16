@@ -2110,8 +2110,9 @@ set-up warnings. Off during a run, on when you need to know with which numbers a
   <label>charge x max [pC]<input id="qxmax" placeholder="auto"></label>
   <label>bins<input id="qbin" placeholder="auto" style="width:60px"></label>
   <label class="chk"><input type="checkbox" id="qlog"> log y</label>
-  <label title="charge gate of this channel; empty = the common charge gate above">gate from [ns]<input id="cgfrom" placeholder="common" style="width:70px"></label>
-  <label>to [ns]<input id="cgto" placeholder="common" style="width:70px"></label>
+  <label title="charge gate of this channel; empty = found automatically around its pulse (the common gate above only for channels without pulses)">gate from [ns]<input id="cgfrom" placeholder="auto" style="width:70px"></label>
+  <label>to [ns]<input id="cgto" placeholder="auto" style="width:70px"></label>
+  <button id="gauto" title="empty the gate of EVERY channel: each one goes back to the gate found automatically around its pulse">auto gates</button>
   <button id="qreset">Autoscale</button>
   <button id="atutti" title="copy what you see here to every recorded channel">apply to all</button>
 </div>
@@ -2265,6 +2266,16 @@ function azzera(pre) {
   leggiCh(); tick();
 }
 document.getElementById('hreset').onclick = () => azzera('h');
+// Un cancello scritto a mano vince su quello automatico, e "apply to all"
+// lo copia su tutti i canali: il 2026-10-16 i 30-90 ns dei PMT erano finiti
+// sui SiPM, che integravano solo rumore. Questo li toglie tutti insieme.
+document.getElementById('gauto').onclick = () => {
+  Object.keys(valCh).forEach(ch => {
+    valCh[ch].cgfrom = ''; valCh[ch].cgto = '';
+    salvaCh(ch);
+  });
+  mostraCh(); tick();
+};
 document.getElementById('qreset').onclick = () => azzera('q');
 
 // Con molti canali rifare la stessa scala trentadue volte non e' lavoro da

@@ -429,8 +429,10 @@ gruppo 0 (ch0-7) ha problemi e non si usa. Stesso trigger per tutti.
 - **Il verso dell'impulso e' per canale, e lo dice il DCOffset**: sopra
   0x9000 positivi, sotto 0x8000 negativi (`efficienza.verso_da_dcoffset`).
   **In mezzo non dice niente** -- il piedistallo e' a meta' dinamica -- e
-  decide PulsePolarity. Monitor ed efficienza lo leggono dal log della run.
-  `run_check.py` non e' ancora stato adeguato.
+  decide TriggerPolarity, non PulsePolarity: il C++ legge PulsePolarity ma
+  non la usa, e nelle run dei PMT di settembre vale 0 (positivi) con impulsi
+  negativi. Monitor ed efficienza lo leggono dal log della run.
+  Anche `run_check.py` (dal 2026-10-16).
 
 - **Nel monitor, cancello di carica e piedistallo sono AUTOMATICI e per
   canale** (decisione dell'utente, 2026-10-16, che supera per questo caso la

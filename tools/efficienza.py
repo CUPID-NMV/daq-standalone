@@ -85,16 +85,22 @@ def polarita_dal_log(path_log):
     Prima il DCOffset di ogni canale ("ch24: DCOffset = 0x7000"), che vale
     canale per canale: con PMT negativi e SiPM positivi sulla stessa scheda e'
     l'unica dichiarazione giusta per tutti (verso_da_dcoffset). I canali nella
-    zona di mezzo prendono PulsePolarity. Ritorna {canale: +1/-1}.
+    zona di mezzo prendono TriggerPolarity. Ritorna {canale: +1/-1}.
 
-    Se il log non riporta i DCOffset, PulsePolarity (0 positivo, 1 negativo),
+    Se il log non riporta i DCOffset (le run fino al 2026-10-12 circa),
+    TriggerPolarity (0 fronte di salita = positivi, 1 di discesa = negativi),
     uguale per tutti: ritorna +1 o -1.
+
+    TriggerPolarity e NON PulsePolarity: il C++ legge PulsePolarity ma non la
+    usa, e nessuno l'ha tenuta allineata -- le run dei PMT di settembre hanno
+    PulsePolarity = 0 (positivi) con impulsi negativi. TriggerPolarity invece
+    il self-trigger la usa davvero: sbagliata, la run non triggera.
     """
     try:
         testo = open(path_log, errors="replace").read()
     except OSError:
         return None
-    m = re.search(r"PulsePolarity\s*=\s*(\d)", testo)
+    m = re.search(r"TriggerPolarity\s*=\s*(\d)", testo)
     globale = (1 if m.group(1) == "0" else -1) if m else None
     dco = re.findall(r"ch(\d+): DCOffset = (0x[0-9A-Fa-f]+)", testo)
     if dco:

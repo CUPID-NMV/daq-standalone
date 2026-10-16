@@ -20,10 +20,11 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import daqio
+import efficienza
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-SOGLIA_MIN     = -15       # conteggi: il piu' permissivo che abbia senso
+SOGLIA_MIN     = 15        # conteggi: il piu' permissivo che abbia senso
 SIGMA_IMPULSO  = 8         # oppure questo numero di sigma di rumore, se maggiore
 
 
@@ -36,7 +37,9 @@ def soglia_impulso(rms):
     invece dal rumore del canale, restando comunque ben sopra il massimo che il
     rumore puo' produrre su una traccia intera (~4-5 sigma).
     """
-    return min(SOGLIA_MIN, -SIGMA_IMPULSO * float(rms))
+    # Positiva: le ampiezze qui sono misurate DALLA PARTE DELL'IMPULSO di
+    # ogni canale, quindi positive per PMT e SiPM allo stesso modo.
+    return max(SOGLIA_MIN, SIGMA_IMPULSO * float(rms))
 TOLLERANZA_NS  = 15        # semiampiezza della finestra in cui cercare l'impulso
 LATENZA_NS     = {"paired": 320.0, "global": 420.0}
 
@@ -83,22 +86,45 @@ def stato(data_dir):
 
 
 def larghezza(traccia, dt_ns):
-    """FWHM contando solo i campioni CONTIGUI sotto meta' altezza.
+    """FWHM contando solo i campioni CONTIGUI sopra meta' altezza.
 
-    Senza il vincolo di contiguita' il conteggio include campioni di rumore
-    sparsi altrove nella traccia, e la larghezza esce sistematicamente doppia.
+    La traccia va data gia' ORIENTATA (impulso verso l'alto) e senza
+    piedistallo. Senza il vincolo di contiguita' il conteggio include campioni
+    di rumore sparsi altrove nella traccia, e la larghezza esce
+    sistematicamente doppia.
     """
-    k = int(np.argmin(traccia))
+    k = int(np.argmax(traccia))
     meta = 0.5 * traccia[k]
     lo = hi = k
-    while lo > 0 and traccia[lo - 1] < meta:
+    while lo > 0 and traccia[lo - 1] > meta:
         lo -= 1
-    while hi < len(traccia) - 1 and traccia[hi + 1] < meta:
+    while hi < len(traccia) - 1 and traccia[hi + 1] > meta:
         hi += 1
     return (hi - lo + 1) * dt_ns
 
 
+def versi(path, chans, d):
+    """Verso dell'impulso per canale: dal DCOffset nel log della run, se no
+    dai dati. Stessa regola di monitor ed efficienza."""
+    base = path[:-3] if path.endswith(".gz") else path
+    segno = efficienza._segni_per([int(c) for c in chans],
+                                  efficienza.polarita_dal_log(os.path.splitext(base)[0] + ".log"))
+    if segno is not None:
+        return segno, "run log"
+    s = d - np.median(d, axis=2)[:, :, None]
+    su = np.median(s.max(axis=2), axis=0)
+    giu = np.median(-s.min(axis=2), axis=0)
+    return np.where(su > giu, 1.0, -1.0), "data"
+
+
 def analizza(path, live, max_eventi):
+    """Ampiezze, posizioni, piedistalli e rumore per evento e canale.
+
+    Tutto canale per canale (2026-10-16, PMT e SiPM sulla stessa scheda):
+    il verso dal DCOffset, la posizione dell'impulso misurata sugli eventi
+    (efficienza.finestre_per_canale), il piedistallo nel tratto prima
+    dell'impulso. Le ampiezze sono dalla parte dell'impulso, quindi positive.
+    """
     f, tmp = daqio.open_file(path, live=live)
     try:
         hdr = daqio.read_header(f)
@@ -111,20 +137,33 @@ def analizza(path, live, max_eventi):
         n = n_tot - a0
         amp = np.empty((n, nch)); pos = np.empty((n, nch))
         dc = np.empty((n, nch)); rms = np.empty((n, nch))
+        if n == 0:
+            return hdr, chans, dt, n_tot, amp, pos, dc, rms, np.ones(nch), "", []
+        prima = np.asarray(w[a0:min(a0 + 1000, n_tot), :]).reshape(-1, nch, ns).astype(np.float32)
+        segni, fonte = versi(path, chans, prima)
+        fin = efficienza.finestre_per_canale(prima - np.median(prima, axis=2)[:, :, None],
+                                             dt, segni)
+        del prima
         for a in range(a0, n_tot, 2000):
             z = min(a + 2000, n_tot)
             d = np.asarray(w[a:z, :]).reshape(z - a, nch, ns).astype(np.float32)
-            m = np.median(d, axis=2)
-            s = d - m[:, :, None]
             i, j = a - a0, z - a0
-            dc[i:j] = m
-            amp[i:j] = s.min(axis=2)
-            pos[i:j] = np.argmin(s, axis=2) * dt
-            rms[i:j] = 1.4826 * np.median(np.abs(s), axis=2)
+            for k in range(nch):
+                fk = fin[k]
+                # piedistallo prima dell'impulso; se non c'e' spazio, la
+                # mediana della traccia intera, come prima
+                tratto = d[:, k, fk["i0"]:fk["i1"]] if "errore" not in fk else d[:, k, :]
+                m = np.median(tratto, axis=1)
+                o = segni[k] * (d[:, k, :] - m[:, None])
+                dc[i:j, k] = m
+                amp[i:j, k] = o.max(axis=1)
+                pos[i:j, k] = np.argmax(o, axis=1) * dt
+                rms[i:j, k] = 1.4826 * np.median(np.abs(o[:, fk["i0"]:fk["i1"]] if "errore" not in fk
+                                                        else o), axis=1)
     finally:
         f.close()
         daqio._cleanup(tmp)
-    return hdr, chans, dt, n_tot, amp, pos, dc, rms
+    return hdr, chans, dt, n_tot, amp, pos, dc, rms, segni, fonte, fin
 
 
 def deriva(x, n=101):
@@ -176,18 +215,26 @@ def main():  # noqa: C901
         except daqio.DaqFileError as e:
             print("rate: non misurabile (", e, ")")
 
-    hdr, chans, dt, n_tot, amp, pos, dc, rms = analizza(path, live, args.max_events)
-    attesa, FIN = finestra_attesa(hdr)
-    if FIN is None:
-        FIN = (-1e9, 1e9)
-        print("posizione attesa dell'impulso: non calcolabile, cerco su tutta la finestra")
-    elif attesa < 0:
-        print("ATTENZIONE: con questa frequenza e PostTriggerSize l'impulso cade a "
-              "%.0f ns, cioe' PRIMA dell'inizio della finestra: non e' registrabile"
-              % attesa)
-    else:
-        print("posizione attesa dell'impulso: %.0f ns  (finestra %.0f-%.0f ns)"
-              % (attesa, FIN[0], FIN[1]))
+    hdr, chans, dt, n_tot, amp, pos, dc, rms, segni, fonte, fin = analizza(
+        path, live, args.max_events)
+    # La posizione prevista dalla latenza vale solo per il self-trigger; con
+    # il trigger esterno il ritardo dipende da cavi e moduli. In ogni caso
+    # l'impulso si cerca dove e' stato MISURATO, canale per canale.
+    if str(hdr.get("TriggerMode", "")).lower().startswith("self"):
+        attesa, finattesa = finestra_attesa(hdr)
+        if attesa is not None and attesa < 0:
+            print("ATTENZIONE: con questa frequenza e PostTriggerSize il self-trigger mette "
+                  "l'impulso a %.0f ns, cioe' PRIMA dell'inizio della finestra" % attesa)
+        elif attesa is not None:
+            print("posizione prevista dal self-trigger: %.0f ns" % attesa)
+    print("verso degli impulsi dal %s: %s" % (fonte, "  ".join(
+        "ch%d %s" % (c, "+" if segni[k] > 0 else "-") for k, c in enumerate(chans))))
+
+    def finestra(k):
+        fk = fin[k] if fin else {}
+        if "j0" in fk:
+            return fk["j0"] * dt, (fk["j1"] - 1) * dt
+        return -1e9, 1e9
     if n_tot == 0:
         print("eventi: NESSUNO")
         print()
@@ -204,13 +251,18 @@ def main():  # noqa: C901
         print("  ATTENZIONE: pochi eventi, la deriva non e' ancora misurabile")
     print()
 
+    buoni_per = []
     for i, ch in enumerate(chans):
         cut = soglia_impulso(np.median(rms[:, i]))
-        buoni = (amp[:, i] < cut) & (pos[:, i] > FIN[0]) \
-                                             & (pos[:, i] < FIN[1])
+        fa, fb = finestra(i)
+        buoni = (amp[:, i] > cut) & (pos[:, i] > fa) & (pos[:, i] < fb)
+        buoni_per.append(buoni)
         pur = 100.0 * buoni.mean() if len(buoni) else float("nan")
-        print("ch%d:  rumore %.2f cnt   impulso in posizione nel %.1f%% degli eventi "
-              "(soglia %.0f cnt)" % (ch, np.median(rms[:, i]), pur, cut))
+        dove = ("impulso cercato in %.0f-%.0f ns" % (fa, fb)) if fa > -1e8 else \
+               ("impulso non localizzabile (%s)" % fin[i].get("errore", "?"))
+        print("ch%d (%s):  rumore %.2f cnt   impulso in posizione nel %.1f%% degli eventi "
+              "(soglia %.0f cnt; %s)" % (ch, "positivo" if segni[i] > 0 else "negativo",
+                                         np.median(rms[:, i]), pur, cut, dove))
         if buoni.sum() > 20:
             a = amp[buoni, i]
             q = np.percentile(a, [5, 25, 50, 75, 95])
@@ -221,29 +273,27 @@ def main():  # noqa: C901
               % (dc[:, i].mean(), dd.max() - dd.min(),
                  (dd.max() - dd.min()) / ATT_CONTINUA))
 
-    # la larghezza si misura solo sul canale che ha davvero il segnale
-    i = int(np.argmax([( (amp[:, k] < soglia_impulso(np.median(rms[:, k]))) &
-                         (pos[:, k] > FIN[0]) &
-                         (pos[:, k] < FIN[1]) ).sum()
-                       for k in range(len(chans))]))
+    # La larghezza su ogni canale con abbastanza impulsi: con PMT e SiPM sulla
+    # stessa scheda sono due cose diverse (pochi ns contro ~100), e misurarla
+    # solo sul canale con piu' impulsi ne avrebbe mostrata una sola.
     f, tmp = daqio.open_file(path, live=live)
     try:
         w = f["events/waveforms"]
         ns = hdr["SamplesPerChannel"]; nch = len(chans)
-        sel = np.where((amp[:, i] < soglia_impulso(np.median(rms[:, i]))) &
-                       (pos[:, i] > FIN[0]) &
-                       (pos[:, i] < FIN[1]))[0]
-        if len(sel):
-            a0 = w.shape[0] - len(amp)
+        a0 = w.shape[0] - len(amp)
+        print()
+        for k, ch in enumerate(chans):
+            sel = np.where(buoni_per[k])[0][:300]
+            if len(sel) < 20:
+                continue
             larg = []
-            for k in sel[:1500]:
-                tr = np.asarray(w[a0 + k, :]).reshape(nch, ns).astype(np.float32)[i]
-                larg.append(larghezza(tr - np.median(tr), dt))
+            for e in sel:
+                tr = np.asarray(w[a0 + e, :]).reshape(nch, ns).astype(np.float32)[k]
+                larg.append(larghezza(segni[k] * (tr - dc[e, k]), dt))
             larg = np.array(larg)
-            print()
-            print("ch%d:  larghezza %.2f ns   (10-90%%: %.2f-%.2f)"
-                  % (chans[i], np.median(larg), np.percentile(larg, 10),
-                     np.percentile(larg, 90)))
+            print("ch%d:  larghezza %.2f ns   (10-90%%: %.2f-%.2f, su %d impulsi)"
+                  % (ch, np.median(larg), np.percentile(larg, 10),
+                     np.percentile(larg, 90), len(larg)))
     finally:
         f.close()
         daqio._cleanup(tmp)

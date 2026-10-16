@@ -1400,11 +1400,20 @@ class Monitor:
             fig = plt.figure(figsize=(larg_px * k / DPI_FIG, alt_px * k / DPI_FIG))
 
             if kind == "muro_wf":
-                # Scala y comune: i canali si confrontano a occhio. Percentili
-                # e non min/max, se no un canale con l'impulso grande schiaccia
-                # tutti gli altri a una riga piatta.
-                lo = float(np.percentile(corr[-1], 0.2))
-                hi = float(np.percentile(corr[-1], 99.8))
+                # Scala y comune: i canali si confrontano a occhio. Prima si
+                # usavano i percentili 0.2-99.8 di tutti i campioni, perche' un
+                # impulso grande non schiacciasse gli altri; ma l'impulso di un
+                # PMT dura 2-3 campioni su 1000 e restava FUORI dalla scala
+                # (2026-10-16, ch24-25 tagliati). Ora la scala contiene
+                # l'estremo vero di ogni canale mostrato, da tutte e due le
+                # parti: con PMT negativi e SiPM positivi si divide fra su e
+                # giu'. Il numero in alto a destra di ogni cella da'
+                # l'ampiezza di QUEL canale, anche quando sembra piccolo.
+                ultimo = corr[-1][list(idx_dis)]
+                hi = max(0.0, float(ultimo.max()))
+                lo = min(0.0, float(ultimo.min()))
+                margine = 0.06 * (hi - lo) + 1.0
+                lo, hi = lo - margine, hi + margine
                 titolo = "waveforms \u00b7 last event, same scale \u00b7 click \u2192 window"
             else:
                 if kind == "muro_car":

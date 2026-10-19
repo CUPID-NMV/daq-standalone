@@ -1521,6 +1521,11 @@ class Monitor:
             interi = [int(c) for c in channels]
             if int(solo) in interi:
                 canali_dis = [channels[interi.index(int(solo))]]
+            else:
+                # Un canale chiesto e non letto: lo si dice. Prima si
+                # ricadeva su tutti i canali letti e la scheda di ch24
+                # mostrava le ampiezze dei SiPM (2026-10-19).
+                return self._messaggio("ch%d is not being read" % int(solo))
         idx_dis = [list(channels).index(c) for c in canali_dis]
 
         def apply_limits(ax):
@@ -1539,7 +1544,13 @@ class Monitor:
             frequenza di campionamento. E' gia' costato un falso allarme.
             """
             parti = []
-            if self.base_finestra:
+            # Con un canale solo, la SUA finestra del piedistallo: puo' essere
+            # automatica o scritta a mano, diversa da quella comune.
+            fch = (self.base_finestre_ch[idx_dis[0]]
+                   if len(idx_dis) == 1 and idx_dis[0] < len(self.base_finestre_ch) else None)
+            if fch:
+                parti.append("baseline %.0f-%.0f ns" % fch)
+            elif self.base_finestra:
                 parti.append("baseline %.0f-%.0f ns" % self.base_finestra[:2])
             else:
                 parti.append("baseline: whole trace")
@@ -2143,6 +2154,15 @@ class Monitor:
         plt.close(fig)
         return buf.getvalue()
 
+    def _messaggio(self, testo):
+        fig, ax = plt.subplots(figsize=(self.LARG_SCHEDA_PX / DPI_FIG, 1.2))
+        ax.text(0.5, 0.5, testo, ha="center", va="center", fontsize=9, color="#888")
+        ax.axis("off")
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=DPI_FIG)
+        plt.close(fig)
+        return buf.getvalue()
+
     def _placeholder(self):
         # Uno schermo vuoto dopo un azzeramento sembra un guasto: va detto che
         # si sta aspettando, e da quando.
@@ -2306,7 +2326,7 @@ PAGE = """<!DOCTYPE html>
      scale sono per canale, nelle impostazioni del canale (la rotella sulla
      sua scheda), salvate nel monitor e uguali per tutti. -->
 <div class="ctl">
-  <label>channels<input id="canali" value="" placeholder="all  e.g. 8,9,12-15" style="width:150px"></label>
+  <label title="which channel cards to show; the monitor keeps reading all channels">channels shown<input id="canali" value="" placeholder="all  e.g. 8,9,12-15" style="width:150px"></label>
   <label title="one point every N seconds, from the history of event counts">rate bin [s]<input id="rbin" value="10" style="width:60px"></label>
   <label class="chk" title="efficiency plot: axis from just below the lowest point instead of 0-100%">
     <input type="checkbox" id="ezoom"> zoom eff.</label>
@@ -2375,8 +2395,27 @@ function setAlert(msg) {
   if (msg) a.textContent = msg;
   document.body.classList.toggle('stale', !!msg);
 }
-// Preferenze di VISTA, di chi guarda: restano nel suo browser.
+// Preferenze di VISTA, di chi guarda: restano nel suo browser. "channels"
+// sceglie quali schede MOSTRARE e non va al server: li' cambierebbe i canali
+// letti per tutti, e le immagini chieste con un filtro diverso da quello
+// delle statistiche mostravano un canale al posto di un altro (2026-10-19).
 const FIELDS = ['canali', 'scala', 'rbin'];
+const AL_SERVER = ['scala', 'rbin'];
+
+// "8,9,12-15" -> insieme di canali; vuoto = tutti (null).
+function filtroCanali() {
+  const t = document.getElementById('canali').value.trim();
+  if (!t) return null;
+  const fuori = new Set();
+  const pezzi = t.split(/[\\s,]+/);
+  for (const pezzo of pezzi) {
+    const m = pezzo.match(/^(\\d+)(?:-(\\d+))?$/);
+    if (!m) continue;
+    const a = +m[1], b = m[2] !== undefined ? +m[2] : a;
+    for (let c = Math.min(a, b); c <= Math.max(a, b); c++) fuori.add(c);
+  }
+  return fuori;
+}
 try {
   for (const f of FIELDS) {
     const v = localStorage.getItem('daqmon.' + f);
@@ -2660,7 +2699,7 @@ function params() {
   for (const f of FIELDS) {
     const v = document.getElementById(f).value.trim();
     try { localStorage.setItem('daqmon.' + f, v); } catch (e) {}
-    if (v !== '') p.set(f, v);
+    if (v !== '' && AL_SERVER.includes(f)) p.set(f, v);
   }
   return p;
 }
@@ -2742,7 +2781,9 @@ async function giro() {
        <td>${na(c.offset)}</td><td>${na(c.threshold)}</td>
        <td>${c.eff_note ? '<span class="err">'+c.eff_note+'</span>' : na(c.eff_mv)}</td>
        <td>${na(c.eff)}</td></tr>`).join('');
-    costruisciSchede((s.channels || []).map(c => c.ch));
+    const filtro = filtroCanali();
+    costruisciSchede((s.channels || []).map(c => c.ch)
+                     .filter(ch => filtro === null || filtro.has(ch)));
     try {
       IMP = await (await fetch('impostazioni.json', {cache: 'no-store'})).json();
     } catch (e) {}

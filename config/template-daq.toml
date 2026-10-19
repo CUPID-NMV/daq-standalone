@@ -173,6 +173,15 @@ ExtTriggerMode  = "NIM"
 # ---------------------------------------------------------------------------
 SelfTrigger     = false      # <<< true = abilitato, false = disabilitato
 
+# false = il self-trigger programma le soglie e manda i canali discriminati su
+# TRG-OUT (serve TriggerOut = "self" o "all"), ma NON fa acquisire: le run le
+# fa partire il trigger esterno. Serve per una logica esterna, per esempio una
+# maggioranza nel V812 fra TRG-OUT e altri rivelatori, che rientra da TRG-IN
+# (allora ExternalTrigger = true). Di serie true: il self-trigger acquisisce.
+# Aggiunto il 2026-10-19; il passaggio su TRG-OUT di un gruppo escluso dal
+# trigger globale e' da verificare all'oscilloscopio.
+# SelfTriggerAcquire = false
+
 # "paired" = l'OR dei canali fa acquisire le coppie di gruppi gr0/gr1 e gr2/gr3
 #            in modo indipendente (sempre disponibile, AMC >= 0.4)
 # "global" = OR su tutta la board: un canale sopra soglia fa acquisire tutti i

@@ -63,6 +63,7 @@ Digitizer::Digitizer()
       fNTransferedEvents(1),
       fGroupMask(0),
       fSelfTrigger(fConfig.GetEntry<bool>("digitizer","SelfTrigger",false)),
+      fSelfTriggerAcquire(fConfig.GetEntry<bool>("digitizer","SelfTriggerAcquire",true)),
       fDRS4Correction(fConfig.GetEntry<bool>("digitizer","DRS4Correction",true)),
       fSaveRaw(fConfig.GetEntry<bool>("digitizer","SaveRaw",false)),
       fExternalTrigger(fConfig.GetEntry<bool>("digitizer","ExternalTrigger",true)),
@@ -1539,6 +1540,34 @@ void Digitizer::ConfigureTrigger() {
     else
         Log::OutSummary("→ Self-trigger: DISABLED");
 
+    // Self-trigger solo sul connettore: soglie programmate come sopra, ma i
+    // gruppi non fanno acquisire. Due cose da spegnere, perche' le strade per
+    // cui un canale sopra soglia fa acquisire sono due:
+    //   - 0x8000[21] = 1: niente acquisizione automatica del gruppo (modo
+    //     "paired");
+    //   - 0x810C[3:0] = 0: nessun gruppo genera il trigger globale (modo
+    //     "global").
+    // L'instradamento verso la motherboard (0x8000[31:28] = 0100) e la
+    // maschera di TRG-OUT (0x8110) li mette ConfigureTriggerOut, piu' sotto.
+    // Che il FPGA lasci passare su TRG-OUT un gruppo escluso dal trigger
+    // globale e' quello che dicono i registri; il 2026-10-19 non era ancora
+    // stato verificato all'oscilloscopio.
+    if (fSelfTrigger && !fSelfTriggerAcquire) {
+        CAEN_DGTZ_WriteRegister(fHandle, REG_BOARD_CONFIG_SET, 1u << BIT_SELFTRG_NO_AUTOACQ);
+        uint32_t gmask = 0;
+        if (CAEN_DGTZ_ReadRegister(fHandle, REG_GLOBAL_TRIGGER_MASK, &gmask) == CAEN_DGTZ_Success)
+            CAEN_DGTZ_WriteRegister(fHandle, REG_GLOBAL_TRIGGER_MASK, gmask & ~0xFu);
+        Log::OutSummary("→ Self-trigger: TRG-OUT ONLY. The channels are discriminated and "
+                        "sent to TRG-OUT, but do NOT trigger the acquisition.");
+        if (fTriggerOutStr == "off" || fTriggerOutStr == "default")
+            Log::OutWarning("SelfTriggerAcquire = false with TriggerOut = \"" + fTriggerOutStr +
+                            "\": the self-trigger goes nowhere. Use TriggerOut = \"self\" "
+                            "or \"all\".");
+        if (!fExternalTrigger)
+            Log::OutWarning("SelfTriggerAcquire = false and ExternalTrigger = false: "
+                            "nothing triggers the acquisition.");
+    }
+
     // --- Trigger esterno su TRG-IN ---
     CAEN_DGTZ_TriggerMode_t extMode =
         fExternalTrigger ? fExternalTriggerMode : CAEN_DGTZ_TRGMODE_DISABLED;
@@ -1550,7 +1579,7 @@ void Digitizer::ConfigureTrigger() {
         Log::OutSummary(std::string("→ External trigger (TRG-IN): ") +
                         (fExternalTrigger ? "ENABLED" : "DISABLED"));
 
-    if (!fSelfTrigger && !fExternalTrigger)
+    if ((!fSelfTrigger || !fSelfTriggerAcquire) && !fExternalTrigger)
         Log::OutWarning("Neither external trigger nor self-trigger is enabled: "
                         "the board will only acquire on software triggers.");
 
@@ -1608,7 +1637,8 @@ void Digitizer::AcquireEvents() {
 
     std::string trgsrc;
     if (fExternalTrigger) trgsrc += "external";
-    if (fSelfTrigger)     trgsrc += (trgsrc.empty() ? "" : " + ") + std::string("self");
+    if (fSelfTrigger && fSelfTriggerAcquire)
+        trgsrc += (trgsrc.empty() ? "" : " + ") + std::string("self");
     if (trgsrc.empty())   trgsrc = "software only";
     // Rilettura DOPO l'avvio: i registri del pannello frontale si leggono
     // giusti a fine configurazione, ma il connettore e' risultato muto. Se
@@ -2275,7 +2305,11 @@ void Digitizer::PrepareOutput() {
 
         std::string trig_mode;
         if (fExternalTrigger) trig_mode += "External";
-        if (fSelfTrigger)     trig_mode += (trig_mode.empty() ? "" : "+") + std::string("Self");
+        // Con il self-trigger solo su TRG-OUT gli eventi li fa partire il
+        // trigger esterno: e' quello che il file deve dire, perche' gli
+        // strumenti di analisi decidono da qui dove aspettarsi l'impulso.
+        if (fSelfTrigger && fSelfTriggerAcquire)
+            trig_mode += (trig_mode.empty() ? "" : "+") + std::string("Self");
         if (trig_mode.empty()) trig_mode = "Disabled";
         {
             H5::StrType stype(H5::PredType::C_S1, H5T_VARIABLE);

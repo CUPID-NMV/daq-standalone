@@ -89,6 +89,10 @@ private:
     uint32_t fGroupMask;
 
     bool fSelfTrigger;
+    // false = il self-trigger programma soglie e TRG-OUT ma NON fa acquisire:
+    // serve a mandare i canali discriminati a una logica esterna (per
+    // esempio una maggioranza nel V812) che rientra da TRG-IN.
+    bool fSelfTriggerAcquire;
     bool fDRS4Correction;   // correzione celle DRS4 sui dati REGISTRATI
     bool fSaveRaw;
     bool fExternalTrigger;

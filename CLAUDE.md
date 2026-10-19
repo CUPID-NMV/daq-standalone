@@ -72,6 +72,19 @@ aggiorna. Le chiavi nuove vanno aggiunte lì a parte, con un backup, dicendolo.
 
 ## Cose misurate, da non ri-derivare
 
+- **PMT passati dalla scheda di amplificazione (ch24-25, 1 GS/s): FWHM 7 ns**
+  fino a ~100 mV, 8 ns fra 100 e 200, 9 ns sopra: si allargano con
+  l'ampiezza (run 0189, 20000 eventi). Non i 1.8 ns dei PMT nudi.
+- **Calibrazione del self-trigger per i PMT amplificati: ~0.8 mV per unita'
+  di offset fra offset ~10 e 100** (attenuazione ~3.2-3.6), misurata il
+  2026-10-18 con `calibra_selftrigger.py` su due scan della run 0199
+  (`measurements/calib_selftrigger_20261018_*.json`). I due stimatori danno
+  0.88 e 0.78 sullo scan fitto (14-100), cioe' ~3 sigma di distanza: c'e' un
+  sistematico del 10-15% non identificato, il numero vale +-15%. **Sopra
+  ~150 la relazione si incurva** (0.6-0.7 mV/offset): coerente con gli
+  impulsi grandi piu' larghi, che il Transparent Mode attenua meno, ma non
+  dimostrato. E' il primo punto misurato fra 1.6 ns (3.08 a 1 GS/s) e
+  l'altopiano dei 47 ns (0.42).
 - **Il fattore fra offset del self-trigger e soglia del CFD e' 0.2 mV per
   unita' di offset**, ricavato dall'utente sovrapponendo gli scan del V812 e
   del self-trigger. Questione CHIUSA per decisione dell'utente il

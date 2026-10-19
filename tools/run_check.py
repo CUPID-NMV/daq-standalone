@@ -138,7 +138,7 @@ def analizza(path, live, max_eventi):
         amp = np.empty((n, nch)); pos = np.empty((n, nch))
         dc = np.empty((n, nch)); rms = np.empty((n, nch))
         if n == 0:
-            return hdr, chans, dt, n_tot, amp, pos, dc, rms, np.ones(nch), "", []
+            return hdr, chans, dt, n_tot, amp, pos, dc, rms, np.ones(nch), "", [], a0
         prima = np.asarray(w[a0:min(a0 + 1000, n_tot), :]).reshape(-1, nch, ns).astype(np.float32)
         segni, fonte = versi(path, chans, prima)
         fin = efficienza.finestre_per_canale(prima - np.median(prima, axis=2)[:, :, None],
@@ -163,7 +163,7 @@ def analizza(path, live, max_eventi):
     finally:
         f.close()
         daqio._cleanup(tmp)
-    return hdr, chans, dt, n_tot, amp, pos, dc, rms, segni, fonte, fin
+    return hdr, chans, dt, n_tot, amp, pos, dc, rms, segni, fonte, fin, a0
 
 
 def deriva(x, n=101):
@@ -215,7 +215,7 @@ def main():  # noqa: C901
         except daqio.DaqFileError as e:
             print("rate: non misurabile (", e, ")")
 
-    hdr, chans, dt, n_tot, amp, pos, dc, rms, segni, fonte, fin = analizza(
+    hdr, chans, dt, n_tot, amp, pos, dc, rms, segni, fonte, fin, a0_eventi = analizza(
         path, live, args.max_events)
     # La posizione prevista dalla latenza vale solo per il self-trigger; con
     # il trigger esterno il ritardo dipende da cavi e moduli. In ogni caso
@@ -280,7 +280,11 @@ def main():  # noqa: C901
     try:
         w = f["events/waveforms"]
         ns = hdr["SamplesPerChannel"]; nch = len(chans)
-        a0 = w.shape[0] - len(amp)
+        # L'indice del primo evento analizzato va preso da analizza(), non
+        # ricalcolato dalla lunghezza del file: a run in corso il file e'
+        # cresciuto nel frattempo, e si rileggevano eventi diversi, in gran
+        # parte senza impulso. Sui PMT della run 0189 dava 3.5 ns invece di 7.
+        a0 = a0_eventi
         print()
         for k, ch in enumerate(chans):
             sel = np.where(buoni_per[k])[0][:300]

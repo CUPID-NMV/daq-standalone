@@ -127,7 +127,25 @@ def larghezza_impulsi(path, canali, quanti=300):
             return None
         base = np.median(d[:, 0, i0:i1], axis=1)
         w = d[:, 0, :] - base[:, None]
-        w = w * (np.sign(np.sum(w)) or 1.0)      # impulsi positivi o negativi
+        # Il verso dal log della run (DCOffset per canale, poi TriggerPolarity),
+        # come monitor ed efficienza. Dedurlo dal segno della somma delle
+        # tracce e' fragile con i PMT amplificati: impulso negativo e coda
+        # positiva che lo segue hanno aree quasi uguali, e la somma resta
+        # vicina a zero. Resta come ripiego se il log non dice niente.
+        # NB: la larghezza e' misurata sugli ULTIMI eventi, quindi alla soglia
+        # di fine scan: i PMT amplificati sono larghi 7 ns sotto ~100 mV e
+        # 9 ns sopra 200, e a fine scan restano solo i grandi.
+        segno = None
+        try:
+            import efficienza
+            ch0 = int(hdr["ChannelList"][0])
+            base_log = path[:-3] if path.endswith(".gz") else path
+            v = efficienza._segni_per([ch0], efficienza.polarita_dal_log(
+                os.path.splitext(base_log)[0] + ".log"))
+            segno = float(v[0]) if v is not None else None
+        except Exception:
+            segno = None
+        w = w * (segno if segno is not None else (np.sign(np.sum(w)) or 1.0))
 
         # La larghezza si misura EVENTO PER EVENTO, attorno al massimo di
         # ciascuno, e poi se ne prende la mediana. Misurarla sulla forma

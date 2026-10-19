@@ -543,6 +543,14 @@ resterebbe disallineato. `localhost:8766/monitor/` inoltra al monitor sulla
 stessa porta del controllore: da VPN o da inoltro di porta quasi sempre è
 inoltrata solo quella.
 
+Il monitor ha **una scheda per canale** (ultime 100 forme d'onda col
+cancello colorato, e carica) con una rotella per le impostazioni di quel
+canale: cancello, piedistallo, scale; vuote = automatiche. Dal 2026-10-19 le
+impostazioni stanno in **`<data>/monitor-impostazioni.json`, uguali per
+chiunque apra il monitor**, non piu' nel browser di ciascuno. Un monitor di
+prova va lanciato con `--impostazioni /tmp/qualcosa.json`, se no cambia
+quelle di tutti.
+
 Nel monitor l'interruttore **`details`** accende cancello, finestra del
 piedistallo, calibrazione e avvertimenti da messa a punto. Spento di serie:
 durante la presa dati sono rumore sul grafico, quando si confrontano due

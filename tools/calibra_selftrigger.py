@@ -52,8 +52,12 @@ MV_PER_CONTEGGIO = 1000.0 / 4096.0
 TOLLERANZA_SPURI = 0.05
 
 
-def ampiezze_mV(dati):
-    """Ampiezza positiva di ogni evento, in mV, massimo sui canali letti.
+def ampiezze_mV(dati, segni=None):
+    """Ampiezza di ogni evento DALLA PARTE DELL'IMPULSO, in mV, massimo sui canali letti.
+
+    `segni` e' il verso di ogni canale (+1 positivi, -1 negativi): i PMT hanno
+    impulsi negativi e misurarne il massimo darebbe il rumore dal lato
+    sbagliato (2026-10-18, primo scan dei PMT amplificati).
 
     Il piedistallo e' la mediana della traccia intera: qui e' lecito perche'
     l'impulso occupa ~35 campioni su 1024 (46 ns su 1365). NON lo sarebbe con
@@ -62,6 +66,8 @@ def ampiezze_mV(dati):
     """
     base = np.median(dati, axis=2)
     corr = dati - base[:, :, None]
+    if segni is not None:
+        corr = corr * np.asarray(segni, dtype=float)[None, :, None]
     per_canale = corr.max(axis=2) * MV_PER_CONTEGGIO     # (eventi, canali)
     return per_canale.max(axis=1), per_canale
 
@@ -117,11 +123,20 @@ def main():
     # minuto e dieci.
     t0 = time.time()
     fino_a = punti[-1]["eventi_a"] if a.verifica else rif["eventi_a"]
-    hdr, dati = daqio.load(h5, max_events=fino_a, channels=canali)
+    hdr, dati = daqio.load(h5, max_events=fino_a, channels=canali,
+                           live=h5.endswith(".h5"))
     print("letti       : %d eventi in %.0f s" % (len(dati), time.time() - t0))
+    # Il verso di ogni canale, dalla stessa regola di monitor ed efficienza.
+    import efficienza
+    base_log = h5[:-3] if h5.endswith(".gz") else h5
+    segni = efficienza._segni_per(canali, efficienza.polarita_dal_log(
+        os.path.splitext(base_log)[0] + ".log"))
+    print("verso       : %s" % ("  ".join("ch%d %s" % (c, "+" if v > 0 else "-")
+                                           for c, v in zip(canali, segni))
+                                if segni is not None else "non dichiarato, positivo"))
 
     blocco = dati[rif["eventi_da"]:rif["eventi_a"]]
-    amp, per_canale = ampiezze_mV(blocco)
+    amp, per_canale = ampiezze_mV(blocco, segni)
     spuri = marca_spuri(per_canale)
     if not a.tieni_spuri:
         amp = amp[~spuri]
@@ -193,7 +208,7 @@ def main():
             blk = dati[p["eventi_da"]:p["eventi_a"]]
             if len(blk) < 50:
                 continue
-            am, pc = ampiezze_mV(blk)
+            am, pc = ampiezze_mV(blk, segni)
             if not a.tieni_spuri:
                 am = am[~marca_spuri(pc)]
             if len(am) < 50:

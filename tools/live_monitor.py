@@ -1374,9 +1374,16 @@ class Monitor:
             n = max(1, min(n_show, corr.shape[0]))
             for j, (i, ch) in enumerate(zip(idx_dis, canali_dis)):
                 ax = axes[j][0]
+                # Piu' eventi: tutti dello stesso colore e semitrasparenti,
+                # come la persistenza di un oscilloscopio -- dove le tracce
+                # passano spesso il colore si fa pieno. Con un colore per
+                # evento, a cento eventi non si leggeva piu' niente.
                 for e in range(corr.shape[0] - n, corr.shape[0]):
-                    ax.plot(t_ns, corr[e, i], lw=0.9 if n == 1 else 0.6,
-                            alpha=1.0 if n == 1 else 0.5)
+                    if n == 1:
+                        ax.plot(t_ns, corr[e, i], lw=0.9)
+                    else:
+                        ax.plot(t_ns, corr[e, i], lw=0.6, color="#2a78d6",
+                                alpha=min(0.5, 10.0 / n))
                 ax.axhline(0, color="k", lw=0.8, ls=":")
 
                 # La curva filtrata e i campioni a 30 MHz sono un modello
@@ -1447,7 +1454,7 @@ class Monitor:
                 if ax.get_legend_handles_labels()[1]:
                     ax.legend(fontsize=8, loc="upper right", framealpha=.9)
 
-                label = ("last event" if n == 1 else f"last {n} events")
+                label = ("last event" if n == 1 else f"last {n} events, overlaid")
                 med = float(np.median(amp[:, i]))
                 ax.set_title(f"ch{ch} — {label}   "
                              f"(median amplitude {med:.0f} ADC = "
@@ -2303,10 +2310,21 @@ const finestre = [];
 // due domande diverse e si leggono bene vicine.
 function sorgentiDi(muro) {
   return {
-    wf:  [["waveforms", "last event"], ["average", "average"]],
+    // Il dettaglio delle forme d'onda mostra gli ULTIMI 100 EVENTI sovrapposti
+    // invece dell'ultimo soltanto: un evento solo dice poco sulla forma tipica
+    // e niente su quanto varia. Il terzo elemento sono parametri in piu' per
+    // quella sola immagine.
+    wf:  [["waveforms", "last 100 events", {n: "100"}], ["average", "average"]],
     amp: [["amplitudes", "amplitude spectrum"]],
     car: [["integrals", "charge spectrum"]],
   }[muro];
+}
+
+// I parametri della pagina, piu' quelli propri di un'immagine (vincono loro).
+function conExtra(q, extra) {
+  const qq = new URLSearchParams(q);
+  if (extra) Object.keys(extra).forEach(k => qq.set(k, extra[k]));
+  return qq.toString();
 }
 
 function nomeDi(muro, ch) {
@@ -2344,7 +2362,7 @@ function aggiornaLente() {
   q.set("t", Date.now());
   const imgs = document.getElementById("lenteimg").getElementsByTagName("img");
   lente.sorgenti.forEach((sg, k) => {
-    if (imgs[k]) imgs[k].src = sg[0] + ".png?" + q.toString();
+    if (imgs[k]) imgs[k].src = sg[0] + ".png?" + conExtra(q, sg[2]);
   });
 }
 
@@ -2416,7 +2434,7 @@ function aggiornaFinestre() {
         q.set("scala", "L");
         q.set("t", Date.now());
         f.sorgenti.forEach((sg, k) => {
-          if (dentro[k]) dentro[k].src = sg[0] + ".png?" + q.toString();
+          if (dentro[k]) dentro[k].src = sg[0] + ".png?" + conExtra(q, sg[2]);
         });
         // La finestra si ridimensiona sulla misura VERA delle immagini, una
         // volta sola. Le width/height passate a window.open sono un

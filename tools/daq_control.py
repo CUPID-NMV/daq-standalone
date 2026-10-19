@@ -443,19 +443,32 @@ def coerenza(d):
     # inevitabile.
     pol = g.get("TriggerPolarity")
     dco = [x for x in lista(g.get("DCOffset")) if isinstance(x, int)]
-    if pol in (0, 1) and dco:
-        if pol == 1 and min(dco) > 0x9000:
-            avvisi.append("TriggerPolarity = 1 (falling edge) but DCOffset is %s: the "
-                          "baseline sits at the BOTTOM of the range, so there is room "
-                          "only for positive pulses. The threshold would end up a few "
-                          "counts below a baseline the signal never goes below, and the "
-                          "run would record nothing. Use 0 for positive pulses."
-                          % ", ".join(hex(x) for x in dco))
-        elif pol == 0 and max(dco) < 0x8000:
-            avvisi.append("TriggerPolarity = 0 (rising edge) but DCOffset is %s: the "
-                          "baseline sits HIGH, which is the setting for negative pulses. "
-                          "Use 1 for those, or raise DCOffset (higher = lower baseline)."
-                          % ", ".join(hex(x) for x in dco))
+    # Si guarda il DCOffset dei SOLI canali che fanno il self-trigger: con PMT
+    # negativi e SiPM positivi sulla stessa scheda il fronte giusto e' quello
+    # dei canali che triggerano. Guardando tutti i canali, il 2026-10-19 la
+    # pagina non ha detto niente con SiPM in self-trigger e fronte di discesa
+    # rimasto dallo scan dei PMT: run da 56 s a zero eventi.
+    per_canale = {ch: dco[min(i, len(dco) - 1)] for i, ch in enumerate(canali)} if dco else {}
+    if g.get("SelfTrigger") and per_canale:
+        trig = [ch for ch in lista(g.get("SelfTriggerChannels")) if ch in per_canale]
+        if pol == 1:
+            sbagliati = [ch for ch in trig if per_canale[ch] > 0x9000]
+            if sbagliati:
+                avvisi.append("TriggerPolarity = 1 (falling edge) but the self-trigger channels %s "
+                              "have their baseline at the BOTTOM of the range (DC offset %s), i.e. "
+                              "positive pulses: the threshold goes below a baseline the signal never "
+                              "goes below, and the run records nothing. Use 0 for positive pulses."
+                              % (", ".join("ch%d" % c for c in sbagliati),
+                                 ", ".join(hex(per_canale[c]) for c in sbagliati)))
+        elif pol == 0:
+            sbagliati = [ch for ch in trig if per_canale[ch] < 0x8000]
+            if sbagliati:
+                avvisi.append("TriggerPolarity = 0 (rising edge) but the self-trigger channels %s "
+                              "have their baseline HIGH (DC offset %s), i.e. negative pulses: the run "
+                              "would trigger on noise and on the positive tail after each pulse. "
+                              "Use 1 for negative pulses."
+                              % (", ".join("ch%d" % c for c in sbagliati),
+                                 ", ".join(hex(per_canale[c]) for c in sbagliati)))
 
     if str(g.get("IOLevel", "NIM")).upper() == "TTL" and c.get("Enabled"):
         avvisi.append("Front panel set to TTL but the V812 CFD is on: its OR output "

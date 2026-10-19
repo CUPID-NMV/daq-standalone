@@ -51,6 +51,107 @@ def _mila(n):
 #  Stato condiviso
 # ----------------------------------------------------------------------
 
+class Impostazioni:
+    """Le impostazioni PER CANALE del monitor, salvate su file e uguali per tutti.
+
+    Prima stavano nel browser di chi guardava: due persone su due computer
+    vedevano cose diverse, e un cancello copiato per sbaglio su tutti i canali
+    restava in un browser solo, invisibile agli altri (2026-10-16). Qui
+    stanno in <data>/monitor-impostazioni.json, e chiunque apra il monitor
+    vede le stesse.
+
+    Ogni campo vuoto (None) vuol dire AUTOMATICO: cancello e piedistallo
+    trovati attorno all'impulso del canale, scale dai dati.
+    """
+    CAMPI = {
+        "gate": "coppia",     # cancello di carica [ns]
+        "ped": "coppia",      # finestra del piedistallo [ns]
+        "wfx": "coppia",      # scala x delle forme d'onda [ns]
+        "wfy": "coppia",      # scala y delle forme d'onda [ADC]
+        "qx": "coppia",       # scala x della carica [pC]
+        "qbin": "intero",     # intervalli dell'istogramma di carica
+        "qlog": "booleano",   # scala logaritmica della carica
+    }
+
+    def __init__(self, path):
+        self.path = path
+        self.dati = {}
+        try:
+            with open(path) as f:
+                self.dati = {str(k): v for k, v in json.load(f).items()}
+        except (OSError, ValueError):
+            pass
+
+    def di(self, ch):
+        v = {k: None for k in self.CAMPI}
+        v.update(self.dati.get(str(int(ch)), {}))
+        return v
+
+    def _salva(self):
+        tmp = self.path + ".tmp"
+        try:
+            with open(tmp, "w") as f:
+                json.dump(self.dati, f, indent=1, sort_keys=True)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+    @staticmethod
+    def _valore(tipo, testo):
+        """Dal testo della casella al valore; "" = automatico. Solleva ValueError."""
+        t = (testo or "").strip()
+        if t == "":
+            return None
+        if tipo == "coppia":
+            pezzi = [x for x in t.replace(";", ",").replace(" ", ",").split(",") if x]
+            if len(pezzi) != 2:
+                raise ValueError("two numbers are needed, e.g. 320,360")
+            a, b = float(pezzi[0]), float(pezzi[1])
+            if not b > a:
+                raise ValueError("the second number must be larger than the first")
+            return [a, b]
+        if tipo == "intero":
+            n = int(float(t))
+            if not 5 <= n <= 500:
+                raise ValueError("bins from 5 to 500")
+            return n
+        if tipo == "booleano":
+            return t in ("1", "true", "on", "yes")
+        raise ValueError(tipo)
+
+    def imposta(self, ch, campi):
+        v = self.dati.get(str(int(ch)), {})
+        for k, testo in campi.items():
+            if k not in self.CAMPI:
+                continue
+            val = self._valore(self.CAMPI[k], testo)
+            if val is None:
+                v.pop(k, None)
+            else:
+                v[k] = val
+        if v:
+            self.dati[str(int(ch))] = v
+        else:
+            self.dati.pop(str(int(ch)), None)
+        self._salva()
+
+    def copia(self, da, a):
+        sorgente = dict(self.dati.get(str(int(da)), {}))
+        for ch in a:
+            if sorgente:
+                self.dati[str(int(ch))] = dict(sorgente)
+            else:
+                self.dati.pop(str(int(ch)), None)
+        self._salva()
+
+    def azzera(self, ch=None):
+        if ch is None:
+            self.dati = {}
+        else:
+            self.dati.pop(str(int(ch)), None)
+        self._salva()
+
+
 class Monitor:
     """Tiene l'ultimo set di dati letto e ne calcola rate e statistiche.
 
@@ -75,6 +176,11 @@ class Monitor:
     def __init__(self, data_dir, path=None, max_events=2000, min_interval=2.0,
                  vpp=1.0):
         self.data_dir = data_dir
+        self.imp = Impostazioni(os.path.join(data_dir, "monitor-impostazioni.json"))
+        # Il cancello per i canali senza impulsi e senza cancello scritto a
+        # mano. Lo fissa main() dalle opzioni: deve essere lo STESSO in ogni
+        # chiamata, perche' le cariche cumulate ripartono da zero quando cambia.
+        self.gate_comune = (None, None)
         self.fixed_path = path
         self.max_events = max_events
         self.min_interval = min_interval
@@ -595,7 +701,18 @@ class Monitor:
             if i1 - i0 >= 5:
                 dich = (i0, i1)
         auto = self._finestre_auto(corr, t_ns, noise)
-        fin = [(auto.get(j) or {}).get("ped") or dich for j in range(corr.shape[1])]
+        # Una finestra scritta a mano per il canale vince su quella automatica.
+        canali_a = [int(c) for c in self.hdr["ChannelList"]]
+
+        def a_mano(j):
+            p = self.imp.di(canali_a[j]).get("ped")
+            if not p:
+                return None
+            a_, b_ = int(np.searchsorted(t_ns, p[0])), min(int(np.searchsorted(t_ns, p[1], "right")), n_s)
+            return (a_, b_) if b_ - a_ >= 5 else None
+        fin = [a_mano(j) or (auto.get(j) or {}).get("ped") or dich for j in range(corr.shape[1])]
+        self.ped_origine = ["set" if a_mano(j) else ("auto" if (auto.get(j) or {}).get("ped") else "common")
+                            for j in range(corr.shape[1])]
         if any(fin):
             off = np.zeros(corr.shape[:2])
             for j, f in enumerate(fin):
@@ -782,7 +899,9 @@ class Monitor:
         # Il cancello di un canale si dichiara nei controlli per canale; se
         # non c'e', vale quello comune. Non si deduce dai dati: una finestra
         # dedotta scatta sullo stesso rumore che dovrebbe escludere.
-        gates_ch = gates_ch or {}
+        if gates_ch is None:
+            gates_ch = {int(c): tuple(self.imp.di(c)["gate"]) for c in channels
+                        if self.imp.di(c).get("gate")}
         n = len(t_ns)
 
         def indici(g):
@@ -1284,6 +1403,82 @@ class Monitor:
         plt.close(fig)
         return buf.getvalue()
 
+    # Le due immagini della scheda di un canale: le ultime 100 forme d'onda
+    # sovrapposte, col cancello colorato, e la distribuzione della carica. Le
+    # scale vengono dalle impostazioni del canale (Impostazioni), vuote =
+    # automatiche. Piccole e senza titolo: il nome del canale e cosa sta
+    # usando li scrive la pagina sopra l'immagine.
+    LARG_SCHEDA_PX = 300
+
+    def _figura_scheda(self, kind, corr, t_ns, channels, i, ch, gate, k):
+        imp = self.imp.di(ch)
+        colore = PALETTE[i % len(PALETTE)]
+        carica, a_i, b_i, nscamp, k_pc, dep = self._carica(corr, t_ns, gate, channels)
+        w_in = self.LARG_SCHEDA_PX * k / DPI_FIG
+        if kind == "scheda_wf":
+            fig, ax = plt.subplots(figsize=(w_in, 1.75 * k))
+            n = min(100, corr.shape[0])
+            for e in range(corr.shape[0] - n, corr.shape[0]):
+                ax.plot(t_ns, corr[e, i], lw=0.5, color="black", alpha=min(0.5, 10.0 / max(n, 1)))
+            ax.axhline(0, color="#999", lw=0.6, ls=":")
+            ax.axvspan(t_ns[a_i[i]], t_ns[b_i[i] - 1], color=colore, alpha=0.18, lw=0)
+            if imp["wfx"]:
+                ax.set_xlim(*imp["wfx"])
+            if imp["wfy"]:
+                ax.set_ylim(*imp["wfy"])
+            ax.set_xlabel("ns", fontsize=7, labelpad=1)
+        else:
+            fig, ax = plt.subplots(figsize=(w_in, 1.45 * k))
+            v = dep["val"].get(ch)
+            if v is None or not len(v):
+                ax.text(.5, .5, "no charges yet", ha="center", va="center",
+                        transform=ax.transAxes, color="#888", fontsize=8)
+                ax.set_xticks([]); ax.set_yticks([])
+            else:
+                qx = imp["qx"] or [None, None]
+                lo, hi = _estremi_utili(v, qx[0], qx[1])
+                ax.hist(v, bins=np.linspace(lo, hi, (imp["qbin"] or 50) + 1),
+                        color=colore, alpha=0.85)
+                ax.set_xlim(lo, hi)
+                if imp["qlog"] is None or imp["qlog"]:
+                    ax.set_yscale("log")
+                ax.set_xlabel("pC", fontsize=7, labelpad=1)
+        ax.tick_params(labelsize=6, pad=1)
+        ax.grid(alpha=0.25)
+        fig.tight_layout(pad=0.25)
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=DPI_FIG)
+        plt.close(fig)
+        return buf.getvalue()
+
+    def in_uso(self):
+        """Per canale: verso, cancello e piedistallo IN USO e da dove vengono.
+
+        La pagina li scrive sulla scheda e li mette in grigio nelle caselle
+        vuote delle impostazioni: un campo automatico deve dire quanto vale,
+        se no non si sa da dove partire per cambiarlo.
+        """
+        res = self.analysis()
+        if res is None:
+            return {}
+        hdr, _, corr, _, t_ns, _, _ = res
+        channels = hdr["ChannelList"]
+        _, a_i, b_i, _, _, _ = self._carica(corr, t_ns, self.gate_comune, channels)
+        segni = self._segni(corr.shape[1])
+        fuori = {}
+        for j, c in enumerate(channels):
+            ped = (self.base_finestre_ch[j] if j < len(self.base_finestre_ch) else None)
+            fuori[str(int(c))] = {
+                "verso": int(segni[j]),
+                "gate": [round(float(t_ns[a_i[j]]), 1), round(float(t_ns[b_i[j] - 1]), 1)],
+                "gate_da": ({"manual": "set"}.get(self.gate_origine[j], self.gate_origine[j])
+                            if j < len(self.gate_origine) else ""),
+                "ped": [round(ped[0], 1), round(ped[1], 1)] if ped else None,
+                "ped_da": (getattr(self, "ped_origine", None) or [""] * len(channels))[j],
+                "set": self.imp.di(c),
+            }
+        return fuori
+
     # Moltiplicatore delle figure. La dimensione giusta dipende dallo schermo
     # di chi guarda -- un portatile in laboratorio e un monitor grande non
     # vogliono la stessa cosa -- quindi la sceglie la pagina invece di essere
@@ -1358,6 +1553,10 @@ class Monitor:
             if extra:
                 parti.append(extra)
             return "time [ns]" + (f"      ({' · '.join(parti)})" if parti else "")
+
+        if kind in ("scheda_wf", "scheda_car") and solo is not None and len(idx_dis) == 1:
+            return self._figura_scheda(kind, corr, t_ns, channels, idx_dis[0],
+                                       int(canali_dis[0]), gate, k)
 
         if kind == "waveforms":
             # Piu' larghe di tutte le altre: su una forma d'onda si guarda il
@@ -2054,6 +2253,36 @@ PAGE = """<!DOCTYPE html>
                    color:var(--fg); padding-bottom:5px; }
   .ctl label.chk input { width:auto; }
   .ctl .grp { font-weight:600; font-size:13px; padding-bottom:5px; min-width:46px; }
+  /* Le schede dei canali: una per canale, forme d'onda e carica. Larghe
+     quanto le loro immagini; vanno a capo da sole. */
+  .tsez { color:var(--mut); font-size:12px; text-transform:uppercase; letter-spacing:.04em;
+          margin:4px 0 8px; }
+  .schede { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-start; margin-bottom:16px; }
+  .scheda { border:1px solid var(--line); border-radius:8px; padding:6px 6px 2px; width:302px; }
+  .scheda img { margin-bottom:3px; cursor:pointer; border-radius:4px; display:block; }
+  .scheda .testa { display:flex; align-items:center; gap:8px; font-size:13px; }
+  .scheda .testa b { font-size:14px; }
+  .scheda .verso { color:var(--mut); font-size:12px; }
+  .scheda .ingr { margin-left:auto; cursor:pointer; font-size:16px; color:var(--mut);
+                  text-decoration:none; padding:0 4px; }
+  .scheda .ingr:hover { color:var(--fg); }
+  .scheda .info { font-size:11px; color:var(--mut); margin:1px 0 4px; min-height:15px; }
+  .scheda .info b { color:var(--fg); font-weight:600; }
+  .scheda .info .man { color:#c0392b; font-weight:600; }
+  /* Le impostazioni di un canale: un riquadro sopra la pagina, come la lente. */
+  .pop { position:fixed; inset:0; background:rgba(0,0,0,.35); display:none;
+         align-items:center; justify-content:center; z-index:60; }
+  .pop.apri { display:flex; }
+  .popbox { background:var(--bg); border-radius:10px; padding:12px 16px; width:380px;
+            box-shadow:0 10px 40px rgba(0,0,0,.45); font-size:13px; }
+  .popbox table { margin:6px 0 4px; }
+  .popbox td { padding:3px 6px; border:none; text-align:left; }
+  .popbox input { width:70px; padding:3px 6px; font:13px inherit; color:var(--fg);
+                  background:var(--bg); border:1px solid var(--line); border-radius:5px; }
+  .popbox button { padding:5px 10px; font:13px inherit; border-radius:5px; cursor:pointer;
+                   border:1px solid var(--line); background:var(--bg); color:var(--fg); margin:6px 4px 0 0; }
+  .popbox .k { color:var(--mut); }
+  .popbox .nota { color:var(--mut); font-size:11px; margin-top:6px; }
 </style></head><body>
 <div id="alert"></div>
 <h1>V1742 DAQ — online monitor</h1>
@@ -2073,19 +2302,11 @@ PAGE = """<!DOCTYPE html>
   The monitor has been updated since this page was opened: the plots are fresh
   but the layout is not. <a href="#" id="ricarica" style="color:#fff">Reload</a>
 </div>
+<!-- Solo cio' che riguarda la VISTA di chi guarda. Cancelli, piedistalli e
+     scale sono per canale, nelle impostazioni del canale (la rotella sulla
+     sua scheda), salvate nel monitor e uguali per tutti. -->
 <div class="ctl">
-  <label>x min [ns]<input id="xmin" value="__XMIN__" placeholder="auto"></label>
-  <label>x max [ns]<input id="xmax" value="__XMAX__" placeholder="auto"></label>
-  <label>y min [ADC]<input id="ymin" value="__YMIN__" placeholder="auto"></label>
-  <label>y max [ADC]<input id="ymax" value="__YMAX__" placeholder="auto"></label>
-  <label>events<input id="nev" value="__NEVENTS__" style="width:60px"></label>
-  <label>bandwidth [MHz]<input id="bw" value="__BW__" placeholder="off" style="width:70px"></label>
-  <label>baseline from [ns]<input id="bfrom" value="__BFROM__" placeholder="default" style="width:70px"></label>
-  <label>to [ns]<input id="bto" value="__BTO__" placeholder="default" style="width:70px"></label>
-  <label>charge gate from [ns]<input id="gfrom" value="__GFROM__" placeholder="default" style="width:70px"></label>
-  <label>to [ns]<input id="gto" value="__GTO__" placeholder="default" style="width:70px"></label>
   <label>channels<input id="canali" value="" placeholder="all  e.g. 8,9,12-15" style="width:150px"></label>
-  <label>threshold [offset]<input id="qcut" value="" placeholder="whole spectrum" style="width:110px"></label>
   <label title="one point every N seconds, from the history of event counts">rate bin [s]<input id="rbin" value="10" style="width:60px"></label>
   <label class="chk" title="efficiency plot: axis from just below the lowest point instead of 0-100%">
     <input type="checkbox" id="ezoom"> zoom eff.</label>
@@ -2094,64 +2315,22 @@ PAGE = """<!DOCTYPE html>
   <label class="chk" title="gate, baseline window, calibration, noise floor and the
 set-up warnings. Off during a run, on when you need to know with which numbers a plot was made.">
     <input type="checkbox" id="det"> details</label>
-  <button id="reset">Autoscale</button>
   <button id="azzera" title="discards the events already acquired and starts from now">Reset data</button>
-  <span class="hint">x/y limits are the waveform zoom only &middot;
-    baseline and charge gate are independent of it</span>
 </div>
-<!-- Un solo gruppo di controlli, non uno per canale: con 32 canali erano 64
-     righe di caselle. Il canale si sceglie dalla tendina e le modifiche
-     valgono per quello; i valori degli altri restano, in memoria e nel
-     browser, e vengono mandati tutti a ogni giro. -->
-<div class="ctl">
-  <span class="grp">per channel</span>
-  <label>channel<select id="chsel" style="font:13px inherit;padding:5px 7px"></select></label>
-  <label>amplitude x min [offset]<input id="hxmin" placeholder="auto"></label>
-  <label>amplitude x max [offset]<input id="hxmax" placeholder="auto"></label>
-  <label>bins<input id="hbin" placeholder="auto" style="width:60px"></label>
-  <label class="chk"><input type="checkbox" id="hlog"> log y</label>
-  <button id="hreset">Autoscale</button>
-</div>
-<div class="ctl">
-  <span class="grp"></span>
-  <label>charge x min [pC]<input id="qxmin" placeholder="auto"></label>
-  <label>charge x max [pC]<input id="qxmax" placeholder="auto"></label>
-  <label>bins<input id="qbin" placeholder="auto" style="width:60px"></label>
-  <label class="chk"><input type="checkbox" id="qlog"> log y</label>
-  <label title="charge gate of this channel; empty = found automatically around its pulse (the common gate above only for channels without pulses)">gate from [ns]<input id="cgfrom" placeholder="auto" style="width:70px"></label>
-  <label>to [ns]<input id="cgto" placeholder="auto" style="width:70px"></label>
-  <button id="gauto" title="empty the gate of EVERY channel: each one goes back to the gate found automatically around its pulse">auto gates</button>
-  <button id="qreset">Autoscale</button>
-  <button id="atutti" title="copy what you see here to every recorded channel">apply to all</button>
-</div>
-<table id="tab"><thead><tr><th>channel</th><th>baseline</th><th>rms</th>
-<th>mean amplitude</th><th>median</th><th>median [mV]</th><th>max</th><th>offset</th><th>threshold</th>
-<th>min amp. [mV]</th><th>min amp. [ADC]</th></tr></thead><tbody></tbody></table>
 <div id="boot" class="err">JavaScript did not run: the page cannot update.
 Open the browser console to see the error.</div>
-<!-- Ogni grafico ha il suo "apri" che lo stacca in una finestra a parte, utile
-     col secondo schermo: le forme d'onda di la', i controlli di qua. I due
-     spettri stanno affiancati, sono due distribuzioni della stessa cosa. -->
-<!-- La panoramica e' alta, il muro delle forme d'onda e' basso: accanto alla
-     prima restava una fascia bianca. Il rate nel tempo ci sta dentro, e il
-     posto e' anche quello giusto -- dice se la presa dati e' stabile, cosa
-     che i numeri in cima, un istante solo, non dicono.
-     I tre muri hanno una miniatura per canale e sopra una griglia di zone
-     trasparenti che aprono il dettaglio. Le posizioni arrivano da stats.json,
-     calcolate dallo stesso codice che disegna. -->
 <div class="affianca">
   <div class="gr"><a class="apri" data-img="pano">&#8599;</a><img id="pano" alt="per-channel overview"></div>
   <div class="colonna">
     <div class="gr"><a class="apri" data-img="r">&#8599;</a><img id="r" alt="rate vs time"></div>
     <div class="gr"><a class="apri" data-img="e">&#8599;</a><img id="e" alt="efficiency vs time"></div>
-    <div class="muro"><img id="mw" alt="waveform wall"><div class="celle" data-muro="wf"></div></div>
   </div>
 </div>
-<div class="affianca">
-  <div class="muro"><img id="ma" alt="amplitude wall"><div class="celle" data-muro="amp"></div></div>
-  <div class="muro"><img id="mc" alt="charge wall"><div class="celle" data-muro="car"></div></div>
-</div>
-
+<div class="tsez">channels &middot; click a plot for the detail &middot; &#9881; settings of the channel</div>
+<div id="schede" class="schede"></div>
+<table id="tab"><thead><tr><th>channel</th><th>baseline</th><th>rms</th>
+<th>mean amplitude</th><th>median</th><th>median [mV]</th><th>max</th><th>offset</th><th>threshold</th>
+<th>min amp. [mV]</th><th>min amp. [ADC]</th></tr></thead><tbody></tbody></table>
 
 <div id="lente" class="lente"><div class="lentebox">
   <div class="lentetop"><span id="lentetit"></span>
@@ -2160,13 +2339,25 @@ Open the browser console to see the error.</div>
   <div id="lenteimg" class="lenteimg"></div>
 </div></div>
 
-<details id="interi"><summary>full-size plots of every channel</summary>
-  <div class="gr"><a class="apri" data-img="w">&#8599;</a><img id="w" alt="waveforms"></div>
-  <div class="affianca">
-    <div class="gr"><a class="apri" data-img="h">&#8599;</a><img id="h" alt="amplitudes"></div>
-    <div class="gr"><a class="apri" data-img="q">&#8599;</a><img id="q" alt="charge integrals"></div>
-  </div>
-</details>
+<div id="pop" class="pop"><div class="popbox">
+  <b id="ptit">settings</b> <span class="k">&middot; empty = automatic</span>
+  <table>
+    <tr><td class="k">charge gate [ns]</td><td><input id="pg0"> &ndash; <input id="pg1"></td></tr>
+    <tr><td class="k">baseline [ns]</td><td><input id="pp0"> &ndash; <input id="pp1"></td></tr>
+    <tr><td class="k">waveform x [ns]</td><td><input id="px0" placeholder="auto"> &ndash; <input id="px1" placeholder="auto"></td></tr>
+    <tr><td class="k">waveform y [ADC]</td><td><input id="py0" placeholder="auto"> &ndash; <input id="py1" placeholder="auto"></td></tr>
+    <tr><td class="k">charge x [pC]</td><td><input id="pq0" placeholder="auto"> &ndash; <input id="pq1" placeholder="auto"></td></tr>
+    <tr><td class="k">charge bins</td><td><input id="pqb" placeholder="50"> &nbsp;
+      <label><input type="checkbox" id="pql" style="width:auto"> log y</label></td></tr>
+  </table>
+  <button id="psalva">Save</button>
+  <button id="pcopia">Copy to channels</button><input id="pca" placeholder="e.g. 26" style="width:80px">
+  <br><button id="pazzera">Back to automatic</button><button id="pchiudi">Close</button>
+  <div id="pmsg" class="nota"></div>
+  <div class="nota">grey = value in use, found automatically &middot; saved in the monitor:
+    the same for everyone who opens it</div>
+</div></div>
+
 <script>
 document.getElementById('boot').style.display = 'none';
 const REFRESH = __REFRESH__ * 1000;
@@ -2176,6 +2367,7 @@ document.getElementById('ricarica').onclick = ev => {
 };
 
 let lastOk = null;            // ultimo aggiornamento riuscito
+let IMP = {};                 // impostazioni e valori in uso, per canale
 
 function setAlert(msg) {
   const a = document.getElementById('alert');
@@ -2183,11 +2375,8 @@ function setAlert(msg) {
   if (msg) a.textContent = msg;
   document.body.classList.toggle('stale', !!msg);
 }
-const FIELDS = ['xmin','xmax','ymin','ymax','nev','bw','bfrom','bto','gfrom','gto',
-                'canali','qcut','scala','rbin'];
-
-// I limiti scelti sopravvivono a un reload della pagina. localStorage puo'
-// essere inaccessibile (finestra privata, cookie bloccati): mai fatale.
+// Preferenze di VISTA, di chi guarda: restano nel suo browser.
+const FIELDS = ['canali', 'scala', 'rbin'];
 try {
   for (const f of FIELDS) {
     const v = localStorage.getItem('daqmon.' + f);
@@ -2195,127 +2384,13 @@ try {
   }
 } catch (e) {}
 
-// I controlli dell'istogramma sono uno per canale e la lista dei canali si
-// conosce solo da stats.json, quindi vengono costruiti al primo giro e
-// ricostruiti solo se i canali cambiano: rifarli a ogni aggiornamento
-// cancellerebbe quello che si sta digitando.
-let builtChannels = null;
-
-function store(k, v) { try { localStorage.setItem('daqmon.' + k, v); } catch (e) {} }
-function recall(k)   { try { return localStorage.getItem('daqmon.' + k); } catch (e) { return null; } }
-
-// --- controlli per canale -------------------------------------------------
-// I valori stanno in memoria per TUTTI i canali; le caselle ne mostrano uno
-// solo, quello scelto nella tendina. A ogni giro si mandano al server quelli
-// di tutti, come prima: cambia come si scrivono, non cosa arriva.
-const CAMPI_CH = ['hxmin', 'hxmax', 'hbin', 'qxmin', 'qxmax', 'qbin', 'cgfrom', 'cgto'];
-const FLAG_CH = ['hlog', 'qlog'];
-let valCh = {};              // {ch: {hxmin: "...", hlog: true, ...}}
-
-function vuotoCh() {
-  const v = {};
-  CAMPI_CH.forEach(k => v[k] = '');
-  FLAG_CH.forEach(k => v[k] = false);
-  return v;
-}
-
-function caricaCh(ch) {
-  const v = vuotoCh();
-  CAMPI_CH.forEach(k => { const x = recall(k + '_' + ch); if (x !== null) v[k] = x; });
-  FLAG_CH.forEach(k => { const x = recall(k + '_' + ch); if (x !== null) v[k] = (x === '1'); });
-  return v;
-}
-
-function salvaCh(ch) {
-  const v = valCh[ch]; if (!v) return;
-  CAMPI_CH.forEach(k => store(k + '_' + ch, v[k]));
-  FLAG_CH.forEach(k => store(k + '_' + ch, v[k] ? '1' : '0'));
-}
-
-function mostraCh() {
-  const ch = document.getElementById('chsel').value;
-  const v = valCh[ch] || vuotoCh();
-  CAMPI_CH.forEach(k => document.getElementById(k).value = v[k]);
-  FLAG_CH.forEach(k => document.getElementById(k).checked = v[k]);
-}
-
-function leggiCh() {
-  const ch = document.getElementById('chsel').value;
-  if (!(ch in valCh)) valCh[ch] = vuotoCh();
-  CAMPI_CH.forEach(k => valCh[ch][k] = document.getElementById(k).value.trim());
-  FLAG_CH.forEach(k => valCh[ch][k] = document.getElementById(k).checked);
-  salvaCh(ch);
-}
-
-function buildHistControls(channels) {
-  const key = channels.join(',');
-  if (key === builtChannels) return;
-  builtChannels = key;
-  const sel = document.getElementById('chsel');
-  const prima = sel.value;
-  sel.innerHTML = channels.map(ch => `<option value="${ch}">ch${ch}</option>`).join('');
-  valCh = {};
-  channels.forEach(ch => valCh[ch] = caricaCh(ch));
-  if (channels.map(String).includes(prima)) sel.value = prima;
-  mostraCh();
-}
-
-document.getElementById('chsel').addEventListener('change', mostraCh);
-CAMPI_CH.concat(FLAG_CH).forEach(k =>
-  document.getElementById(k).addEventListener('change', () => { leggiCh(); tick(); }));
-
-// Due Autoscale distinti: azzerare la scala delle ampiezze mentre si sta
-// sistemando quella della carica farebbe perdere una vista buona.
-function azzera(pre) {
-  const ch = document.getElementById('chsel').value;
-  [pre + 'xmin', pre + 'xmax', pre + 'bin'].forEach(k =>
-    document.getElementById(k).value = '');
-  document.getElementById(pre + 'log').checked = false;
-  leggiCh(); tick();
-}
-document.getElementById('hreset').onclick = () => azzera('h');
-// Un cancello scritto a mano vince su quello automatico, e "apply to all"
-// lo copia su tutti i canali: il 2026-10-16 i 30-90 ns dei PMT erano finiti
-// sui SiPM, che integravano solo rumore. Questo li toglie tutti insieme.
-document.getElementById('gauto').onclick = () => {
-  Object.keys(valCh).forEach(ch => {
-    valCh[ch].cgfrom = ''; valCh[ch].cgto = '';
-    salvaCh(ch);
-  });
-  mostraCh(); tick();
-};
-document.getElementById('qreset').onclick = () => azzera('q');
-
-// Con molti canali rifare la stessa scala trentadue volte non e' lavoro da
-// fare a mano.
-document.getElementById('atutti').onclick = () => {
-  leggiCh();
-  const ch = document.getElementById('chsel').value;
-  Object.keys(valCh).forEach(altro => {
-    valCh[altro] = Object.assign({}, valCh[ch]);
-    salvaCh(altro);
-  });
-  tick();
-};
-
-// Finestre separate, una per grafico. Non hanno uno script loro: e' questa
-// pagina che, a ogni giro, gli riscrive la src dell'immagine. Cosi' non serve
-// una rotta nuova sul server, e una finestra rimasta aperta mentre la pagina
-// madre e' chiusa smette semplicemente di aggiornarsi invece di mostrare dati
-// vecchi fingendo di essere viva.
 const finestre = [];
 
-// Cosa mostra il dettaglio di un canale. Quello delle forme d'onda porta DUE
-// grafici: l'ultimo evento e la media dello stesso canale, affiancati -- sono
-// due domande diverse e si leggono bene vicine.
+// Cosa mostra il dettaglio di un canale: le ultime 100 forme d'onda con la
+// media accanto, oppure lo spettro di carica.
 function sorgentiDi(muro) {
   return {
-    // Il dettaglio delle forme d'onda mostra gli ULTIMI 100 EVENTI sovrapposti
-    // invece dell'ultimo soltanto: un evento solo dice poco sulla forma tipica
-    // e niente su quanto varia. Il terzo elemento sono parametri in piu' per
-    // quella sola immagine.
     wf:  [["waveforms", "last 100 events", {n: "100"}], ["average", "average"]],
-    amp: [["amplitudes", "amplitude spectrum"]],
     car: [["integrals", "charge spectrum"]],
   }[muro];
 }
@@ -2328,13 +2403,9 @@ function conExtra(q, extra) {
 }
 
 function nomeDi(muro, ch) {
-  return "ch" + ch + " \u00b7 " + (muro === "wf" ? "waveform" :
-         muro === "amp" ? "amplitude" : "charge");
+  return "ch" + ch + " · " + (muro === "wf" ? "waveform" : "charge");
 }
 
-// La lente: il dettaglio sopra la pagina. E' questa l'azione del clic, perche'
-// funziona sempre -- anche con Safari a schermo intero, dove una finestra
-// nuova finisce a tutto schermo e non c'e' modo di impedirlo da qui.
 let lente = null;
 
 function apriLente(muro, ch) {
@@ -2355,9 +2426,6 @@ function aggiornaLente() {
   if (!lente) return;
   const q = new URLSearchParams(params());
   q.set("solo", lente.ch);
-  // Il dettaglio si apre per guardarci dentro: va chiesto piu' grande della
-  // miniatura da cui si arriva, e indipendentemente dalla scala scelta per la
-  // pagina -- che serve a far stare tutto insieme, non a leggere un canale.
   q.set("scala", "L");
   q.set("t", Date.now());
   const imgs = document.getElementById("lenteimg").getElementsByTagName("img");
@@ -2371,7 +2439,7 @@ document.getElementById("lente").onclick = ev => {
   if (ev.target.id === "lente") chiudiLente();
 };
 document.addEventListener("keydown", ev => {
-  if (ev.key === "Escape") chiudiLente();
+  if (ev.key === "Escape") { chiudiLente(); chiudiImp(); }
 });
 document.getElementById("lenteapri").onclick = () => {
   if (lente) { const l = lente; chiudiLente(); apriCanale(l.muro, l.ch); }
@@ -2391,7 +2459,7 @@ function apriCanale(muro, ch) {
     "div{display:flex;gap:6px;align-items:flex-start}" +
     "img{max-width:100%;display:block}p{margin:6px 10px}</style></head><body><div>" +
     sorgenti.map(() => "<img>").join("") +
-    "</div><p>" + nome + " &middot; aggiornata dalla pagina principale</p></body></html>");
+    "</div><p>" + nome + " &middot; updated by the main page</p></body></html>");
   w.document.close();
   finestre.push({w: w, muro: muro, ch: ch, sorgenti: sorgenti, dim: false});
   aggiornaFinestre();
@@ -2409,7 +2477,7 @@ function apriFinestra(id, titolo) {
     "img{max-width:100%;display:block}" +
     "p{margin:6px 10px}</style></head><body>" +
     "<img src='" + img.src + "'>" +
-    "<p>" + titolo + " &middot; aggiornato dalla pagina principale: se la chiudi, questa si ferma.</p>" +
+    "<p>" + titolo + " &middot; updated by the main page: close it there and this stops.</p>" +
     "</body></html>");
   w.document.close();
   finestre.push({w: w, id: id, dim: false});
@@ -2426,9 +2494,6 @@ function aggiornaFinestre() {
       // questa pagina abbia un id che non ha.
       const dentro = f.w.document.images;
       if (f.sorgenti) {
-        // finestra di un canale: si chiedono le immagini con "solo", che
-        // disegna quel canale senza toccare i canali LETTI, che sono
-        // condivisi con chi guarda la stessa pagina da un'altra macchina
         const q = new URLSearchParams(p);
         q.set("solo", f.ch);
         q.set("scala", "L");
@@ -2436,10 +2501,6 @@ function aggiornaFinestre() {
         f.sorgenti.forEach((sg, k) => {
           if (dentro[k]) dentro[k].src = sg[0] + ".png?" + conExtra(q, sg[2]);
         });
-        // La finestra si ridimensiona sulla misura VERA delle immagini, una
-        // volta sola. Le width/height passate a window.open sono un
-        // suggerimento che Safari ignora: si apriva grande quanto lo schermo
-        // con dentro un grafico da 330 px in un angolo.
         if (!f.dim && dentro.length &&
             Array.prototype.every.call(dentro, im => im.naturalWidth > 0)) {
           let lw = 0, lh = 0;
@@ -2468,27 +2529,128 @@ function aggiornaFinestre() {
   }
 }
 
-// Le zone cliccabili sopra i muri: posizioni e canali arrivano da stats.json,
-// calcolati dallo stesso codice che disegna le celle.
-function costruisciCelle(muro) {
-  if (!muro || !muro.celle) return;
-  const firma = muro.celle.map(c => c.ch).join(",") + "|" + muro.ncol;
-  document.querySelectorAll(".celle").forEach(box => {
-    if (box.dataset.firma === firma) return;
-    box.dataset.firma = firma;
-    box.innerHTML = muro.celle.map(c =>
-      `<a title="ch${c.ch}" data-ch="${c.ch}" style="left:${c.x * 100}%;` +
-      `bottom:${c.y * 100}%;width:${c.w * 100}%;height:${c.h * 100}%"></a>`).join("");
-    box.querySelectorAll("a").forEach(a => {
-      a.onclick = () => apriLente(box.dataset.muro, a.dataset.ch);
-    });
+// --- schede dei canali --------------------------------------------------------
+// Si ricostruiscono solo quando cambia la lista dei canali: rifarle a ogni giro
+// farebbe sparire l'immagine sotto il mouse mentre la si clicca.
+let firmaSchede = '';
+
+function costruisciSchede(canali) {
+  const firma = canali.join(',');
+  if (firma === firmaSchede) return;
+  firmaSchede = firma;
+  const box = document.getElementById('schede');
+  box.innerHTML = canali.map(ch =>
+    `<div class="scheda" data-ch="${ch}">
+       <div class="testa"><b>ch${ch}</b><span class="verso"></span>
+         <a class="ingr" title="settings of this channel">&#9881;</a></div>
+       <div class="info"></div>
+       <img class="iwf" alt="ch${ch} waveforms">
+       <img class="icar" alt="ch${ch} charge"></div>`).join('');
+  box.querySelectorAll('.scheda').forEach(sc => {
+    const ch = sc.dataset.ch;
+    sc.querySelector('.iwf').onclick = () => apriLente('wf', ch);
+    sc.querySelector('.icar').onclick = () => apriLente('car', ch);
+    sc.querySelector('.ingr').onclick = () => apriImp(ch);
   });
 }
 
+function coppia(v) { return v ? Math.round(v[0]) + '–' + Math.round(v[1]) : ''; }
+
+// Sulla scheda: verso, e cancello e piedistallo IN USO con la loro origine.
+// "set" in rosso: scritto a mano, vince sull'automatico.
+function aggiornaInfo() {
+  document.querySelectorAll('#schede .scheda').forEach(sc => {
+    const u = IMP[sc.dataset.ch];
+    if (!u) return;
+    sc.querySelector('.verso').textContent = u.verso > 0 ? 'pulses +' : 'pulses −';
+    const voce = (nome, val, da) => val ? nome + ' ' + (da === 'set'
+      ? '<span class="man">' + coppia(val) + ' ns set</span>'
+      : '<b>' + coppia(val) + '</b> ns ' + (da || '')) : '';
+    const pezzi = [voce('gate', u.gate, u.gate_da), voce('baseline', u.ped, u.ped_da)];
+    const st = u.set || {};
+    if (st.wfx) pezzi.push('wf x ' + coppia(st.wfx));
+    if (st.wfy) pezzi.push('wf y ' + coppia(st.wfy));
+    if (st.qx) pezzi.push('charge ' + coppia(st.qx) + ' pC');
+    sc.querySelector('.info').innerHTML = pezzi.filter(x => x).join(' &middot; ');
+  });
+}
+
+// --- impostazioni di un canale --------------------------------------------------
+let impCh = null;
+const CAMPI_POP = [['pg0', 'pg1', 'gate'], ['pp0', 'pp1', 'ped'], ['px0', 'px1', 'wfx'],
+                   ['py0', 'py1', 'wfy'], ['pq0', 'pq1', 'qx']];
+
+function apriImp(ch) {
+  impCh = ch;
+  const u = IMP[ch] || {}, st = u.set || {};
+  document.getElementById('ptit').textContent = 'ch' + ch + ' · settings';
+  for (const [a, b, k] of CAMPI_POP) {
+    const v = st[k];
+    document.getElementById(a).value = v ? v[0] : '';
+    document.getElementById(b).value = v ? v[1] : '';
+  }
+  // Nelle caselle vuote, in grigio, il valore che il monitor sta usando:
+  // per cambiarlo bisogna sapere da dove si parte.
+  document.getElementById('pg0').placeholder = u.gate ? u.gate[0] : 'auto';
+  document.getElementById('pg1').placeholder = u.gate ? u.gate[1] : 'auto';
+  document.getElementById('pp0').placeholder = u.ped ? u.ped[0] : 'auto';
+  document.getElementById('pp1').placeholder = u.ped ? u.ped[1] : 'auto';
+  document.getElementById('pqb').value = st.qbin || '';
+  document.getElementById('pql').checked = (st.qlog === null || st.qlog === undefined) ? true : !!st.qlog;
+  document.getElementById('pmsg').textContent = '';
+  document.getElementById('pop').classList.add('apri');
+}
+
+function chiudiImp() {
+  impCh = null;
+  document.getElementById('pop').classList.remove('apri');
+}
+
+async function chiedi(q) {
+  try {
+    const r = await (await fetch('imposta?' + q.toString(), {cache: 'no-store'})).json();
+    document.getElementById('pmsg').textContent = r.messaggio || '';
+    return r.ok;
+  } catch (e) {
+    document.getElementById('pmsg').textContent = 'request failed: ' + e;
+    return false;
+  }
+}
+
+// Dopo un cambio le schede si ridisegnano subito, non al prossimo giro lento.
+function ridisegnaSchede() {
+  document.querySelectorAll('#schede img').forEach(im => { im.dataset.t = ''; });
+  tick();
+}
+
+document.getElementById('psalva').onclick = async () => {
+  if (impCh === null) return;
+  const q = new URLSearchParams({ch: impCh});
+  for (const [a, b, k] of CAMPI_POP) {
+    const x = document.getElementById(a).value.trim(), y = document.getElementById(b).value.trim();
+    q.set(k, (x === '' && y === '') ? '' : x + ',' + y);
+  }
+  q.set('qbin', document.getElementById('pqb').value.trim());
+  q.set('qlog', document.getElementById('pql').checked ? '1' : '0');
+  if (await chiedi(q)) ridisegnaSchede();
+};
+document.getElementById('pcopia').onclick = async () => {
+  if (impCh === null) return;
+  const q = new URLSearchParams({azione: 'copia', da: impCh,
+                                 a: document.getElementById('pca').value.trim()});
+  if (await chiedi(q)) ridisegnaSchede();
+};
+document.getElementById('pazzera').onclick = async () => {
+  if (impCh === null) return;
+  if (await chiedi(new URLSearchParams({azione: 'azzera', ch: impCh}))) {
+    apriImp(impCh); ridisegnaSchede();
+  }
+};
+document.getElementById('pchiudi').onclick = chiudiImp;
+document.getElementById('pop').onclick = ev => { if (ev.target.id === 'pop') chiudiImp(); };
+
 function params() {
   const p = new URLSearchParams();
-  // Fuori da FIELDS perche' e' una casella di spunta: FIELDS legge .value, e
-  // su una checkbox .value e' sempre "on".
   const det = document.getElementById('det').checked;
   try { localStorage.setItem('daqmon.det', det ? '1' : '0'); } catch (e) {}
   p.set('det', det ? '1' : '0');
@@ -2498,12 +2660,7 @@ function params() {
   for (const f of FIELDS) {
     const v = document.getElementById(f).value.trim();
     try { localStorage.setItem('daqmon.' + f, v); } catch (e) {}
-    if (v !== '') p.set(f === 'nev' ? 'n' : f, v);
-  }
-  for (const ch of Object.keys(valCh)) {
-    const v = valCh[ch];
-    CAMPI_CH.forEach(k => { if (v[k] !== '') p.set(k + '_' + ch, v[k]); });
-    FLAG_CH.forEach(k => p.set(k + '_' + ch, v[k] ? '1' : '0'));
+    if (v !== '') p.set(f, v);
   }
   return p;
 }
@@ -2515,14 +2672,7 @@ document.querySelectorAll('.gr .apri').forEach(a => {
 });
 
 document.getElementById('azzera').onclick = async () => {
-  // Non ricarica la pagina: l'azzeramento vive nel server, e il giro
-  // successivo ritrova gli istogrammi vuoti da soli.
   try { await fetch('azzera?t=' + Date.now()); } catch (e) {}
-  tick();
-};
-
-document.getElementById('reset').onclick = () => {
-  for (const f of ['xmin','xmax','ymin','ymax']) document.getElementById(f).value = '';
   tick();
 };
 for (const f of FIELDS)
@@ -2530,8 +2680,6 @@ for (const f of FIELDS)
 function show(id, v) {
   document.getElementById(id).textContent = (v === null || v === undefined) ? '-' : v;
 }
-// Mette una immagine e torna quando e' arrivata (o quando e' fallita: un
-// errore non deve bloccare il giro, le altre immagini servono lo stesso).
 function carica(el, url) {
   return new Promise(ok => {
     el.onload = el.onerror = () => { el.onload = el.onerror = null; ok(); };
@@ -2539,8 +2687,6 @@ function carica(el, url) {
   });
 }
 
-// Un giro puo' durare piu' dell'intervallo: senza questa guardia i giri si
-// accavallano e ognuno aggiunge lavoro a un server che e' gia' in ritardo.
 let inCorso = false;
 
 async function tick() {
@@ -2550,10 +2696,6 @@ async function tick() {
 }
 
 async function giro() {
-  // Vero appena i dati sono arrivati: serve a distinguere una rete caduta da
-  // un errore di QUESTA pagina. Un richiamo a una funzione inesistente finiva
-  // nello stesso catch e si annunciava come "server unreachable", mandando a
-  // cercare il guasto sulla macchina DAQ invece che nel codice.
   let arrivati = false;
   try {
     const r = await fetch('stats.json?det=' +
@@ -2564,11 +2706,8 @@ async function giro() {
     arrivati = true;
     lastOk = new Date();
 
-    // Un file che non cresce non e' una run in corso. Quando una run finisce
-    // il suo file viene compresso e questo monitor ripiega sul .h5 non
-    // compresso piu' recente rimasto in data/, che puo' essere di giorni
-    // prima: stessi grafici, stessi numeri, nessun avviso. E' successo, con
-    // un file del 1 ottobre mostrato come se fosse la run del momento.
+    // Un file che non cresce non e' una run in corso (vedi la storia nel
+    // codice di prima): lo si dice in rosso.
     const FERMA_S = 15;
     const ferma = s.ferma_da !== null && s.ferma_da !== undefined
                   && s.ferma_da > FERMA_S;
@@ -2581,7 +2720,6 @@ async function giro() {
     } else {
       setAlert(null);
     }
-    // Il server ha una pagina diversa da questa: questa e' vecchia.
     if (s.versione && s.versione !== VERSIONE)
       document.getElementById('vecchia').style.display = 'block';
     document.getElementById('upd').textContent = ferma
@@ -2591,12 +2729,10 @@ async function giro() {
     document.getElementById('ratemednota').textContent =
         'Hz · run average' + (s.ratemednota || '');
     show('events', s.events); show('shown', s.shown);
-    // La nota non e' un errore: grigia, accanto al nome del file
     document.getElementById('err').textContent    = s.error || '';
     document.getElementById('nota').textContent   = s.nota || '';
     document.getElementById('file').textContent   =
       (s.file || 'no file') + (s.sampling ? ' · ' + s.sampling : '');
-    buildHistControls((s.channels || []).map(c => c.ch));
     const tb = document.querySelector('#tab tbody');
     const na = v => (v === null || v === undefined) ? '-' : v;
     tb.innerHTML = (s.channels||[]).map(c =>
@@ -2606,41 +2742,35 @@ async function giro() {
        <td>${na(c.offset)}</td><td>${na(c.threshold)}</td>
        <td>${c.eff_note ? '<span class="err">'+c.eff_note+'</span>' : na(c.eff_mv)}</td>
        <td>${na(c.eff)}</td></tr>`).join('');
+    costruisciSchede((s.channels || []).map(c => c.ch));
+    try {
+      IMP = await (await fetch('impostazioni.json', {cache: 'no-store'})).json();
+    } catch (e) {}
+    aggiornaInfo();
+
     const p = params();
     p.set('t', Date.now());
-    costruisciCelle(s.muro);
-
-    // Le immagini si chiedono UNA ALLA VOLTA, aspettando che ognuna arrivi.
-    // Il server ne disegna una per volta -- c'e' un lucchetto solo sui dati --
-    // quindi chiederle tutte insieme non le fa arrivare prima: le mette in
-    // coda. Con nove immagini e un rate alto la coda cresceva piu' in fretta
-    // di quanto si svuotasse e la pagina sembrava bloccata, con il monitor e
-    // la DAQ perfettamente vivi. In piu' il browser apre al massimo sei
-    // connessioni per origine: tenendole occupate tutte, la pagina di
-    // CONTROLLO -- che sta sulla stessa porta attraverso /monitor/ -- restava
-    // senza e sembrava ferma anche lei.
-    //
-    // I grafici che cambiano piano si rinfrescano ogni 5 s: la panoramica non
-    // risente nemmeno della selezione dei canali, e i muri e il rate si
-    // muovono lentamente per costruzione.
+    // Una immagine alla volta: il server ne disegna una per volta, e
+    // chiederle tutte insieme le mette solo in coda (vedi la storia nel
+    // codice di prima). Panoramica, rate, efficienza e schede si muovono
+    // piano: una volta ogni 5 s.
     const LENTI = 5000;
     const ora = Date.now();
-    for (const [id, name] of [['w','waveforms'],['h','amplitudes'],
-                              ['q','integrals'],
-                              ['r','rate'],['e','eff'],['mw','muro_wf'],
-                              ['ma','muro_amp'],['mc','muro_car'],
-                              ['pano','panoramica']]) {
-      const el = document.getElementById(id);
-      const lento = (id === 'pano' || id === 'r' || id === 'e' || id.startsWith('m'));
-      if (lento && el.dataset.t && (ora - el.dataset.t) < LENTI) continue;
+    const lista = [['r', 'rate'], ['e', 'eff'], ['pano', 'panoramica']].map(
+      ([id, nome]) => [document.getElementById(id), nome + '.png?' + p.toString()]);
+    document.querySelectorAll('#schede .scheda').forEach(sc => {
+      const q = new URLSearchParams(p); q.set('solo', sc.dataset.ch);
+      lista.push([sc.querySelector('.iwf'), 'scheda_wf.png?' + q.toString()]);
+      lista.push([sc.querySelector('.icar'), 'scheda_car.png?' + q.toString()]);
+    });
+    for (const [el, url] of lista) {
+      if (el.dataset.t && (ora - el.dataset.t) < LENTI) continue;
       el.dataset.t = ora;
-      await carica(el, name + '.png?' + p.toString());
-      aggiornaLente();
-      aggiornaFinestre();
+      await carica(el, url);
     }
+    aggiornaLente();
+    aggiornaFinestre();
   } catch (e) {
-    // Le immagini restano quelle di prima: senza un avviso vistoso la pagina
-    // sembrerebbe viva mentre mostra dati fermi.
     const why = (e && e.message) ? e.message : String(e);
     const msg = arrivati
       ? `Monitor page error (${why}). The data arrived, the page failed to `
@@ -2666,8 +2796,6 @@ try {
   if (localStorage.getItem('daqmon.ezoom') === '1')
     document.getElementById('ezoom').checked = true;
 } catch (e) {}
-// Il grafico dell'efficienza e' fra i lenti (uno ogni 5 s): senza azzerarne
-// l'istante il cambio di scala si vedrebbe solo al giro dopo.
 document.getElementById('ezoom').addEventListener('change', () => {
   document.getElementById('e').dataset.t = '';
   tick();
@@ -2870,60 +2998,74 @@ def make_handler(monitor, refresh, defaults):
                                       json.dumps(monitor.stats(
                                           qs.get("det", ["0"])[0] == "1")).encode())
 
+                if route == "impostazioni.json":
+                    return self._send(200, "application/json",
+                                      json.dumps(monitor.in_uso()).encode())
+
+                if route == "imposta":
+                    # GET e non POST: la pagina arriva anche attraverso il
+                    # controllore (/monitor/), che inoltra solo GET.
+                    azione = qs.get("azione", ["imposta"])[0]
+                    try:
+                        if azione == "copia":
+                            da = int(qs.get("da", [""])[0])
+                            a = [int(x) for x in qs.get("a", [""])[0].replace(" ", ",").split(",") if x]
+                            monitor.imp.copia(da, a)
+                            msg = "settings of ch%d copied to %s" % (da, ", ".join("ch%d" % c for c in a))
+                        elif azione == "azzera":
+                            ch = qs.get("ch", ["all"])[0]
+                            monitor.imp.azzera(None if ch == "all" else int(ch))
+                            msg = "back to automatic" + ("" if ch == "all" else " for ch%s" % ch)
+                        else:
+                            ch = int(qs.get("ch", [""])[0])
+                            monitor.imp.imposta(ch, {k: qs.get(k, [""])[0]
+                                                     for k in Impostazioni.CAMPI if k in qs})
+                            msg = "settings of ch%d saved" % ch
+                        monitor._ana = None      # piedistallo e cancello cambiati
+                        risposta = {"ok": True, "messaggio": msg}
+                    except (ValueError, TypeError) as e:
+                        risposta = {"ok": False, "messaggio": str(e)}
+                    return self._send(200, "application/json", json.dumps(risposta).encode())
+
                 kinds = {"panoramica.png": "panoramica",
                          "rate.png": "rate",
                          "eff.png": "eff",
                          "waveforms.png": "waveforms",
                          "average.png": "average",
-                         "amplitudes.png": "amplitudes",
                          "integrals.png": "integrals",
-                         "muro_wf.png": "muro_wf",
-                         "muro_amp.png": "muro_amp",
-                         "muro_car.png": "muro_car"}
+                         "scheda_wf.png": "scheda_wf",
+                         "scheda_car.png": "scheda_car"}
                 if route in kinds:
-                    # I limiti dell'istogramma sono per canale: hxmin_8, hlog_9, ...
-                    # I valori da riga di comando fanno da default per tutti.
+                    # Scale e cancelli dalle impostazioni del canale, salvate
+                    # nel monitor e uguali per tutti, non dai parametri della
+                    # pagina di chi guarda.
+                    solo = self._num(qs, "solo", None)
                     hset, qset = {}, {}
                     for ch in (monitor.hdr or {}).get("ChannelList", []):
                         ch = int(ch)
-                        hset[ch] = (
-                            self._num(qs, f"hxmin_{ch}", defaults["hxmin"]),
-                            self._num(qs, f"hxmax_{ch}", defaults["hxmax"]),
-                            qs.get(f"hlog_{ch}",
-                                   ["1" if defaults["hlog"] else "0"])[0] == "1",
-                            _bin(self._num(qs, f"hbin_{ch}", None)),
-                        )
-                        # Lo spettro di carica ha la sua scala: e' in pC, e con
-                        # i limiti delle ampiezze -- che sono in unita' di
-                        # offset -- si sarebbe ritagliato su numeri che li' non
-                        # vogliono dire niente.
-                        qset[ch] = (
-                            self._num(qs, f"qxmin_{ch}", None),
-                            self._num(qs, f"qxmax_{ch}", None),
-                            qs.get(f"qlog_{ch}", ["0"])[0] == "1",
-                            _bin(self._num(qs, f"qbin_{ch}", None)),
-                        )
-                    gate = (self._num(qs, "gfrom", defaults["gfrom"]),
-                            self._num(qs, "gto", defaults["gto"]))
-                    gates_ch = {}
-                    for ch in (monitor.hdr or {}).get("ChannelList", []):
-                        ch = int(ch)
-                        g = (self._num(qs, f"cgfrom_{ch}", None),
-                             self._num(qs, f"cgto_{ch}", None))
-                        if g != (None, None):
-                            gates_ch[ch] = g
+                        imp = monitor.imp.di(ch)
+                        qx = imp["qx"] or [None, None]
+                        qset[ch] = (qx[0], qx[1], imp["qlog"] is None or bool(imp["qlog"]),
+                                    _bin(imp["qbin"]))
+                        hset[ch] = (defaults["hxmin"], defaults["hxmax"], defaults["hlog"], None)
+                    if solo is not None and route in ("waveforms.png", "average.png"):
+                        imp = monitor.imp.di(int(solo))
+                        if imp["wfx"]:
+                            xlim = tuple(imp["wfx"])
+                        if imp["wfy"]:
+                            ylim = tuple(imp["wfy"])
                     return self._send(200, "image/png",
                                       monitor.figure(kinds[route], n, xlim, ylim,
                                                      hset,
                                                      self._num(qs, "bw", defaults["bw"]),
-                                                     self._num(qs, "qcut", defaults["qcut"]),
-                                                     qset, gate,
+                                                     None,
+                                                     qset, monitor.gate_comune,
                                                      qs.get("scala", ["M"])[0],
                                                      qs.get("det", ["0"])[0] == "1",
-                                                     self._num(qs, "solo", None),
+                                                     solo,
                                                      self._num(qs, "rbin", 10.0),
                                                      qs.get("ezoom", ["0"])[0] == "1",
-                                                     gates_ch))
+                                                     None))
 
             self._send(404, "text/plain", b"not found")
 
@@ -2966,6 +3108,10 @@ def main():
                          "campionamento alte la finestra intera e' corta e questi "
                          "valori vanno rivisti. Con fine <= inizio non si corregge "
                          "niente e si torna alla mediana dell'intera traccia")
+    ap.add_argument("--impostazioni", default=None,
+                    help="file delle impostazioni per canale (default: "
+                         "<data>/monitor-impostazioni.json). Un monitor di prova "
+                         "ne usa uno suo, se no cambia quelle di tutti")
     ap.add_argument("--gate-from", type=float, default=190.0, dest="gfrom",
                     help="inizio del cancello su cui si integra la carica [ns] "
                          "(default 190). Indipendente dallo zoom: la forma d'onda "
@@ -3016,6 +3162,9 @@ def main():
     monitor.tail_cut = max(0, args.tail_cut)
     monitor.att_forzata = args.attenuazione
     monitor.baseline_ns = (args.bfrom, args.bto)
+    monitor.gate_comune = (args.gfrom, args.gto)
+    if args.impostazioni:
+        monitor.imp = Impostazioni(args.impostazioni)
     defaults = {"n": args.nevents, "bw": args.bw, "qcut": args.qcut,
                 "xmin": args.xmin, "xmax": args.xmax,
                 "ymin": args.ymin, "ymax": args.ymax,

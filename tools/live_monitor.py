@@ -305,6 +305,15 @@ class Monitor:
         self._ov = None
         self._prev = None
         self.rate = 0.0
+        # Tutto quello che il monitor ha accumulato, non solo gli spettri: la
+        # curva dell'efficienza con la sua stima (sigma del piedistallo e
+        # finestre), i cancelli e i piedistalli automatici, che vanno
+        # rimisurati sugli eventi nuovi, e il rate medio, che da qui in avanti
+        # e' "da quando hai azzerato" invece che dall'inizio della run.
+        self._eff = None
+        self._eff_hist.clear()
+        self._auto = None
+        self.t_azzera = time.time()
 
     def set_baseline_ns(self, a, b):
         """Finestra del piedistallo. Cambiarla invalida l'analisi in memoria."""
@@ -611,6 +620,9 @@ class Monitor:
         if not self._hist:
             return None, ""
         t_now, n_now = self._hist[-1]
+        if self.origin and getattr(self, "t_azzera", None):
+            dt = t_now - self.t_azzera
+            return ((n_now - self.origin) / dt if dt > 0 else None), " (since reset)"
         t0 = self.start_time
         if t0:
             return (n_now / (t_now - t0), "") if t_now > t0 else (None, "")

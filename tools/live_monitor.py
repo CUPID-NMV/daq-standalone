@@ -1382,7 +1382,7 @@ class Monitor:
                     if n == 1:
                         ax.plot(t_ns, corr[e, i], lw=0.9)
                     else:
-                        ax.plot(t_ns, corr[e, i], lw=0.6, color="#2a78d6",
+                        ax.plot(t_ns, corr[e, i], lw=0.6, color="black",
                                 alpha=min(0.5, 10.0 / n))
                 ax.axhline(0, color="k", lw=0.8, ls=":")
 

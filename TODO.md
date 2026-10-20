@@ -241,9 +241,19 @@ Da provare:
 5. Le due schede insieme: banda del bridge con due letture di dati in
    contemporanea (finora provati solo registri: 16k e 22k letture in 8 s,
    zero errori).
-6. Unita' e giro del Trigger Time Tag: nella prova ~9.9e8 conteggi in ~17 s,
-   cioe' ~17 ns/conteggio e giro dopo ~18 s se il contatore e' a 30 bit --
-   numeri stimati dalla durata, non misurati. Servono per abbinare gli eventi.
+6. Trigger Time Tag: dal datasheet DS3159 contatore a 30 bit, 8.5 ns, giro
+   ogni ~9 s. (Il "~17 ns" scritto qui prima veniva da una durata della run
+   assunta, non misurata: era sbagliato.) Da verificare sui dati: rate dal
+   TTT contro rate dalla DAQ, e il giro a 2^30.
+7. Sincronizzazione, dalla nota CAEN AN2862 e dal datasheet DS3159 (letti il
+   2026-10-20): clock interno/esterno scelto da un COMMUTATORE MECCANICO
+   sulla scheda; clock in daisy chain CLK-OUT -> CLK-IN (riferimento esterno
+   50 o 58 MHz), con ritardo programmabile sul CLK-OUT; partenza comune con
+   TRG-OUT -> S-IN (la slave armata su S-IN, la master avviata via software,
+   ritardo di partenza da compensare) oppure con TRG-IN comune; S-IN puo'
+   anche azzerare il TTT. CAEN distribuisce "SyncTest x742", un programma C
+   di esempio che sincronizza due V1742: e' il riferimento per i registri.
+   Manca ancora il manuale tecnico del V1742 (UM4270) con i registri.
 
 Poi fase 2 (controllore: schede nella pagina, Enabled, start/stop insieme,
 numero di run unico, mail per scheda -- prima un PNG da approvare) e fase 3

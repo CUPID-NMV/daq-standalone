@@ -140,6 +140,8 @@ CAMPI = [
     ("digitizer", "OutputDir",       "output directory",   "testo",  None),
 
     ("digitizer", "ExternalTrigger", "external trigger (TRG-IN)", "booleano", None),
+    ("digitizer", "SoftwareTrigger", "software trigger (random windows: dark count, pedestal)", "booleano", None),
+    ("digitizer", "SoftwareTriggerRate", "software trigger mean rate [Hz]", "intero", (1, 5000)),
     ("digitizer", "IOLevel",         "front panel level",  "scelta", ["NIM", "TTL"]),
     ("digitizer", "TriggerPolarity", "discrimination edge (0 = rising/positive pulses, 1 = falling/negative)", "intero", (0, 1)),
     ("digitizer", "SelfTrigger",     "self-trigger",       "booleano", None),
@@ -361,9 +363,18 @@ def coerenza(d):
     modo = str(g.get("SelfTriggerMode", "paired"))
     freq = str(g.get("SamplingRate", ""))
 
-    if not self_on and not est_on and not c.get("Enabled"):
-        avvisi.append("Neither self-trigger nor external trigger: only the software "
-                      "trigger would be left, and the run would acquire nothing on its own.")
+    sw_on = bool(g.get("SoftwareTrigger"))
+    if not self_on and not est_on and not sw_on and not c.get("Enabled"):
+        avvisi.append("Neither self-trigger nor external trigger nor software trigger: "
+                      "the run would acquire nothing.")
+
+    # Una run a trigger software serve perche' le finestre sono CIECHE (DCR
+    # dei SiPM, piedistallo per cella del DRS4). Un'altra sorgente accesa
+    # insieme ci mescola eventi scelti dal segnale, e la misura non vale piu'.
+    if sw_on and ((self_on and g.get("SelfTriggerAcquire", True) is not False) or est_on):
+        avvisi.append("Software trigger together with the self-trigger or TRG-IN: the "
+                      "file mixes blind windows with events chosen by the signal, and is "
+                      "no good for dark count or per-cell pedestal. Switch the others off.")
 
     # Due sorgenti accese insieme sono previste dalla board e vanno in OR: non
     # e' un errore. Ma negli eventi non resta scritto QUALE ha fatto scattare
@@ -457,7 +468,7 @@ def coerenza(d):
     # 2026-10-20 ha dato una run senza nessun evento senza che la pagina
     # dicesse niente.
     if g.get("SelfTrigger") and g.get("SelfTriggerAcquire") is False:
-        if not g.get("ExternalTrigger"):
+        if not g.get("ExternalTrigger") and not g.get("SoftwareTrigger"):
             avvisi.append("SelfTriggerAcquire = false and ExternalTrigger = false: the "
                           "self-trigger only drives TRG-OUT and nothing triggers the "
                           "acquisition. The run will record NO events. Set "

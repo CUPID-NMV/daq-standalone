@@ -96,6 +96,15 @@ private:
     bool fDRS4Correction;   // correzione celle DRS4 sui dati REGISTRATI
     bool fSaveRaw;
     bool fExternalTrigger;
+    // Run a trigger SOFTWARE: finestre aperte a istanti scelti dal PC, senza
+    // guardare il segnale. E' il campione imparziale che serve per il DCR dei
+    // SiPM (conteggio degli impulsi in finestre cieche) e per la calibrazione
+    // del piedistallo per cella del DRS4. Intervalli casuali, esponenziali di
+    // media 1/fSWTriggerRateHz: a intervalli fissi un disturbo periodico
+    // commensurabile cadrebbe sempre nella stessa fase della finestra.
+    // Letti nel corpo del costruttore, non nella lista di inizializzazione.
+    bool   fSoftwareTrigger = false;
+    double fSWTriggerRateHz = 100.0;
 
     CAEN_DGTZ_TriggerMode_t  fSelfTriggerMode;
     CAEN_DGTZ_TriggerMode_t  fExternalTriggerMode;

@@ -138,6 +138,20 @@ TriggerPolarity = 1
 ExternalTrigger = true       # <<< true = abilitato, false = disabilitato
 
 # ---------------------------------------------------------------------------
+#  Trigger SOFTWARE: finestre cieche, aperte a istanti scelti dal PC senza
+#  guardare il segnale, a intervalli casuali (esponenziali) di media
+#  1/SoftwareTriggerRate. Servono per il rate degli impulsi al buio dei SiPM
+#  (si contano gli impulsi nelle finestre, a ogni soglia, offline) e per la
+#  calibrazione del piedistallo per cella del DRS4 (metodo PADME). Per queste
+#  misure le altre sorgenti vanno SPENTE: un evento portato dal segnale non e'
+#  piu' una finestra cieca. Il rate vero e' limitato dal bridge e dalla
+#  lettura (qualche centinaio di Hz); a fine run il log dice trigger mandati
+#  contro eventi registrati.
+# ---------------------------------------------------------------------------
+SoftwareTrigger     = false
+SoftwareTriggerRate = 100     # Hz, media
+
+# ---------------------------------------------------------------------------
 #  Livello elettrico del pannello frontale: "NIM" oppure "TTL".
 #
 #  Vale per TUTTO il pannello, TRG-IN e TRG-OUT insieme: non si puo' avere

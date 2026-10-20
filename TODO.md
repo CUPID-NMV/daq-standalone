@@ -273,6 +273,15 @@ Da provare:
    provato su queste schede). Il ginocchio della calibrazione della soglia
    fra 1.6 e 47 ns resta da fare al rientro, con l'impulsatore.
 
+10. **Run a trigger software (`SoftwareTrigger`, `SoftwareTriggerRate`)
+   scritta il 2026-10-20 a PC DAQ spento: NON COMPILATA.** Le due chiavi
+   vanno aggiunte a mano in run-local.toml (con backup): la pagina modifica
+   solo chiavi esistenti. Da verificare: rate effettivo contro richiesto
+   (log: trigger mandati contro eventi registrati), TriggerMode = "Software"
+   nell'header, poi `tools/dcr_scala.py` su una run vera; controllo del
+   campione cieco (prima/seconda meta' della finestra, forma media degli
+   eventi vuoti senza strutture).
+
 Poi fase 2 (controllore: schede nella pagina, Enabled, start/stop insieme,
 numero di run unico, mail per scheda -- prima un PNG da approvare) e fase 3
 (monitor: due file per run, schede dei canali col nome della scheda, file di

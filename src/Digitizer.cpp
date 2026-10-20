@@ -19,6 +19,7 @@
 #include <algorithm>   // <-- per std::all_of, std::remove_if
 #include <cstdio>      // <-- per std::sscanf
 #include <sys/stat.h>  // <-- per stat() sul file delle soglie live
+#include <random>      // <-- intervalli casuali del trigger software
 
 #include "Digitizer.h"
 #include "Log.h"
@@ -142,6 +143,17 @@ Digitizer::Digitizer()
     // Livello del pannello frontale: NIM oppure TTL. Un valore sconosciuto e'
     // fatale invece che silenziosamente NIM, perche' un trigger che non arriva
     // e' il sintomo piu' dispendioso da diagnosticare che ci sia.
+    // Chiavi lette senza GetEntry: mancano in tutte le configurazioni vecchie,
+    // e un avviso "using the built-in default" a ogni run per una funzione
+    // che quasi nessuno usa insegna solo a ignorare gli avvisi.
+    fSoftwareTrigger = fConfig.GetTbl()["digitizer"]["SoftwareTrigger"].value_or(false);
+    fSWTriggerRateHz = fConfig.GetTbl()["digitizer"]["SoftwareTriggerRate"].value_or(100.0);
+    if (fSoftwareTrigger && !(fSWTriggerRateHz > 0.0 && fSWTriggerRateHz <= 5000.0)) {
+        Log::OutError("SoftwareTriggerRate = " + std::to_string(fSWTriggerRateHz) +
+                      " Hz non valido: deve stare fra 0 e 5000. Abort.");
+        exit(1);
+    }
+
     fIOLevelStr = fConfig.GetEntry<std::string>("digitizer","IOLevel","NIM");
     {
         std::string v;
@@ -1602,9 +1614,19 @@ void Digitizer::ConfigureTrigger() {
         Log::OutSummary(std::string("→ External trigger (TRG-IN): ") +
                         (fExternalTrigger ? "ENABLED" : "DISABLED"));
 
-    if ((!fSelfTrigger || !fSelfTriggerAcquire) && !fExternalTrigger)
+    if (fSoftwareTrigger) {
+        Log::OutSummary("→ Software trigger: ENABLED, random intervals, mean rate " +
+                        std::to_string(fSWTriggerRateHz) + " Hz");
+        // Per il DCR e per il piedistallo per cella il campione deve essere
+        // cieco: un solo evento portato da un'altra sorgente e' un impulso
+        // scelto apposta, e sposta la misura proprio dove conta.
+        if ((fSelfTrigger && fSelfTriggerAcquire) || fExternalTrigger)
+            Log::OutWarning("SoftwareTrigger = true insieme al self-trigger o al trigger "
+                            "esterno: il file mescola finestre cieche e eventi scelti dal "
+                            "segnale, e non vale per DCR e piedistallo per cella.");
+    } else if ((!fSelfTrigger || !fSelfTriggerAcquire) && !fExternalTrigger)
         Log::OutWarning("Neither external trigger nor self-trigger is enabled: "
-                        "the board will only acquire on software triggers.");
+                        "nothing triggers the acquisition (SoftwareTrigger = false).");
 
     ConfigureTriggerOut();
 
@@ -1662,7 +1684,9 @@ void Digitizer::AcquireEvents() {
     if (fExternalTrigger) trgsrc += "external";
     if (fSelfTrigger && fSelfTriggerAcquire)
         trgsrc += (trgsrc.empty() ? "" : " + ") + std::string("self");
-    if (trgsrc.empty())   trgsrc = "software only";
+    if (fSoftwareTrigger)
+        trgsrc += (trgsrc.empty() ? "" : " + ") + std::string("software");
+    if (trgsrc.empty())   trgsrc = "no";
     // Rilettura DOPO l'avvio: i registri del pannello frontale si leggono
     // giusti a fine configurazione, ma il connettore e' risultato muto. Se
     // qualcosa fra la configurazione e l'acquisizione li azzera, e' qui che si
@@ -1699,6 +1723,25 @@ void Digitizer::AcquireEvents() {
     constexpr long kFlushMaxDelayMs = 300;
     auto lastFlush = std::chrono::steady_clock::now();
 
+    // Trigger software a intervalli esponenziali. Si programma l'istante del
+    // prossimo e lo si manda quando e' passato; se il ciclo resta indietro di
+    // piu' di un secondo (lettura lunga) si riparte da adesso invece di
+    // recuperare con una raffica, che riempirebbe il buffer della scheda.
+    std::mt19937_64 rng(std::random_device{}());
+    std::exponential_distribution<double> intervallo(fSWTriggerRateHz);
+    auto prossimoSW = std::chrono::steady_clock::now();
+    uint64_t swInviati = 0, swFalliti = 0;
+    auto MandaSW = [&]() {
+        if (!fSoftwareTrigger) return;
+        auto now = std::chrono::steady_clock::now();
+        if (now < prossimoSW) return;
+        if (now - prossimoSW > std::chrono::seconds(1)) prossimoSW = now;
+        if (CAEN_DGTZ_SendSWtrigger(fHandle) == CAEN_DGTZ_Success) ++swInviati;
+        else ++swFalliti;
+        prossimoSW += std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                          std::chrono::duration<double>(intervallo(rng)));
+    };
+
     while (totalEvents < maxEvents && retry < maxRetries) {
         // Uscita pulita su richiesta: si esce di qui, non si muore dove
         // capita, cosi' il file viene chiuso e compresso e la board resettata.
@@ -1707,6 +1750,7 @@ void Digitizer::AcquireEvents() {
                             std::to_string(totalEvents) + " eventi.");
             break;
         }
+        MandaSW();
         re = CAEN_DGTZ_ReadData(
             fHandle,
             CAEN_DGTZ_SLAVE_TERMINATED_READOUT_MBLT,
@@ -1740,8 +1784,19 @@ void Digitizer::AcquireEvents() {
             // muoiono con ReadData -1 si presenta solo a basso rate. Con 100 ms
             // il link resta impegnato, e le soglie a caldo diventano anche piu'
             // reattive. Il costo in CPU e' trascurabile.
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            ++retry;
+            // Col trigger software si dorme solo fino al prossimo trigger:
+            // 100 ms fissi limiterebbero il rate a 10 Hz.
+            auto attesa = std::chrono::milliseconds(100);
+            if (fSoftwareTrigger) {
+                auto mancano = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   prossimoSW - std::chrono::steady_clock::now());
+                attesa = std::max(std::chrono::milliseconds(0), std::min(attesa, mancano));
+            }
+            std::this_thread::sleep_for(attesa);
+            // Le attese vuote contano solo senza trigger software: con quello
+            // gli eventi arrivano per costruzione, e il limite di ~83 minuti
+            // senza eventi scatterebbe a vuoto se il rate e' basso.
+            if (!fSoftwareTrigger) ++retry;
             continue;
         }
 
@@ -1890,6 +1945,15 @@ void Digitizer::AcquireEvents() {
     fAcqRunning = false;
 
     std::cout << std::endl << std::endl;
+    if (fSoftwareTrigger) {
+        // Trigger mandati contro eventi registrati: la scheda ignora un
+        // trigger mentre e' occupata, e la differenza dice quante finestre
+        // sono andate perse. Non sposta il DCR (le finestre perse non
+        // dipendono dal segnale), ma va saputa.
+        Log::OutSummary("→ Software triggers sent: " + std::to_string(swInviati) +
+                        " (failed: " + std::to_string(swFalliti) + "), events recorded: " +
+                        std::to_string(totalEvents));
+    }
     Log::OutSummary("Acquisition complete.");
     Log::OutSummary("→ Total events recorded: " + std::to_string(totalEvents));
     Log::OutSummary("→ Acquisition time: " + std::to_string(elapsed_s) + " s");
@@ -2411,6 +2475,8 @@ void Digitizer::PrepareOutput() {
         // strumenti di analisi decidono da qui dove aspettarsi l'impulso.
         if (fSelfTrigger && fSelfTriggerAcquire)
             trig_mode += (trig_mode.empty() ? "" : "+") + std::string("Self");
+        if (fSoftwareTrigger)
+            trig_mode += (trig_mode.empty() ? "" : "+") + std::string("Software");
         if (trig_mode.empty()) trig_mode = "Disabled";
         {
             H5::StrType stype(H5::PredType::C_S1, H5T_VARIABLE);

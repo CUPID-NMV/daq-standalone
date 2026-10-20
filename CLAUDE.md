@@ -214,6 +214,16 @@ aggiorna. Le chiavi nuove vanno aggiunte lì a parte, con un backup, dicendolo.
   Q_pe e crosstalk misurati al buio coincidono col LED (entro 4% e 2% fino a
   55.5 V), V_bd entro 1.2 sigma: la distanza fra i picchi non risente della
   scelta del trigger, i pesi dei picchi si'.
+- **Il DCR si misura con una run a TRIGGER SOFTWARE** (`SoftwareTrigger =
+  true`, finestre a intervalli casuali, altre sorgenti spente) e
+  `tools/dcr_scala.py`: la scala in soglia si fa offline su una sola run, e
+  la scala in p.e. la danno i gradini stessi. Validato il 2026-10-20 su dati
+  SIMULATI (750 MS/s, 40 conteggi/p.e., crosstalk 0.20): a 100 kHz DCR
+  95.9/20.1/4.0 kHz contro 100/20/4 veri, crosstalk 0.209; a 1 MHz la stima
+  di Poisson da' 979 kHz a 0.5 p.e., ma a 1.5 p.e. 262 contro 200: il
+  pile-up di due 1 p.e. supera la soglia, e il crosstalk ne esce gonfiato
+  (0.27). Senza isteresi la coda lenta degli impulsi, riattraversando la
+  soglia col rumore, gonfiava il conteggio del 10%. Mai provato su dati veri.
 - **Il DCR non si misura dalle run in self-trigger**, nemmeno contando gli
   impulsi nelle tracce: prima del trigger mancano quelli che lo avrebbero fatto
   scattare, dopo pesa la coda dell'impulso del trigger. Il rate della run e'
@@ -584,6 +594,7 @@ eventi totali. Misurato il 2026-10-15 su run intere (SiPM su ch16-18, 52 V):
 | `tools/posta.py` | spedizione delle mail via pmg1/pmg2, con i tentativi per il greylisting; `--prova indirizzo` |
 | `tools/riepilogo_giorno.py` | il riepilogo di un giorno dai .log delle run, col grafico del rate; `--png`, `--invia` |
 | `tools/notifiche.py` | lista delle persone, invio in sottofondo, storico, riepilogo all'ora fissata, diagnosi di fine run |
+| `tools/dcr_scala.py` | DCR dei SiPM contro soglia da una run a trigger software: scala a gradini, crosstalk, DCR a 0.5/1.5/2.5 p.e. (tre stime) |
 | `tools/WCFastCheck.ipynb` | analisi offline; legge i due formati e i `.gz` via `daqio` |
 
 Le misure stanno in `measurements/*.json` con i dati grezzi, e gli script di

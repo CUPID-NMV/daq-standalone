@@ -265,6 +265,14 @@ Da provare:
    va in daqio con un interruttore nel monitor; la mediana per cella va
    presa FUORI dal cancello (i SiPM col LED occupano il 40% della traccia).
 
+9. Impulsatore lasciato a casa per la trasferta (2026-10-20). Per la PADME
+   servono eventi di solo piedistallo: aggiungere una run a trigger
+   SOFTWARE (oggi i trigger software si usano solo per il piedistallo
+   all'avvio). Per la sincronizzazione delle schede: un segnale sdoppiato,
+   o il generatore di impulsi interno del V4718 (Bridge::SetPulser, mai
+   provato su queste schede). Il ginocchio della calibrazione della soglia
+   fra 1.6 e 47 ns resta da fare al rientro, con l'impulsatore.
+
 Poi fase 2 (controllore: schede nella pagina, Enabled, start/stop insieme,
 numero di run unico, mail per scheda -- prima un PNG da approvare) e fase 3
 (monitor: due file per run, schede dei canali col nome della scheda, file di

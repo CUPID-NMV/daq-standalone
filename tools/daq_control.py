@@ -441,6 +441,21 @@ def coerenza(d):
     # Resta un avviso e non un errore perche' DCOffset e' per canale mentre
     # TriggerPolarity e' uno solo: con polarita' mescolate un compromesso e'
     # inevitabile.
+    # SelfTriggerAcquire = false: il self-trigger va solo su TRG-OUT e non fa
+    # acquisire. Rimasta cosi' dopo la prova con la maggioranza del V812, il
+    # 2026-10-20 ha dato una run senza nessun evento senza che la pagina
+    # dicesse niente.
+    if g.get("SelfTrigger") and g.get("SelfTriggerAcquire") is False:
+        if not g.get("ExternalTrigger"):
+            avvisi.append("SelfTriggerAcquire = false and ExternalTrigger = false: the "
+                          "self-trigger only drives TRG-OUT and nothing triggers the "
+                          "acquisition. The run will record NO events. Set "
+                          "SelfTriggerAcquire = true for a self-triggered run.")
+        if str(g.get("TriggerOut", "self")) in ("off", "default"):
+            avvisi.append("SelfTriggerAcquire = false with TriggerOut = \"%s\": the "
+                          "self-trigger goes nowhere. Use TriggerOut = \"self\" or \"all\"."
+                          % g.get("TriggerOut"))
+
     pol = g.get("TriggerPolarity")
     dco = [x for x in lista(g.get("DCOffset")) if isinstance(x, int)]
     # Si guarda il DCOffset dei SOLI canali che fanno il self-trigger: con PMT

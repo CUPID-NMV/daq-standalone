@@ -1441,7 +1441,7 @@ class Monitor:
             for e in range(corr.shape[0] - n, corr.shape[0]):
                 ax.plot(t_ns, corr[e, i], lw=0.5, color="black", alpha=min(0.5, 10.0 / max(n, 1)))
             ax.axhline(0, color="#999", lw=0.6, ls=":")
-            ax.axvspan(t_ns[a_i[i]], t_ns[b_i[i] - 1], color=colore, alpha=0.18, lw=0)
+            self._regioni(ax, i, a_i, b_i, t_ns, colore)
             if imp["wfx"]:
                 ax.set_xlim(left=imp["wfx"][0], right=imp["wfx"][1])
             if imp["wfy"]:
@@ -1470,6 +1470,20 @@ class Monitor:
         fig.savefig(buf, format="png", dpi=DPI_FIG)
         plt.close(fig)
         return buf.getvalue()
+
+    def _regioni(self, ax, i, a_i, b_i, t_ns, colore, etichette=False):
+        """Finestra del piedistallo (grigia) e cancello di carica (colorato).
+
+        Sulle forme d'onda tutte e due: il cancello dice cosa si integra, la
+        finestra del piedistallo da dove si misura lo zero, e un impulso che ci
+        cade dentro sposta lo zero di tutto il resto.
+        """
+        fch = self.base_finestre_ch[i] if i < len(self.base_finestre_ch) else None
+        if fch:
+            ax.axvspan(fch[0], fch[1], color="#7f7f7f", alpha=0.14, lw=0,
+                       label="baseline" if etichette else None)
+        ax.axvspan(t_ns[a_i[i]], t_ns[b_i[i] - 1], color=colore, alpha=0.18, lw=0,
+                   label="charge gate" if etichette else None)
 
     def in_uso(self):
         """Per canale: verso, cancello e piedistallo IN USO e da dove vengono.
@@ -1602,8 +1616,10 @@ class Monitor:
                                               3.3 * k * len(canali_dis)),
                                      squeeze=False, sharex=True)
             n = max(1, min(n_show, corr.shape[0]))
+            _, a_r, b_r, _, _, _ = self._carica(corr, t_ns, gate, channels)
             for j, (i, ch) in enumerate(zip(idx_dis, canali_dis)):
                 ax = axes[j][0]
+                self._regioni(ax, i, a_r, b_r, t_ns, PALETTE[i % len(PALETTE)], etichette=True)
                 # Piu' eventi: tutti dello stesso colore e semitrasparenti,
                 # come la persistenza di un oscilloscopio -- dove le tracce
                 # passano spesso il colore si fa pieno. Con un colore per
@@ -1707,6 +1723,13 @@ class Monitor:
             # pagina resta bassa, dove serve compatta e sta da sola.
             alt = 3.3 if solo is not None else 2.5
             fig, ax = plt.subplots(figsize=(LARG_PX * k / DPI_FIG, alt * k))
+            # Con un canale solo (la finestra di dettaglio) anche qui le
+            # finestre di piedistallo e cancello; con piu' canali sovrapposti
+            # sarebbero una per canale una sopra l'altra.
+            if len(idx_dis) == 1:
+                _, a_r, b_r, _, _, _ = self._carica(corr, t_ns, gate, channels)
+                self._regioni(ax, idx_dis[0], a_r, b_r, t_ns,
+                              PALETTE[idx_dis[0] % len(PALETTE)], etichette=True)
             for i, ch in zip(idx_dis, canali_dis):
                 line, = ax.plot(t_ns, corr[:, i].mean(axis=0), lw=1.4, label=f"ch{ch}")
 
@@ -2366,7 +2389,7 @@ Open the browser console to see the error.</div>
     <div class="gr"><a class="apri" data-img="e">&#8599;</a><img id="e" alt="efficiency vs time"></div>
   </div>
 </div>
-<div class="tsez">channels &middot; click a plot for the detail &middot; &#9881; settings of the channel</div>
+<div class="tsez">channels &middot; grey band = baseline window, coloured band = charge gate &middot; click a plot for the detail &middot; &#9881; settings of the channel</div>
 <div id="schede" class="schede"></div>
 <table id="tab"><thead><tr><th>channel</th><th>baseline</th><th>rms</th>
 <th>mean amplitude</th><th>median</th><th>median [mV]</th><th>max</th><th>offset</th><th>threshold</th>

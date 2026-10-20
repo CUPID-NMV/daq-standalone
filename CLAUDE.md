@@ -17,7 +17,8 @@ ad avere hardware e librerie CAEN.
 
 - PC DAQ: alias SSH `daq-pc` → `192.168.99.104`, utente `daq`, repo in
   `/home/daq/daq-standalone`. Login a chiave.
-- Digitizer V1742: `192.168.99.105` (non è il PC DAQ).
+- Bridge VME V4718: `192.168.99.105` (non è il PC DAQ). I digitizer stanno
+  sul bus VME dietro di lui, distinti dall'indirizzo di base: vedi "Due V1742".
 - **Gli indirizzi sono assegnati da DHCP e cambiano.** Il PC DAQ è passato
   da `.108` a `.104` dopo un riavvio, il 2026-10-05. Se `daq-pc` non
   risponde, prima di dare per rotto qualcosa si cerca dove è finito:
@@ -284,6 +285,17 @@ cambiato al banco.** Qui lavorano piu' persone sulla stessa catena.
 
 ## Le correzioni DRS4 non si accendono. Mai.
 
+> **Attenzione, verificato il 2026-10-20: il codice NON fa piu' quello che
+> dice questa sezione.** Il commit `f18a2a0` del 2026-09-28
+> ("DRS4Correction: opzione esplicita nel TOML, default attiva") le ha
+> riaccese apposta -- senza correzione il rumore registrato era 34 conteggi
+> contro 1.5 -- e `run-local.toml` ha `DRS4Correction = true`: tutte le run
+> recenti hanno nel log "DRS4 corrections ENABLED". Restano spente solo
+> durante la misura del piedistallo in Transparent Mode. Quale delle due sia
+> la decisione valida lo deve dire l'utente; fino ad allora, NON cambiare
+> nessuna delle due cose. I sigma da 1.5 conteggi della tabella
+> dell'efficienza sono misurati con le correzioni accese.
+
 Decisione esplicita, presa il 2026-09-25: `CAEN_DGTZ_EnableDRS4Correction` non
 va applicata in questo progetto, da nessuna parte.
 
@@ -470,6 +482,50 @@ gruppo 0 (ch0-7) ha problemi e non si usa. Stesso trigger per tutti.
   carica vicina a zero o del segno sbagliato: e' quello che succedeva col
   cancello comune 190-1000 ns.
 
+## Due V1742 (dal 2026-10-20)
+
+Nello stesso crate, dietro lo stesso bridge V4718:
+
+| scheda | seriale | base VME | rivelatori |
+|---|---|---|---|
+| `sipm` | 51639 | `0x32100000` | SiPM |
+| `pmt` | 202 | `0x11110000` (commutatori 1111) | PMT |
+
+- **Un indirizzo che non risponde si trova in 20 secondi**: leggere un
+  registro della scheda (`base + 0x8140`, A32, D32, con `CAENVME_ReadCycle`
+  su `cvETH_V4718` = 27) per tutte le 65536 posizioni dei commutatori. Cosi'
+  e' venuto fuori che con i commutatori su F00A la scheda rispondeva a
+  `0xD00A0000`: il bit 29 si leggeva 0. Forse un contatto del primo
+  commutatore, non verificato; con 1111 il problema non si pone.
+- **Il bridge accetta due programmi insieme**, uno per scheda: 16k e 22k
+  letture di registro in 8 s in contemporanea, zero errori. Due letture di
+  DATI insieme non sono ancora provate.
+- **Un processo DAQ per scheda, un solo TOML** (scelta dell'utente: le due
+  schede hanno frequenza, PostTrigger e polarita' diverse). Ogni scheda ha
+  una sezione `[boards.<nome>]` con le sole chiavi che la distinguono, che
+  `--board <nome>` fonde sopra `[digitizer]`; `Enabled = false` la esclude
+  (richiesta dell'utente: poterne spegnere una); `BoardSerial` facoltativo
+  blocca una scheda sbagliata a quell'indirizzo. `--run N` impone il numero
+  di run, che con piu' schede deve darlo il controllore: contando i file
+  ognuna lo calcolerebbe a seconda di chi ha gia' creato il suo. Il nome
+  porta la scheda DOPO il numero: `test_0201_pmt_1Gs_60PT.h5`. File di stato
+  e di soglie per scheda (`live-status-<scheda>.json`); il V812 lo configura
+  solo la scheda scritta in `[cfd] Board`. Senza `--board` tutto come prima.
+  Esempio commentato in fondo a `config/template-daq.toml`.
+- **Formato v3**: per ogni evento `/events/event_counter` e
+  `/events/trigger_time_tag`, riga per riga con le forme d'onda, e
+  `Board`/`BoardSerial`/`VMEBaseAddress` nell'header. Senza questi due numeri
+  gli eventi di due schede non si abbinano nemmeno offline. Il Trigger Time
+  Tag, da datasheet, e' a 30 bit da 8.5 ns: un giro ogni ~9 s.
+- **Stato al 2026-10-20**: fase 1 (C++) committata e provata sulla scheda
+  SiPM, **non installata in `build/`**. La scheda PMT risponde ma non
+  acquisisce (reset in timeout, buffer non allocabile; registri: clock
+  esterno, PLL sganciato, scheda non pronta): sospetto il commutatore
+  meccanico della sorgente di clock. Il trigger delle due schede (comune o
+  separato) non e' deciso; la sincronizzazione (clock CLK-OUT -> CLK-IN,
+  partenza TRG-OUT -> S-IN) e' riassunta in `TODO.md` con le fonti. Prove
+  rimaste, fase 2 (controllore) e fase 3 (monitor) sono in `TODO.md`.
+
 ## La stima dell'efficienza nel riepilogo
 
 Una stima, non un'analisi: le analisi si fanno offline. `tools/efficienza.py`,
@@ -544,7 +600,7 @@ stessa porta del controllore: da VPN o da inoltro di porta quasi sempre è
 inoltrata solo quella.
 
 Il monitor ha **una scheda per canale** (ultime 100 forme d'onda col
-cancello colorato, e carica) con una rotella per le impostazioni di quel
+cancello colorato e la finestra del piedistallo in grigio, e carica) con una rotella per le impostazioni di quel
 canale: cancello, piedistallo, scale; vuote = automatiche. Dal 2026-10-19 le
 impostazioni stanno in **`<data>/monitor-impostazioni.json`, uguali per
 chiunque apra il monitor**, non piu' nel browser di ciascuno. Un monitor di

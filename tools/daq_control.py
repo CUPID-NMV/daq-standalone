@@ -441,6 +441,17 @@ def coerenza(d):
     # Resta un avviso e non un errore perche' DCOffset e' per canale mentre
     # TriggerPolarity e' uno solo: con polarita' mescolate un compromesso e'
     # inevitabile.
+    # DCOffset fuori dall'intervallo in cui il piedistallo resta nella
+    # dinamica. Il 2026-10-20 un 150 (0x0096) scritto nella colonna del DC
+    # offset invece che in quella della soglia ha portato i SiPM a 4095.
+    dco_v = [x for x in lista(g.get("DCOffset")) if isinstance(x, int)]
+    fuori = [x for x in dco_v if x < 0x5000 or x > 0xD000]
+    if fuori:
+        avvisi.append("DCOffset %s puts the baseline outside the ADC range (sensible values "
+                      "0x5000-0xD000: 0x7000 for negative pulses, 0xB000 for positive ones). "
+                      "Those channels saturate and cannot trigger. Did a threshold offset "
+                      "end up in the DC offset column?" % ", ".join(hex(x) for x in sorted(set(fuori))))
+
     # SelfTriggerAcquire = false: il self-trigger va solo su TRG-OUT e non fa
     # acquisire. Rimasta cosi' dopo la prova con la maggioranza del V812, il
     # 2026-10-20 ha dato una run senza nessun evento senza che la pagina
@@ -3283,8 +3294,8 @@ function disegnaTabelle(){
   tabellaCanali("tabdig", "V1742 digitizer channels", 32, [
     {chiave: "reg",  titolo: "record",       tipo: "flag"},
     {chiave: "self", titolo: "self-trigger", tipo: "flag"},
-    {chiave: "off",  titolo: "offset",       tipo: "testo"},
-    {chiave: "dco",  titolo: "DC offset",    tipo: "testo"},
+    {chiave: "off",  titolo: "trigger offset", tipo: "testo"},
+    {chiave: "dco",  titolo: "DC offset (baseline)", tipo: "testo"},
     {chiave: "ver",  titolo: "pulses",       tipo: "info"},
     {chiave: "ped",  titolo: "pedestal (last run)", tipo: "info"},
   ], {reg: reg, self: self, off: srotola(self, off),
@@ -3318,6 +3329,12 @@ function esa(v){
 function versoDco(v){
   const n = parseInt(v);
   if(isNaN(n)) return "";
+  // Fuori da qui il piedistallo esce dalla dinamica (misurato: 0x7000 ->
+  // ~3185 conteggi, ~0.142 conteggi per unita'; 0xD000 gia' fuori). Il
+  // 2026-10-20 un 150 finito in questa colonna invece che nella soglia ha
+  // portato i SiPM a 4095: nessun trigger possibile.
+  if(n < 0x5000 || n > 0xD000)
+    return '<span style="color:#c0392b;font-weight:600" title="the baseline goes out of the ADC range: the channel is saturated and cannot trigger">baseline out of range</span>';
   if(n > 0x9000) return '<span style="color:#15603a;font-weight:600">&uarr; positive</span>';
   if(n < 0x8000) return '<span style="color:#2a5bd6;font-weight:600">&darr; negative</span>';
   return '<span style="color:#8a6d1f;font-weight:600" title="between 0x8000 and 0x9000 the pedestal sits mid-range: the pulse direction is not defined by the DC offset, PulsePolarity decides">? mid-range</span>';

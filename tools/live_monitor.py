@@ -66,9 +66,12 @@ class Impostazioni:
     CAMPI = {
         "gate": "coppia",     # cancello di carica [ns]
         "ped": "coppia",      # finestra del piedistallo [ns]
-        "wfx": "coppia",      # scala x delle forme d'onda [ns]
-        "wfy": "coppia",      # scala y delle forme d'onda [ADC]
-        "qx": "coppia",       # scala x della carica [pC]
+        # Le scale accettano anche un estremo solo ("fino a 3000"): l'altro
+        # resta automatico. Prima erano rifiutate, con un messaggio grigio
+        # che nessuno vedeva, e il range della carica sembrava non funzionare.
+        "wfx": "scala",       # scala x delle forme d'onda [ns]
+        "wfy": "scala",       # scala y delle forme d'onda [ADC]
+        "qx": "scala",        # scala x della carica [pC]
         "qbin": "intero",     # intervalli dell'istogramma di carica
         "qlog": "booleano",   # scala logaritmica della carica
     }
@@ -102,12 +105,17 @@ class Impostazioni:
         t = (testo or "").strip()
         if t == "":
             return None
-        if tipo == "coppia":
-            pezzi = [x for x in t.replace(";", ",").replace(" ", ",").split(",") if x]
+        if tipo in ("coppia", "scala"):
+            pezzi = t.replace(";", ",").split(",")
             if len(pezzi) != 2:
                 raise ValueError("two numbers are needed, e.g. 320,360")
-            a, b = float(pezzi[0]), float(pezzi[1])
-            if not b > a:
+            a = float(pezzi[0]) if pezzi[0].strip() else None
+            b = float(pezzi[1]) if pezzi[1].strip() else None
+            if a is None and b is None:
+                return None
+            if tipo == "coppia" and (a is None or b is None):
+                raise ValueError("gate and baseline need both ends")
+            if a is not None and b is not None and not b > a:
                 raise ValueError("the second number must be larger than the first")
             return [a, b]
         if tipo == "intero":
@@ -1435,9 +1443,9 @@ class Monitor:
             ax.axhline(0, color="#999", lw=0.6, ls=":")
             ax.axvspan(t_ns[a_i[i]], t_ns[b_i[i] - 1], color=colore, alpha=0.18, lw=0)
             if imp["wfx"]:
-                ax.set_xlim(*imp["wfx"])
+                ax.set_xlim(left=imp["wfx"][0], right=imp["wfx"][1])
             if imp["wfy"]:
-                ax.set_ylim(*imp["wfy"])
+                ax.set_ylim(bottom=imp["wfy"][0], top=imp["wfy"][1])
             ax.set_xlabel("ns", fontsize=7, labelpad=1)
         else:
             fig, ax = plt.subplots(figsize=(w_in, 1.45 * k))
@@ -2605,7 +2613,11 @@ function costruisciSchede(canali) {
   });
 }
 
-function coppia(v) { return v ? Math.round(v[0]) + '–' + Math.round(v[1]) : ''; }
+function coppia(v) {
+  if (!v) return '';
+  const e = x => (x === null || x === undefined) ? 'auto' : Math.round(x);
+  return e(v[0]) + '–' + e(v[1]);
+}
 
 // Sulla scheda: verso, e cancello e piedistallo IN USO con la loro origine.
 // "set" in rosso: scritto a mano, vince sull'automatico.
@@ -2637,8 +2649,9 @@ function apriImp(ch) {
   document.getElementById('ptit').textContent = 'ch' + ch + ' · settings';
   for (const [a, b, k] of CAMPI_POP) {
     const v = st[k];
-    document.getElementById(a).value = v ? v[0] : '';
-    document.getElementById(b).value = v ? v[1] : '';
+    const val = x => (x === null || x === undefined) ? '' : x;
+    document.getElementById(a).value = v ? val(v[0]) : '';
+    document.getElementById(b).value = v ? val(v[1]) : '';
   }
   // Nelle caselle vuote, in grigio, il valore che il monitor sta usando:
   // per cambiarlo bisogna sapere da dove si parte.
@@ -2660,7 +2673,10 @@ function chiudiImp() {
 async function chiedi(q) {
   try {
     const r = await (await fetch('imposta?' + q.toString(), {cache: 'no-store'})).json();
-    document.getElementById('pmsg').textContent = r.messaggio || '';
+    const m = document.getElementById('pmsg');
+    m.textContent = r.messaggio || '';
+    m.style.color = r.ok ? '' : '#c0392b';
+    m.style.fontWeight = r.ok ? '' : '600';
     return r.ok;
   } catch (e) {
     document.getElementById('pmsg').textContent = 'request failed: ' + e;
@@ -2995,7 +3011,10 @@ def make_handler(monitor, refresh, defaults):
         def do_GET(self):
             parsed = urlparse(self.path)
             route = parsed.path.lstrip("/") or "index.html"
-            qs = parse_qs(parsed.query)
+            # keep_blank_values: una casella svuotata nelle impostazioni deve
+            # arrivare come "" e riportare il campo all'automatico; senza, il
+            # parametro spariva e il valore vecchio restava.
+            qs = parse_qs(parsed.query, keep_blank_values=True)
 
             if route == "favicon.ico":
                 # Il browser la chiede da solo: senza questa riga la console

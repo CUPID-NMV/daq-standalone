@@ -277,3 +277,36 @@ Poi fase 2 (controllore: schede nella pagina, Enabled, start/stop insieme,
 numero di run unico, mail per scheda -- prima un PNG da approvare) e fase 3
 (monitor: due file per run, schede dei canali col nome della scheda, file di
 stato live-status-<scheda>.json).
+
+## Al Gran Sasso (setup trasferito il 2026-10-21) — da fare al primo collegamento
+
+Sottoterra: pochissimi muoni (ordine di 1 per m² all'ora, stima di
+letteratura, non misurata qui), molto fondo gamma dalla roccia. Niente
+impulsatore. Il debug va costruito su quello che c'e'.
+
+1. **Ritrovare il PC DAQ**: indirizzo nuovo dalla rete LNGS, aggiornare
+   l'alias `daq-pc` in `~/.ssh/config` sul Mac e l'indirizzo in CLAUDE.md.
+   Controllare che la rete privata 192.168.99.x (bridge .105) sia rimasta
+   com'era.
+2. **Le mail**: escono da pmg1/pmg2.lnf.infn.it porta 25. Dalla rete LNGS
+   la 25 verso Frascati potrebbe essere chiusa. Provare con
+   `python3 tools/posta.py --prova <indirizzo LNF>` (parlando SMTP, non
+   contando byte: vedi "Le mail della DAQ"). Per run lunghe senza nessuno al
+   banco sono l'unico allarme: se non passano, trovare un server di posta
+   raggiungibile da LNGS, da decidere con l'utente.
+3. **Fase 1 dei due V1742**: compilare (start_index_cell non e' mai stata
+   compilata), provare, installare: vedi la sezione "Due V1742".
+4. **Run al buio sui PMT** (self-trigger sul singolo fotoelettrone): guadagno
+   dal picco dello SPE, verifica della catena PMT -> amplificatore ->
+   digitizer, coda di verso opposto e oscillazione lenta di ch24, e la
+   valutazione della correzione PADME (sigma_ped CAEN contro CAEN + PADME).
+5. **Run sui pannelli EJ200 coi gamma della roccia**: spalle Compton del
+   40K (riga 1.46 MeV) e del 208Tl (2.61 MeV) come calibrazione in energia
+   dei pannelli.
+6. **Trigger per i muoni**: con soglie basse il fondo gamma sui pannelli puo'
+   arrivare a kHz e la DAQ satura sopra ~880 Hz. Per cercare i muoni:
+   coincidenza/maggioranza (V812, o self-trigger su TRG-OUT con logica
+   esterna), non OR a soglia bassa. Run lunghe (notti, giorni).
+7. Eventuale sorgente di prova del laboratorio (137Cs, 60Co, 22Na) al posto
+   dell'impulsatore per pannelli e coincidenze: da chiedere, regole di
+   radioprotezione a cura dell'utente.

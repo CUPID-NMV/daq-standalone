@@ -1,4 +1,5 @@
 #include <iostream>
+#include <string>
 
 #include "Config.h"
 #include "Log.h"
@@ -9,10 +10,26 @@
 
 int main(int argc, char** argv)
 {
-    if (argc != 2)
+    // DAQ-WC config.toml [--board NOME] [--run N]
+    //
+    // --board  sceglie la sezione [boards.NOME] del TOML: con piu' digitizer
+    //          gira un processo per scheda. Senza, tutto come prima.
+    // --run    numero di run imposto: con piu' schede lo da' il controllore,
+    //          lo stesso a tutte, perche' contando i file ognuna lo
+    //          calcolerebbe a seconda di chi ha gia' creato il suo.
+    std::string board;
+    int runNumber = -1;
+    const char* configFile = nullptr;
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        if (a == "--board" && i + 1 < argc)      board = argv[++i];
+        else if (a == "--run" && i + 1 < argc)   runNumber = std::stoi(argv[++i]);
+        else if (configFile == nullptr && a.rfind("--", 0) != 0) configFile = argv[i];
+        else { configFile = nullptr; break; }
+    }
+    if (configFile == nullptr)
     {
-        std::cout << "You need to supply the toml config-file (and only that) to the program." << std::endl;
-        std::cout << "Usage: ./GAGG-DAQ /path/to/config-file.toml" << std::endl;
+        std::cout << "Usage: ./DAQ-WC /path/to/config-file.toml [--board NAME] [--run N]" << std::endl;
         return 1;
     }
 
@@ -24,7 +41,10 @@ int main(int argc, char** argv)
 
     // --- Config ---
     Config& theConfig = Config::GetInstance();
-    theConfig.Read(argv[1]);
+    theConfig.Read(const_cast<char*>(configFile));
+    if (!board.empty())
+        theConfig.SelectBoard(board);
+    theConfig.SetRunNumber(runNumber);
 
     // Il livello lo decide [settings][verbosity] nel TOML, letto da
     // Config::Read: forzarlo qui rendeva quell'opzione inerte.
@@ -43,8 +63,20 @@ int main(int argc, char** argv)
     digitizer.SelectBoard();    // 1. Connessione al V1742
 
     // --- Bridge VME, solo se serve ---
+    // Il V812 e' uno solo e lo configura UNA sola scheda, quella indicata da
+    // [cfd] Board: due processi che lo scrivono insieme farebbero solo
+    // confusione. Il bridge serve soltanto al V812, quindi chi non lo
+    // configura non lo apre nemmeno.
+    bool doCFD = true;
+    if (!board.empty()) {
+        std::string cfdBoard = theConfig.GetTbl()["cfd"]["Board"].value_or(std::string());
+        doCFD = (cfdBoard == board);
+        if (cfdBoard.empty() && theConfig.GetTbl()["cfd"]["Enabled"].value_or(false))
+            Log::OutWarning("[cfd] Board non indicato: con piu' schede il V812 lo configura "
+                            "solo quella scritta li', quindi nessuna lo configura.");
+    }
     Bridge bridge(theConfig);
-    const bool useBridge = digitizer.UsesVMEBridge();
+    const bool useBridge = doCFD && digitizer.UsesVMEBridge();
     if (useBridge)
         bridge.Open();
 
@@ -53,7 +85,8 @@ int main(int argc, char** argv)
     // digitizer: se l'indirizzo e' sbagliato conviene scoprirlo adesso.
     // Senza la sezione [cfd] nel TOML non succede niente.
     CFD cfd(theConfig, bridge);
-    cfd.Configure();
+    if (doCFD)
+        cfd.Configure();
 
     digitizer.Configure();      // 2. Configurazione base (record length, gruppi, canali, offset, ecc.)
     digitizer.InitAcquisition();// 3. Allocazione buffer/evento

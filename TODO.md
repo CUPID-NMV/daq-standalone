@@ -211,3 +211,41 @@ sottratto, stima su piu' tratti, o solo cancelli stretti).
 
 Insieme: la finestra di dettaglio potrebbe dire da dove viene la finestra del
 piedistallo di quel canale (set / auto / common).
+
+## Due V1742 — fase 1 (DAQ) scritta il 2026-10-20, da finire al banco rimontato
+
+Scheda SiPM: seriale 51639, VME 0x32100000. Scheda PMT: seriale 202, VME
+0x11110000 (commutatori 1111; con F00A rispondeva a 0xD00A0000, cioe' il bit
+29 letto 0: forse un contatto del primo commutatore, non verificato).
+
+Fatto e provato sulla scheda SiPM (trigger sul rumore, offset 3):
+`DAQ-WC run.toml --board sipm --run N` fonde [boards.sipm] in [digitizer],
+scrive `prova_9002_sipm_750Ms_40PT.h5` con Board/BoardSerial/VMEBaseAddress
+nell'header, FormatVersion 3, e /events/event_counter e
+/events/trigger_time_tag riga per riga con le forme d'onda (15620 eventi,
+contatore senza salti). Rifiuta un numero di run gia' usato e una scheda che
+non esiste. NON ancora in build/: installare dopo le prove sotto.
+
+Da provare:
+1. **La scheda PMT non e' pronta ad acquisire**: reset in timeout (-18),
+   MallocReadoutBuffer fallisce. Registro 0x8104 = 0x420 contro 0x580 della
+   scheda buona: letto col manuale a memoria, bit 5 = clock ESTERNO, bit 7 =
+   PLL non agganciato, bit 8 = scheda non pronta; 0x8178 = 0x14, bit 4 =
+   perdita del PLL. Ipotesi: sorgente di clock della scheda su esterno senza
+   clock in ingresso (commutatore/ponticello sulla scheda). DA VERIFICARE sul
+   manuale e sulla scheda, prima di tutto il resto.
+2. Enabled = false rifiutato con --board (la prova si e' guastata per un mio
+   errore nel file di prova, non per il codice).
+3. Chiusura pulita con un solo SIGINT (nelle prove `timeout` ne mandava due).
+4. Nuovo binario SENZA --board: file e log come prima, piu' i due dataset.
+5. Le due schede insieme: banda del bridge con due letture di dati in
+   contemporanea (finora provati solo registri: 16k e 22k letture in 8 s,
+   zero errori).
+6. Unita' e giro del Trigger Time Tag: nella prova ~9.9e8 conteggi in ~17 s,
+   cioe' ~17 ns/conteggio e giro dopo ~18 s se il contatore e' a 30 bit --
+   numeri stimati dalla durata, non misurati. Servono per abbinare gli eventi.
+
+Poi fase 2 (controllore: schede nella pagina, Enabled, start/stop insieme,
+numero di run unico, mail per scheda -- prima un PNG da approvare) e fase 3
+(monitor: due file per run, schede dei canali col nome della scheda, file di
+stato live-status-<scheda>.json).

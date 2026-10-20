@@ -122,16 +122,22 @@ Digitizer::Digitizer()
     fH5Group        = nullptr;
     fH5Waveforms    = nullptr;
     fH5WaveformsRaw = nullptr;
+    fH5EventCounter   = nullptr;
+    fH5TriggerTimeTag = nullptr;
     fH5Rows         = 0;
     fEventWidth     = 0;
     fSkippedEvents  = 0;
     fLiveMonitoring = fLiveMonitoringCfg;
     fFlushEvery     = (fFlushEveryCfg == 0) ? 1 : fFlushEveryCfg;
 
+    // Con piu' schede nella stessa cartella ognuna ha il suo file di soglie e
+    // di stato: con un nome unico la seconda scheda sovrascriverebbe lo stato
+    // della prima, e un cambio di soglia andrebbe a tutte e due.
+    const std::string suffisso = fConfig.Board().empty() ? "" : "-" + fConfig.Board();
     fLiveThresholdPath = fLiveThresholdFileCfg.empty()
-                           ? fOutputDir + "/live-threshold.txt"
+                           ? fOutputDir + "/live-threshold" + suffisso + ".txt"
                            : fLiveThresholdFileCfg;
-    fStatusPath        = fOutputDir + "/live-status.json";
+    fStatusPath        = fOutputDir + "/live-status" + suffisso + ".json";
     // Livello del pannello frontale: NIM oppure TTL. Un valore sconosciuto e'
     // fatale invece che silenziosamente NIM, perche' un trigger che non arriva
     // e' il sintomo piu' dispendioso da diagnosticare che ci sia.
@@ -506,6 +512,22 @@ void Digitizer::SelectBoard()
     CAEN_DGTZ_ErrorCode err;        // riusata dal resto della funzione
 
     CAEN_DGTZ_GetInfo(fHandle,&fBoardInfo);
+    Log::OutSummary("Board serial number: " + std::to_string(fBoardInfo.SerialNumber));
+
+    // Con piu' schede sullo stesso bridge l'indirizzo VME e' l'unica cosa che
+    // le distingue, e si sbaglia girando un commutatore. Se la sezione della
+    // scheda dichiara il seriale, una scheda diversa da quella attesa non
+    // parte: i dati dei PMT finirebbero in un file etichettato SiPM.
+    {
+        int64_t atteso = fConfig.GetTbl()["digitizer"]["BoardSerial"].value_or(int64_t(0));
+        if (atteso > 0 && static_cast<int64_t>(fBoardInfo.SerialNumber) != atteso) {
+            Log::OutError("Al " + LinkDescription() + " risponde la scheda con seriale " +
+                          std::to_string(fBoardInfo.SerialNumber) + ", ma la configurazione" +
+                          (fConfig.Board().empty() ? "" : " della scheda '" + fConfig.Board() + "'") +
+                          " si aspetta il seriale " + std::to_string(atteso) + ". Abort.");
+            exit(1);
+        }
+    }
 
     // Riportare la board a uno stato noto PRIMA di configurarla. Finora il
     // Reset si faceva solo allo spegnimento, quindi una sessione morta male
@@ -1821,6 +1843,7 @@ void Digitizer::AcquireEvents() {
                             allSamplesRaw.size() == fEventWidth)
                             AppendEvent(fH5WaveformsRaw, allSamplesRaw.data(),
                                         PredType::NATIVE_UINT16, fH5Rows);
+                        AppendEventInfo(fH5Rows);
 
                         ++fH5Rows;
 
@@ -1838,9 +1861,7 @@ void Digitizer::AcquireEvents() {
                             bool perTempo = std::chrono::duration_cast<std::chrono::milliseconds>(
                                                 now - lastFlush).count() >= kFlushMaxDelayMs;
                             if (perConteggio || perTempo) {
-                                H5Dflush(fH5Waveforms->getId());
-                                if (fH5WaveformsRaw != nullptr)
-                                    H5Dflush(fH5WaveformsRaw->getId());
+                                FlushAll();
                                 lastFlush = now;
                             }
                         }
@@ -2007,10 +2028,11 @@ void Digitizer::AcquireTransparent()
 
             try {
                 AppendEvent(fH5Waveforms, samples.data(), PredType::NATIVE_INT16, fH5Rows);
+                AppendEventInfo(fH5Rows);
                 ++fH5Rows;
                 ++written;
                 if (fLiveMonitoring && (fH5Rows % fFlushEvery) == 0)
-                    H5Dflush(fH5Waveforms->getId());
+                    FlushAll();
             } catch (const H5::Exception& e) {
                 Log::OutError("HDF5 write error: " + std::string(e.getDetailMsg()));
             }
@@ -2056,6 +2078,32 @@ bool Digitizer::CheckAccepted(std::map<uint32_t,uint32_t>& nAccepted) {
         if (nAccepted[c] < fNNoiseEvents)
             return false;
     return true;
+}
+
+// =======================================================================
+//  HDF5: contatore e Trigger Time Tag dell'evento corrente (fEventInfo)
+// =======================================================================
+void Digitizer::AppendEventInfo(hsize_t row)
+{
+    const uint32_t valori[2] = { fEventInfo.EventCounter, fEventInfo.TriggerTimeTag };
+    H5::DataSet* ds[2] = { fH5EventCounter, fH5TriggerTimeTag };
+    for (int k = 0; k < 2; ++k) {
+        if (ds[k] == nullptr) continue;
+        hsize_t newsize[1] = {row + 1};
+        ds[k]->extend(newsize);
+        H5::DataSpace fspace = ds[k]->getSpace();
+        hsize_t offset[1] = {row}, count[1] = {1};
+        fspace.selectHyperslab(H5S_SELECT_SET, count, offset);
+        H5::DataSpace mspace(1, count);
+        ds[k]->write(&valori[k], H5::PredType::NATIVE_UINT32, mspace, fspace);
+    }
+}
+
+void Digitizer::FlushAll()
+{
+    for (H5::DataSet* ds : { fH5Waveforms, fH5WaveformsRaw, fH5EventCounter, fH5TriggerTimeTag })
+        if (ds != nullptr)
+            H5Dflush(ds->getId());
 }
 
 // =======================================================================
@@ -2130,6 +2178,13 @@ void Digitizer::PrepareOutput() {
     }
 
     fRunNumber = maxRun + 1;
+    const bool runImposto = fConfig.ForcedRunNumber() >= 0;
+    if (runImposto)
+        fRunNumber = fConfig.ForcedRunNumber();
+    // L'etichetta della scheda va DOPO il numero di run: il conteggio qui
+    // sopra legge le quattro cifre subito dopo il prefisso, e cosi' continua
+    // a vedere le run di tutte le schede.
+    const std::string boardTag = fConfig.Board().empty() ? "" : "_" + fConfig.Board();
 
     if (fRunNumber < 0 || fRunNumber > 9999) {
         Log::OutError("Computed run number out of range: " + std::to_string(fRunNumber));
@@ -2150,6 +2205,7 @@ void Digitizer::PrepareOutput() {
     fname << fOutputDir << "/"
           << base << "_"
           << std::setw(4) << std::setfill('0') << fRunNumber
+          << boardTag
           << rateTag
           << "_" << fPostTriggerSize << "PT"
           << ".h5";
@@ -2161,6 +2217,14 @@ void Digitizer::PrepareOutput() {
     // preavviso. Piuttosto si cerca il primo numero libero.
     while (std::filesystem::exists(fOutputPath) ||
            std::filesystem::exists(fOutputPath + ".gz")) {
+        // Con il numero imposto non si cerca il successivo: le altre schede
+        // della stessa run scrivono quel numero, e i file non si
+        // abbinerebbero piu'.
+        if (runImposto) {
+            Log::OutError("Run file already exists: " + fOutputPath +
+                          " — il numero di run e' imposto (--run), non lo cambio. Abort.");
+            exit(1);
+        }
         Log::OutWarning("→ Run file already exists: " + fOutputPath +
                         " — trying the next run number.");
         if (++fRunNumber > 9999) {
@@ -2170,7 +2234,7 @@ void Digitizer::PrepareOutput() {
         std::ostringstream retry;
         retry << fOutputDir << "/" << base << "_"
               << std::setw(4) << std::setfill('0') << fRunNumber
-              << rateTag << "_" << fPostTriggerSize << "PT" << ".h5";
+              << boardTag << rateTag << "_" << fPostTriggerSize << "PT" << ".h5";
         fOutputPath = retry.str();
     }
 
@@ -2241,6 +2305,18 @@ void Digitizer::PrepareOutput() {
             fH5File->createGroup("/events_raw");
             fH5WaveformsRaw = MakeWaveformDataset("/events_raw/waveforms",
                                                   H5::PredType::NATIVE_UINT16);
+        }
+        {
+            auto MakeInfoDataset = [&](const std::string& path) {
+                hsize_t dims[1] = {0}, maxdims[1] = {H5S_UNLIMITED}, chunk[1] = {256};
+                H5::DataSpace space(1, dims, maxdims);
+                H5::DSetCreatPropList dcpl;
+                dcpl.setChunk(1, chunk);
+                return new H5::DataSet(fH5File->createDataSet(path, H5::PredType::NATIVE_UINT32,
+                                                              space, dcpl));
+            };
+            fH5EventCounter   = MakeInfoDataset("/events/event_counter");
+            fH5TriggerTimeTag = MakeInfoDataset("/events/trigger_time_tag");
         }
         fH5Rows = 0;
 
@@ -2354,6 +2430,19 @@ void Digitizer::PrepareOutput() {
                   .write(H5::PredType::NATIVE_UINT, fCFDThresholdMv.data());
         }
 
+        {
+            // Quale scheda ha scritto il file. Il nome viene dal TOML, il
+            // seriale dalla scheda stessa: e' il seriale che fa fede.
+            H5::StrType stype(H5::PredType::C_S1, H5T_VARIABLE);
+            header.createAttribute("Board", stype, H5::DataSpace())
+                  .write(stype, fConfig.Board());
+            uint32_t serial = fBoardInfo.SerialNumber;
+            header.createAttribute("BoardSerial", H5::PredType::NATIVE_UINT,
+                                   H5::DataSpace()).write(H5::PredType::NATIVE_UINT, &serial);
+            header.createAttribute("VMEBaseAddress", H5::PredType::NATIVE_UINT,
+                                   H5::DataSpace()).write(H5::PredType::NATIVE_UINT, &fVMEBaseAddress);
+        }
+
         if (!fChannelList.empty()) {
             hsize_t dim = fChannelList.size();
             H5::DataSpace dspace(1, &dim);
@@ -2410,6 +2499,12 @@ void Digitizer::CloseOutputFile() {
             delete fH5WaveformsRaw;
             fH5WaveformsRaw = nullptr;
         }
+        for (H5::DataSet** ds : { &fH5EventCounter, &fH5TriggerTimeTag })
+            if (*ds != nullptr) {
+                (*ds)->close();
+                delete *ds;
+                *ds = nullptr;
+            }
         if (fH5Group != nullptr) {
             fH5Group->close();
         }

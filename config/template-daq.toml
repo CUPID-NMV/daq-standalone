@@ -22,9 +22,9 @@
 Connection      = "auto"
 A4818PID        = 49826
 
-# NOTA: ConnectionType, LinkNumber e VMEBaseAddress NON sono letti dal codice.
-# I valori effettivi sono fissati nel costruttore di Digitizer.cpp
-# (CAEN_DGTZ_ETH_V4718, base address 0x32100000): modificarli qui non ha effetto.
+# NOTA: ConnectionType e LinkNumber NON sono letti dal codice. VMEBaseAddress
+# invece si', ed e' quello che distingue le schede sullo stesso bridge: con
+# piu' digitizer va scritto nella sezione [boards.<nome>] di ciascuno.
 ConnectionType  = "ETH_V4718"
 IPAddress       = "192.168.99.105"
 LinkNumber      = 0
@@ -333,6 +333,45 @@ IPAddress = "192.168.99.105"
 # # Livello di maggioranza: 1 = OR. Conta solo per l'uscita MAJ, non per l'OR,
 # # ma va scritto comunque perche' all'accensione il registro e' indeterminato.
 # Majority    = 1
+
+# ===========================================================================
+#  PIU' DIGITIZER
+#
+#  Ogni scheda ha una sezione [boards.<nome>] con le sole chiavi che la
+#  distinguono; tutto il resto lo prende da [digitizer]. Gira un processo DAQ
+#  per scheda:   DAQ-WC run.toml --board pmt --run 201
+#  e il file porta il nome della scheda dopo il numero di run:
+#      test_0201_pmt_1Gs_60PT.h5
+#  Il numero di run lo da' il controllore, lo stesso a tutte le schede.
+#  Senza --board la DAQ ignora [boards] e fa come prima.
+#
+#  Enabled = false esclude la scheda: il controllore non la avvia, e la DAQ
+#  lanciata a mano con --board si rifiuta di partire.
+#  BoardSerial e' facoltativo: se c'e', una scheda con un altro seriale a
+#  quell'indirizzo non parte (un commutatore girato, una scheda scambiata).
+#
+#  Il V812 e' uno solo: lo configura la scheda scritta in [cfd] Board.
+# ===========================================================================
+# [boards.sipm]
+# Enabled          = true
+# VMEBaseAddress   = 0x32100000
+# BoardSerial      = 51639
+# ChannelList      = [16, 17, 18]
+# DCOffset         = 0xB000
+# SamplingRate     = "750MHz"
+# PostTriggerSize  = 40
+# TriggerPolarity  = 0
+#
+# [boards.pmt]
+# Enabled          = true
+# VMEBaseAddress   = 0x11110000
+# BoardSerial      = 202
+# ChannelList      = [24, 26]
+# DCOffset         = 0x7000
+# SamplingRate     = "2.5GHz"
+# PostTriggerSize  = 60
+# TriggerPolarity  = 1
+
 [settings]
 # Quanto la DAQ stampa A SCHERMO. Il file di log accanto ai dati riceve
 # sempre tutto, qualunque sia questo valore: si puo' tenere il terminale

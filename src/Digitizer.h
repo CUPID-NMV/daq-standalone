@@ -219,6 +219,8 @@ private:
                      const void* data,
                      const H5::DataType& type,
                      hsize_t row);
+    void AppendEventInfo(hsize_t row);
+    void FlushAll();
 
     // ---- SELF-TRIGGER HELPERS ----
     void ConfigureSelfTrigger();
@@ -249,6 +251,12 @@ private:
     // e' ancora in corso (SWMR vieta di creare oggetti nuovi a file aperto).
     H5::DataSet* fH5Waveforms;
     H5::DataSet* fH5WaveformsRaw;
+    // Formato v3: per ogni riga di /events/waveforms il contatore degli
+    // eventi e il Trigger Time Tag della scheda, come li da' l'intestazione
+    // dell'evento. Senza questi due numeri gli eventi di due digitizer non si
+    // possono abbinare, nemmeno offline.
+    H5::DataSet* fH5EventCounter;
+    H5::DataSet* fH5TriggerTimeTag;
     hsize_t      fH5Rows;         // eventi gia' scritti nel dataset
     hsize_t      fEventWidth;     // campioni per evento = n_canali * (RecordLength - TailCut)
     uint32_t     fSkippedEvents;  // eventi scartati perche' di dimensione inattesa
@@ -277,7 +285,7 @@ private:
     // Versione del formato di output, scritta in /config per i lettori:
     //   1 = un dataset per evento (/events/eventN)   [storico]
     //   2 = un dataset estendibile (/events/waveforms) + SWMR
-    static constexpr int      OUTPUT_FORMAT_VERSION = 2;
+    static constexpr int      OUTPUT_FORMAT_VERSION = 3;
     static constexpr hsize_t  H5_CHUNK_EVENTS = 8;   // eventi per chunk HDF5
 
     static constexpr uint32_t MAX_CHANNELS = 64;

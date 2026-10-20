@@ -29,6 +29,22 @@ public:
     bool ConfigFileProvided(){ return fReadConfigFile; };
     void Read( char* filename );
 
+    // Piu' digitizer con un solo TOML: ogni scheda ha la sua sezione
+    // [boards.<nome>] con le sole chiavi che la distinguono (indirizzo VME,
+    // canali, DCOffset, frequenza, PostTrigger, polarita'...), e un processo
+    // DAQ per scheda. Qui la sezione della scheda viene FUSA dentro
+    // [digitizer], sovrascrivendone le chiavi: il resto del programma
+    // continua a leggere [digitizer] come prima e non sa delle schede, e la
+    // configurazione allegata al log e' quella effettivamente usata.
+    // Una scheda con Enabled = false si rifiuta di partire.
+    void SelectBoard( const std::string& name );
+    const std::string& Board() const { return fBoard; }
+
+    // Numero di run imposto da fuori (dal controllore, uguale per tutte le
+    // schede della stessa run). -1 = lo calcola la DAQ contando i file.
+    void SetRunNumber( int n ){ fForcedRun = n; }
+    int  ForcedRunNumber() const { return fForcedRun; }
+
     /// La configurazione come testo, per allegarla al log della run.
     std::string AsString() const
     {
@@ -406,6 +422,8 @@ private:
     std::string fFileName;
     const bool fReadConfigFile;
     toml::table fTbl;
+    std::string fBoard;
+    int fForcedRun = -1;
 
 };
 

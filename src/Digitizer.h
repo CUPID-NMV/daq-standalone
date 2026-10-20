@@ -257,6 +257,13 @@ private:
     // possono abbinare, nemmeno offline.
     H5::DataSet* fH5EventCounter;
     H5::DataSet* fH5TriggerTimeTag;
+    // Start Index Cell di ciascuno dei 4 gruppi (un DRS4 per gruppo): la cella
+    // fisica da cui parte la lettura. Serve alla correzione del piedistallo
+    // per cella (metodo PADME, Georgiev et al., J. Phys. Conf. Ser. 2255
+    // (2022) 012008): il campione t viene dalla cella (t + SIC) mod 1024, e
+    // senza SIC quella corrispondenza e' persa per sempre. 0xFFFF = gruppo
+    // assente nell'evento.
+    H5::DataSet* fH5StartIndexCell;
     hsize_t      fH5Rows;         // eventi gia' scritti nel dataset
     hsize_t      fEventWidth;     // campioni per evento = n_canali * (RecordLength - TailCut)
     uint32_t     fSkippedEvents;  // eventi scartati perche' di dimensione inattesa

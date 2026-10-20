@@ -124,6 +124,7 @@ Digitizer::Digitizer()
     fH5WaveformsRaw = nullptr;
     fH5EventCounter   = nullptr;
     fH5TriggerTimeTag = nullptr;
+    fH5StartIndexCell = nullptr;
     fH5Rows         = 0;
     fEventWidth     = 0;
     fSkippedEvents  = 0;
@@ -2097,11 +2098,26 @@ void Digitizer::AppendEventInfo(hsize_t row)
         H5::DataSpace mspace(1, count);
         ds[k]->write(&valori[k], H5::PredType::NATIVE_UINT32, mspace, fspace);
     }
+
+    if (fH5StartIndexCell != nullptr) {
+        uint16_t sic[MAX_X742_GROUP_SIZE];
+        for (int g = 0; g < MAX_X742_GROUP_SIZE; ++g)
+            sic[g] = (fEvent != nullptr && fEvent->GrPresent[g])
+                       ? fEvent->DataGroup[g].StartIndexCell : uint16_t(0xFFFF);
+        hsize_t newsize[2] = {row + 1, MAX_X742_GROUP_SIZE};
+        fH5StartIndexCell->extend(newsize);
+        H5::DataSpace fspace = fH5StartIndexCell->getSpace();
+        hsize_t offset[2] = {row, 0}, count[2] = {1, MAX_X742_GROUP_SIZE};
+        fspace.selectHyperslab(H5S_SELECT_SET, count, offset);
+        H5::DataSpace mspace(2, count);
+        fH5StartIndexCell->write(sic, H5::PredType::NATIVE_UINT16, mspace, fspace);
+    }
 }
 
 void Digitizer::FlushAll()
 {
-    for (H5::DataSet* ds : { fH5Waveforms, fH5WaveformsRaw, fH5EventCounter, fH5TriggerTimeTag })
+    for (H5::DataSet* ds : { fH5Waveforms, fH5WaveformsRaw, fH5EventCounter, fH5TriggerTimeTag,
+                             fH5StartIndexCell })
         if (ds != nullptr)
             H5Dflush(ds->getId());
 }
@@ -2317,6 +2333,15 @@ void Digitizer::PrepareOutput() {
             };
             fH5EventCounter   = MakeInfoDataset("/events/event_counter");
             fH5TriggerTimeTag = MakeInfoDataset("/events/trigger_time_tag");
+
+            hsize_t dims[2] = {0, MAX_X742_GROUP_SIZE};
+            hsize_t maxdims[2] = {H5S_UNLIMITED, MAX_X742_GROUP_SIZE};
+            hsize_t chunk[2] = {256, MAX_X742_GROUP_SIZE};
+            H5::DataSpace space(2, dims, maxdims);
+            H5::DSetCreatPropList dcpl;
+            dcpl.setChunk(2, chunk);
+            fH5StartIndexCell = new H5::DataSet(fH5File->createDataSet(
+                "/events/start_index_cell", H5::PredType::NATIVE_UINT16, space, dcpl));
         }
         fH5Rows = 0;
 
@@ -2499,7 +2524,7 @@ void Digitizer::CloseOutputFile() {
             delete fH5WaveformsRaw;
             fH5WaveformsRaw = nullptr;
         }
-        for (H5::DataSet** ds : { &fH5EventCounter, &fH5TriggerTimeTag })
+        for (H5::DataSet** ds : { &fH5EventCounter, &fH5TriggerTimeTag, &fH5StartIndexCell })
             if (*ds != nullptr) {
                 (*ds)->close();
                 delete *ds;

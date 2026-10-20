@@ -512,8 +512,10 @@ Nello stesso crate, dietro lo stesso bridge V4718:
   e di soglie per scheda (`live-status-<scheda>.json`); il V812 lo configura
   solo la scheda scritta in `[cfd] Board`. Senza `--board` tutto come prima.
   Esempio commentato in fondo a `config/template-daq.toml`.
-- **Formato v3**: per ogni evento `/events/event_counter` e
-  `/events/trigger_time_tag`, riga per riga con le forme d'onda, e
+- **Formato v3**: per ogni evento `/events/event_counter`,
+  `/events/trigger_time_tag` e `/events/start_index_cell` (la cella fisica
+  del DRS4 da cui parte la lettura, una colonna per gruppo, 0xFFFF se il
+  gruppo manca), riga per riga con le forme d'onda, e
   `Board`/`BoardSerial`/`VMEBaseAddress` nell'header. Senza questi due numeri
   gli eventi di due schede non si abbinano nemmeno offline. Il Trigger Time
   Tag, da datasheet, e' a 30 bit da 8.5 ns: un giro ogni ~9 s.

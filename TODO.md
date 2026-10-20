@@ -255,6 +255,16 @@ Da provare:
    di esempio che sincronizza due V1742: e' il riferimento per i registri.
    Manca ancora il manuale tecnico del V1742 (UM4270) con i registri.
 
+8. **`/events/start_index_cell` scritta il 2026-10-20 a PC DAQ spento: NON
+   COMPILATA.** Prima cosa al rientro: pull, compilare in un worktree,
+   verificare che i valori stiano in 0-1023 e cambino evento per evento.
+   Serve alla correzione PADME del piedistallo per cella: poi run sui PMT
+   con sigma_ped (CAEN) contro (CAEN + PADME) e la media della traccia,
+   per vedere se l'oscillazione lenta di ch24 resta (attesa: si', perche'
+   gli offset per cella si mediano via con SIC casuale). Se la PADME rende,
+   va in daqio con un interruttore nel monitor; la mediana per cella va
+   presa FUORI dal cancello (i SiPM col LED occupano il 40% della traccia).
+
 Poi fase 2 (controllore: schede nella pagina, Enabled, start/stop insieme,
 numero di run unico, mail per scheda -- prima un PNG da approvare) e fase 3
 (monitor: due file per run, schede dei canali col nome della scheda, file di

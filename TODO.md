@@ -197,3 +197,17 @@ Riavviare il monitor NON tocca la presa dati: si fa da *Stop monitor* /
    bias sotto la corrente di lavoro con l'uscita accesa su un carico, e
    guardare quale bit si accende e cosa dice la mail. Il significato
    (2 = OVP, 3 = OCP) viene dal manuale e non e' mai stato visto accadere.
+
+## Monitor: linea di base che non e' costante nella traccia — rimandato dall'utente il 2026-10-20
+
+Il monitor toglie a ogni evento una COSTANTE, la mediana dei campioni nella
+finestra del piedistallo del canale (scritta a mano, automatica, o la comune
+10-180 ns). Un andamento lento della linea di base resta nella traccia e nel
+cancello: nella media di ch24 (PMT amplificato, run del 2026-10-20) si vede
+un'oscillazione di +-3 conteggi con periodo ~400 ns, che un cancello largo
+(quello salvato era 150-500 ns, contro un impulso a ~220 ns) integra come se
+fosse carica. Da decidere con l'utente se e come toglierla (andamento medio
+sottratto, stima su piu' tratti, o solo cancelli stretti).
+
+Insieme: la finestra di dettaglio potrebbe dire da dove viene la finestra del
+piedistallo di quel canale (set / auto / common).

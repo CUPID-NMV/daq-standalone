@@ -274,10 +274,13 @@ Da provare:
    dei campioni); se coincidono, calibrazione automatica per run.
    Riferimento: workspace Testbeam2026_WC_unified (run 1339, wclib.py,
    SIC_RawView.ipynb, presentazioni/V1742 DRS4 correction.pdf): larghezza
-   del piedistallo ridotta ~4.3x, efficienza 75.5% -> 93.7%. DA CHIARIRE
-   prima di confrontare: nei dati del test beam la correzione CAEN era
-   accesa? Nei nostri si': se li' era spenta, da noi la PADME puo' togliere
-   solo il residuo, e il guadagno atteso e' minore.
+   per cella ridotta ~4.3x, efficienza 75.5% -> 93.7%. Al test beam la
+   correzione CAEN era ACCESA, la stessa delle nostre librerie (detto
+   dall'utente il 2026-10-21): il confronto e' omogeneo. Ma il 4.3x e' sulla
+   dispersione FRA LE CELLE, non sulla larghezza totale: li' la struttura
+   residua sui PMT sani era ~1 mV (~4 conteggi), da noi nella run 0104
+   (SiPM, settembre) 0.68 su 1.48 conteggi totali -- tolta tutta darebbe
+   ~1.3. Il guadagno sui PMT amplificati di oggi va misurato.
    Se rende: dati grezzi + SIC nel file, tabella copiata nel file all'avvio,
    correzione applicata da daqio in lettura (reversibile), NON segnali
    corretti scritti nel file (decisione 2026-10-21).

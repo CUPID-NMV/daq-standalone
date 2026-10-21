@@ -264,6 +264,14 @@ Da provare:
    gli offset per cella si mediano via con SIC casuale). Se la PADME rende,
    va in daqio con un interruttore nel monitor; la mediana per cella va
    presa FUORI dal cancello (i SiPM col LED occupano il 40% della traccia).
+   Calibrazione PADME per i PMT da una run a TRIGGER SOFTWARE (decisione
+   2026-10-21): ~10^4 eventi bastano (ogni cella ~N campioni, mediana a
+   ~0.06 conteggi con 1000). Stessa frequenza, DCOffset e stato della
+   correzione CAEN delle run da correggere; per scheda, canale e gruppo.
+   Valutazione con calibrazione e verifica su META' DISGIUNTE degli eventi.
+   Da misurare: stabilita' (due calibrazioni a ore di distanza) e accordo
+   con la tabella ricavata dalle run di fisica stesse (PMT: impulso ~1%
+   dei campioni); se coincidono, calibrazione automatica per run.
 
 9. Impulsatore lasciato a casa per la trasferta (2026-10-20). Per la PADME
    servono eventi di solo piedistallo: aggiungere una run a trigger

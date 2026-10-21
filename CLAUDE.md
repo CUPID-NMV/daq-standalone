@@ -538,6 +538,31 @@ Nello stesso crate, dietro lo stesso bridge V4718:
   partenza TRG-OUT -> S-IN) e' riassunta in `TODO.md` con le fonti. Prove
   rimaste, fase 2 (controllore) e fase 3 (monitor) sono in `TODO.md`.
 
+## Formato MIDAS (dal 2026-10-21, NON ancora compilato)
+
+Decisione dell'utente: i dati devono uscire in MIDAS, il formato della DAQ di
+CYGNO, per usarli con gli strumenti del test beam (`wclib.py`,
+`WC_analisys_tool.ipynb`). Prima INSIEME all'HDF5 (`OutputFormat = "both"`),
+poi, quando monitor, controllore e strumenti sapranno leggere MIDAS, da solo.
+I dati presi prima non si convertono.
+
+- **Il formato e' copiato byte per byte da `run01339.mid.gz`** del test beam:
+  BOR/EOR (0x8000/0x8001) col dump dell'ODB in JSON, eventi con ID 1, blocchi
+  a 32 bit (flag 0x11); `DIG0` uint16 sempre 32 canali x campioni, `DGH0`
+  uint32 con schede, modello 1742, campioni, canali, risoluzione, **passo di
+  campionamento in ps** (il "400" del test beam = 2.5 GS/s), 32 DC offset,
+  TTT e UNA sola SIC per scheda. Nostri in piu': `DSIC` (le 4 SIC), `DCNT`,
+  `DCHL`. Nell'ODB c'e' il TOML intero come testo.
+- `src/MidasWriter.h` non dipende dalla libreria MIDAS, e comprime mentre
+  scrive (zlib, livello 1). **Provato sul Mac** con un programma di prova:
+  100 eventi riletti da `midas.file_reader` e `wclib.py` senza un errore.
+  **L'integrazione nella DAQ non e' compilata** (PC DAQ in trasloco).
+- **Una SIC per scheda nel formato di CYGNO contro quattro DRS4**: se le
+  quattro SIC di un evento coincidono non si perde niente; e' da verificare
+  sui dati (`/events/start_index_cell` o `DSIC`).
+- **Da misurare**: il costo della compressione nel ciclo di acquisizione
+  (~64 kB per evento) sul rate massimo della DAQ, `HDF5` contro `both`.
+
 ## La stima dell'efficienza nel riepilogo
 
 Una stima, non un'analisi: le analisi si fanno offline. `tools/efficienza.py`,

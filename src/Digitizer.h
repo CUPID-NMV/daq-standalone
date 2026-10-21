@@ -15,6 +15,7 @@
 #include "CAENDigitizerType.h"
 
 #include "Config.h"
+#include "MidasWriter.h"
 
 class Digitizer {
 public:
@@ -273,6 +274,17 @@ private:
     // senza SIC quella corrispondenza e' persa per sempre. 0xFFFF = gruppo
     // assente nell'evento.
     H5::DataSet* fH5StartIndexCell;
+
+    // ---- MIDAS ----
+    // Con OutputFormat = "both" la DAQ scrive, accanto all'HDF5, un .mid.gz
+    // nel formato della DAQ di CYGNO (blocchi DGH0/DIG0), leggibile da
+    // wclib.py e dagli strumenti del test beam. L'HDF5 resta finche' monitor
+    // e strumenti non leggono MIDAS (decisione dell'utente, 2026-10-21).
+    bool        fWriteMidas = false;
+    MidasWriter fMidas;
+    std::string fMidasPath;
+    void WriteMidasEvent(hsize_t row);
+    void WriteMidasOdb(uint16_t eventId);
     hsize_t      fH5Rows;         // eventi gia' scritti nel dataset
     hsize_t      fEventWidth;     // campioni per evento = n_canali * (RecordLength - TailCut)
     uint32_t     fSkippedEvents;  // eventi scartati perche' di dimensione inattesa

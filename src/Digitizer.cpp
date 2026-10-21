@@ -236,8 +236,17 @@ Digitizer::Digitizer()
     Log::OutSummary("OutputFormat read from config = '" + format + "'");
     if (format == "ASCII") fOutputFormat = kASCII;
     else if (format == "HDF5")  fOutputFormat = kHDF5;
+    else if (format == "both") { fOutputFormat = kHDF5; fWriteMidas = true; }
+    else if (format == "MIDAS") {
+        // Il solo MIDAS arriva quando monitor, controllore e strumenti
+        // sapranno leggerlo: oggi la run andrebbe avanti senza che niente la
+        // mostri, e il rate nelle mail resterebbe a zero.
+        Log::OutError("OutputFormat = \"MIDAS\" non e' ancora supportato: monitor e "
+                      "strumenti leggono l'HDF5. Usa \"both\".");
+        exit(1);
+    }
     else {
-        Log::OutError("Unknown output format: " + format);
+        Log::OutError("Unknown output format: " + format + " (HDF5, both)");
         exit(1);
     }
 
@@ -1900,6 +1909,7 @@ void Digitizer::AcquireEvents() {
                             AppendEvent(fH5WaveformsRaw, allSamplesRaw.data(),
                                         PredType::NATIVE_UINT16, fH5Rows);
                         AppendEventInfo(fH5Rows);
+                        if (fWriteMidas) WriteMidasEvent(fH5Rows);
 
                         ++fH5Rows;
 
@@ -2094,6 +2104,7 @@ void Digitizer::AcquireTransparent()
             try {
                 AppendEvent(fH5Waveforms, samples.data(), PredType::NATIVE_INT16, fH5Rows);
                 AppendEventInfo(fH5Rows);
+                if (fWriteMidas) WriteMidasEvent(fH5Rows);
                 ++fH5Rows;
                 ++written;
                 if (fLiveMonitoring && (fH5Rows % fFlushEvery) == 0)
@@ -2180,6 +2191,7 @@ void Digitizer::AppendEventInfo(hsize_t row)
 
 void Digitizer::FlushAll()
 {
+    fMidas.Flush();
     for (H5::DataSet* ds : { fH5Waveforms, fH5WaveformsRaw, fH5EventCounter, fH5TriggerTimeTag,
                              fH5StartIndexCell })
         if (ds != nullptr)
@@ -2570,12 +2582,136 @@ void Digitizer::PrepareOutput() {
         Log::OutError("HDF5 file creation failed: " + std::string(e.getDetailMsg()));
         exit(1);
     }
+
+    if (fWriteMidas) {
+        // Stesso nome dell'HDF5, stessa cartella: un file per formato, e la
+        // stessa run si riconosce dal nome.
+        fMidasPath = fOutputPath.substr(0, fOutputPath.size() - 3) + ".mid.gz";
+        if (!fMidas.Open(fMidasPath)) {
+            Log::OutError("Cannot create the MIDAS file " + fMidasPath + ". Abort.");
+            exit(1);
+        }
+        WriteMidasOdb(0x8000);
+        Log::OutSummary("→ MIDAS output (CYGNO format, DGH0/DIG0): " + fMidasPath);
+    }
+}
+
+// =======================================================================
+//  MIDAS: dump dell'ODB all'inizio (0x8000) e alla fine (0x8001) della run
+// =======================================================================
+// Un ODB vero non c'e': si scrive in JSON quello che serve a chi legge il
+// file -- numero di run e istante d'inizio dove li cerca MIDAS (Runinfo), la
+// scheda e i parametri principali, e il TOML intero come testo, che e' la
+// configurazione completa della run.
+void Digitizer::WriteMidasOdb(uint16_t eventId)
+{
+    const uint32_t now = static_cast<uint32_t>(std::time(nullptr));
+    auto lista = [](const auto& v) {
+        std::string o = "[";
+        for (size_t i = 0; i < v.size(); ++i) o += (i ? ", " : "") + std::to_string(v[i]);
+        return o + "]";
+    };
+    std::ostringstream j;
+    j << "{\n \"Runinfo\": {\"Run number\": " << fRunNumber
+      << ", \"Start time binary\": " << now << "},\n"
+      << " \"Experiment\": {\"Name\": \"daq-standalone\"},\n"
+      << " \"Equipment\": {\"V1742\": {\"Settings\": {"
+      << "\"Board\": " << MidasWriter::JsonString(fConfig.Board())
+      << ", \"Board serial\": " << fBoardInfo.SerialNumber
+      << ", \"VME base address\": " << fVMEBaseAddress
+      << ", \"Link\": " << MidasWriter::JsonString(LinkDescription())
+      << ", \"Sampling rate\": " << MidasWriter::JsonString(fSamplingRateStr)
+      << ", \"Sampling time ps\": " << static_cast<long>(std::lround(fSamplingTime * 1e12))
+      << ", \"Record length\": " << fRecordLength
+      << ", \"Tail cut\": " << fTailCut
+      << ", \"Post trigger\": " << fPostTriggerSize
+      << ", \"Channel list\": " << lista(fChannelList)
+      << ", \"DC offset\": " << lista(fDCOffset)
+      << ", \"DRS4 correction\": " << (fDRS4Correction ? "true" : "false")
+      << ", \"HDF5 file\": " << MidasWriter::JsonString(fOutputPath)
+      << "}}},\n"
+      << " \"DAQ\": {\"Config TOML\": " << MidasWriter::JsonString(fConfig.AsString()) << "}\n}";
+    fMidas.WriteOdb(eventId, static_cast<uint32_t>(fRunNumber), now, j.str());
+}
+
+// =======================================================================
+//  MIDAS: un evento nel formato di CYGNO
+// =======================================================================
+// DIG0  uint16, SEMPRE 32 canali x campioni, come li aspetta wclib.py (che
+//       indicizza per numero di canale). Il V1742 legge gruppi interi: i
+//       canali dei gruppi letti hanno il loro segnale vero anche se non sono
+//       in ChannelList; quelli dei gruppi spenti sono zeri, che la
+//       compressione riduce a niente.
+// DGH0  uint32: schede (1), modello (1742), campioni, canali (32), eventi
+//       nel blocco (1), risoluzione (4096), passo di campionamento in ps, i
+//       32 DC offset, il Trigger Time Tag, UNA Start Index Cell. Il formato
+//       di CYGNO ne prevede una per scheda: si scrive quella del gruppo del
+//       primo canale di ChannelList. Se le quattro SIC coincidono non si
+//       perde niente; se no, la correzione per cella sugli altri gruppi va
+//       fatta con DSIC.
+// In piu', ignorati dagli strumenti di CYGNO:
+// DSIC  uint16 x 4: la SIC di ogni gruppo (0xFFFF = gruppo assente)
+// DCNT  uint32: il contatore degli eventi della scheda
+// DCHL  uint32: i canali di ChannelList, cioe' quelli che stanno anche
+//       nell'HDF5
+void Digitizer::WriteMidasEvent(hsize_t row)
+{
+    if (!fMidas.IsOpen() || fEvent == nullptr)
+        return;
+    const uint32_t S = (fRecordLength > fTailCut) ? (fRecordLength - fTailCut) : 0;
+    const uint32_t kCh = 32, kPerGroup = 8;
+    std::vector<uint16_t> dig(static_cast<size_t>(kCh) * S, 0);
+    for (uint32_t ch = 0; ch < kCh; ++ch) {
+        const uint32_t g = ch / kPerGroup, l = ch % kPerGroup;
+        if (g >= MAX_X742_GROUP_SIZE || !fEvent->GrPresent[g]) continue;
+        const float* wf = fEvent->DataGroup[g].DataChannel[l];
+        const uint32_t n = std::min<uint32_t>(fEvent->DataGroup[g].ChSize[l], S);
+        if (wf == nullptr) continue;
+        for (uint32_t t = 0; t < n; ++t) {
+            float v = wf[t];
+            dig[static_cast<size_t>(ch) * S + t] =
+                static_cast<uint16_t>(v < 0.f ? 0.f : (v > 65535.f ? 65535.f : v));
+        }
+    }
+
+    std::vector<uint32_t> dgh = {1u, 1742u, S, kCh, 1u, 4096u,
+                                 static_cast<uint32_t>(std::lround(fSamplingTime * 1e12))};
+    std::vector<uint32_t> dco(kCh, 0);
+    for (size_t i = 0; i < fChannelList.size(); ++i)
+        if (fChannelList[i] < kCh && !fDCOffset.empty())
+            dco[fChannelList[i]] = static_cast<uint32_t>(
+                fDCOffset[i < fDCOffset.size() ? i : fDCOffset.size() - 1]);
+    dgh.insert(dgh.end(), dco.begin(), dco.end());
+    dgh.push_back(fEventInfo.TriggerTimeTag);
+
+    uint16_t sic[MAX_X742_GROUP_SIZE];
+    for (int g = 0; g < MAX_X742_GROUP_SIZE; ++g)
+        sic[g] = fEvent->GrPresent[g] ? fEvent->DataGroup[g].StartIndexCell : uint16_t(0xFFFF);
+    const uint32_t g0 = fChannelList.empty() ? 0 : fChannelList[0] / kPerGroup;
+    dgh.push_back(g0 < MAX_X742_GROUP_SIZE ? sic[g0] : 0u);
+
+    const uint32_t cnt = fEventInfo.EventCounter;
+    std::vector<uint32_t> chl(fChannelList.begin(), fChannelList.end());
+
+    fMidas.BeginEvent();
+    fMidas.AddBank("DIG0", MidasWriter::TID_WORD,  dig.data(), static_cast<uint32_t>(dig.size() * 2));
+    fMidas.AddBank("DGH0", MidasWriter::TID_DWORD, dgh.data(), static_cast<uint32_t>(dgh.size() * 4));
+    fMidas.AddBank("DSIC", MidasWriter::TID_WORD,  sic, sizeof(sic));
+    fMidas.AddBank("DCNT", MidasWriter::TID_DWORD, &cnt, 4);
+    fMidas.AddBank("DCHL", MidasWriter::TID_DWORD, chl.data(), static_cast<uint32_t>(chl.size() * 4));
+    // serial = riga dell'HDF5: lo stesso evento ha lo stesso indice nei due file
+    fMidas.EndEvent(1, static_cast<uint32_t>(row), static_cast<uint32_t>(std::time(nullptr)));
 }
 
 // =======================================================================
 //  CLOSE OUTPUT FILE + GZIP
 // =======================================================================
 void Digitizer::CloseOutputFile() {
+    if (fMidas.IsOpen()) {
+        WriteMidasOdb(0x8001);
+        fMidas.Close();
+        Log::OutSummary("→ MIDAS file closed: " + fMidasPath);
+    }
     if (fOutputFormat != kHDF5 || fH5File == nullptr)
         return;
 

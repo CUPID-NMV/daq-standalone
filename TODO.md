@@ -302,6 +302,15 @@ Da provare:
    campione cieco (prima/seconda meta' della finestra, forma media degli
    eventi vuoti senza strutture).
 
+11. **MIDAS accanto all'HDF5 (`OutputFormat = "both"`), scritto il
+    2026-10-21: NON COMPILATO nella DAQ** (lo scrittore da solo si', sul
+    Mac). Al rientro: compilare; una run "both" e rileggere il .mid.gz con
+    wclib.py (forme d'onda uguali all'HDF5 riga per riga: serial MIDAS =
+    riga HDF5); confrontare il rate massimo HDF5 contro both; controllare se
+    le 4 SIC coincidono. Poi daqio che legge MIDAS (anche in diretta, il
+    file si chiude a blocchi gzip a ogni flush), monitor, controllore
+    (rate-log), e solo allora OutputFormat = "MIDAS" da solo.
+
 Poi fase 2 (controllore: schede nella pagina, Enabled, start/stop insieme,
 numero di run unico, mail per scheda -- prima un PNG da approvare) e fase 3
 (monitor: due file per run, schede dei canali col nome della scheda, file di

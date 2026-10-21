@@ -278,7 +278,13 @@ LiveFlushEvery  = 10
 LiveThresholdFile = ""
 
 SaveRaw = false 
-OutputFormat    = "HDF5"        # oppure "ROOT" o "ASCII"
+# "HDF5" oppure "both": con "both" la DAQ scrive ANCHE un .mid.gz nel formato
+# MIDAS della DAQ di CYGNO (blocchi DGH0/DIG0, sempre 32 canali), leggibile da
+# wclib.py e dagli strumenti del test beam, con lo stesso nome dell'HDF5.
+# Blocchi in piu': DSIC (SIC dei 4 gruppi), DCNT (contatore), DCHL (canali
+# di ChannelList). "MIDAS" da solo non e' ancora accettato: monitor e
+# strumenti leggono l'HDF5.
+OutputFormat    = "HDF5"
 OutputDir       = "/home/daq/daq-standalone/data"
 OutputFile      = "WC_proto"
 

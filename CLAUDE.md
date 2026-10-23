@@ -581,6 +581,14 @@ solo SENZA `--board`, sulla scheda dei SiPM: 30 s a trigger software 200 Hz.
   solo in ~80 posizioni della traccia, e una struttura legata all'indice di
   lettura non si separa bene da quella legata alla cella.
 
+- **Run di prova** (`SaveData = false`, chiesta dall'utente il 2026-10-23
+  per non perdere tempo nella compressione): il file si scrive comunque,
+  perche' il monitor lo legge in diretta, ma si chiama `TEST_...` (niente
+  prefisso con la tensione, niente numeri di run consumati) e a fine run
+  .h5 e .mid.gz si cancellano senza comprimerli. Resta il `.log`. La pagina
+  avvisa in rosso; riepilogo ed e-log saltano le `TEST_`. Provata e
+  installata il 2026-10-23.
+
 ## Formato MIDAS (dal 2026-10-21; installato il 2026-10-23)
 
 Decisione dell'utente: i dati devono uscire in MIDAS, il formato della DAQ di

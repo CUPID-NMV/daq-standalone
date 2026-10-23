@@ -47,8 +47,10 @@ def run_del_giorno(cartelle_dati, giorno):
         for radice, cartelle, files in os.walk(cartella):
             in_scan = os.sep + "scan" in radice[len(cartella):]
             for f in files:
+                # TEST_: run di prova (SaveData = false), dati gia' cancellati
                 if not f.endswith(".log") or f.startswith(("daq-console", "controllore",
-                                                            "monitor-console", "scan-console")):
+                                                            "monitor-console", "scan-console",
+                                                            "TEST_")):
                     continue
                 percorso = os.path.realpath(os.path.join(radice, f))
                 if percorso in visti:        # una cartella dentro l'altra

@@ -138,6 +138,7 @@ CAMPI = [
     ("digitizer", "DRS4Correction",  "DRS4 corrections",   "booleano", None),
     ("digitizer", "OutputFile",      "file prefix",        "testo",  None),
     ("digitizer", "OutputDir",       "output directory",   "testo",  None),
+    ("digitizer", "SaveData",        "save the data (false = TEST run: files deleted at the end, no compression)", "booleano", None),
 
     ("digitizer", "ExternalTrigger", "external trigger (TRG-IN)", "booleano", None),
     ("digitizer", "SoftwareTrigger", "software trigger (random windows: dark count, pedestal)", "booleano", None),
@@ -362,6 +363,12 @@ def coerenza(d):
     est_on = bool(g.get("ExternalTrigger"))
     modo = str(g.get("SelfTriggerMode", "paired"))
     freq = str(g.get("SamplingRate", ""))
+
+    # Una run di prova si cancella da sola: va detto prima, non scoperto dopo.
+    if g.get("SaveData") is False:
+        avvisi.append("TEST RUN: SaveData = false. The file is called TEST_... and is "
+                      "DELETED at the end of the run, without compression; only the "
+                      ".log stays. Set SaveData = true to keep the data.")
 
     sw_on = bool(g.get("SoftwareTrigger"))
     if not self_on and not est_on and not sw_on and not c.get("Enabled"):

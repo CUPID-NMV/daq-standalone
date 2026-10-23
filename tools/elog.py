@@ -247,7 +247,8 @@ def main():
         if not a.anche_scan:
             cartelle[:] = [c for c in cartelle if c != "scan"]
         for f in files:
-            if f.endswith(".log") and not f.startswith("daq-console"):
+            # TEST_: run di prova (SaveData = false), non sono misure
+            if f.endswith(".log") and not f.startswith(("daq-console", "TEST_")):
                 r = riga_da_log(os.path.join(radice, f), psu, avvii)
                 if r and (not a.da or r["data"] >= a.da):
                     righe.append(r)

@@ -104,6 +104,10 @@ private:
     // media 1/fSWTriggerRateHz: a intervalli fissi un disturbo periodico
     // commensurabile cadrebbe sempre nella stessa fase della finestra.
     // Letti nel corpo del costruttore, non nella lista di inizializzazione.
+    // Run di PROVA: con SaveData = false il file si scrive comunque durante
+    // la run (il monitor lo legge in diretta), ma si chiama TEST_ e a fine
+    // run si cancella invece di comprimerlo. Resta solo il .log.
+    bool   fSaveData = true;
     bool   fSoftwareTrigger = false;
     double fSWTriggerRateHz = 100.0;
 

@@ -278,6 +278,12 @@ LiveFlushEvery  = 10
 LiveThresholdFile = ""
 
 SaveRaw = false 
+# false = RUN DI PROVA: il file si scrive durante la run (il monitor lo legge
+# in diretta) ma si chiama TEST_... e a fine run viene cancellato, senza
+# perdere tempo a comprimerlo. Resta solo il .log. Riepilogo ed e-log saltano
+# le TEST_.
+SaveData        = true
+
 # "HDF5" oppure "both": con "both" la DAQ scrive ANCHE un .mid.gz nel formato
 # MIDAS della DAQ di CYGNO (blocchi DGH0/DIG0, sempre 32 canali), leggibile da
 # wclib.py e dagli strumenti del test beam, con lo stesso nome dell'HDF5.

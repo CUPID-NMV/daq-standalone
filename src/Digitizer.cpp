@@ -146,6 +146,7 @@ Digitizer::Digitizer()
     // Chiavi lette senza GetEntry: mancano in tutte le configurazioni vecchie,
     // e un avviso "using the built-in default" a ogni run per una funzione
     // che quasi nessuno usa insegna solo a ignorare gli avvisi.
+    fSaveData = fConfig.GetTbl()["digitizer"]["SaveData"].value_or(true);
     fSoftwareTrigger = fConfig.GetTbl()["digitizer"]["SoftwareTrigger"].value_or(false);
     fSWTriggerRateHz = fConfig.GetTbl()["digitizer"]["SoftwareTriggerRate"].value_or(100.0);
     if (fSoftwareTrigger && !(fSWTriggerRateHz > 0.0 && fSWTriggerRateHz <= 5000.0)) {
@@ -2230,7 +2231,12 @@ void Digitizer::PrepareOutput() {
         exit(1);
     }
 
-    std::string base = fOutputFileName;
+    // Una run di prova non consuma i numeri delle run vere e non porta il
+    // prefisso con la tensione, che in un nome sembrerebbe autorevole.
+    std::string base = fSaveData ? fOutputFileName : std::string("TEST");
+    if (!fSaveData)
+        Log::OutWarning("SaveData = false: RUN DI PROVA. Il file si chiama TEST_..., "
+                        "e a fine run viene CANCELLATO (resta solo il .log).");
 
     int maxRun = -1;
 
@@ -2741,6 +2747,19 @@ void Digitizer::CloseOutputFile() {
         delete fH5File;
         fH5Group = nullptr;
         fH5File  = nullptr;
+
+        if (!fSaveData) {
+            // Niente compressione: e' il tempo che la run di prova vuole
+            // risparmiare. Il monitor puo' avere il file ancora aperto; su
+            // Linux la cancellazione lo toglie dalla cartella e lui finisce
+            // di leggerlo senza danni.
+            std::filesystem::remove(fOutputPath);
+            if (!fMidasPath.empty())
+                std::filesystem::remove(fMidasPath);
+            Log::OutSummary("→ Run di prova (SaveData = false): file dei dati cancellati, "
+                            "resta il .log.");
+            return;
+        }
 
         std::string gzFile = fOutputPath + ".gz";
         Log::OutSummary("→ Compressing HDF5 file: " + fOutputPath);

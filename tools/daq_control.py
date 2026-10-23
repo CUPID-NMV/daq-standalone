@@ -923,8 +923,14 @@ class Alimentatore:
     passare 57 V su una scheda da 12, o impedire il bias.
     """
 
-    def __init__(self, host, nome="bias", vmax=None, csv=None, descrizione=""):
+    def __init__(self, host, nome="bias", vmax=None, csv=None, descrizione="", modello=None):
         self.host = host
+        # Il modello atteso nella risposta a *IDN?. Gli indirizzi vengono dal
+        # DHCP e cambiano: al Gran Sasso, il 2026-10-23, il bias dei SiPM
+        # (PLH250-P) e' finito a .104 e all'indirizzo di serie del bias, .106,
+        # c'era il CPX400SP dell'amplificatore. Senza questo controllo un
+        # "set 54 V" del bias sarebbe andato sulla scheda da 12 V.
+        self.modello = modello
         self.nome = nome
         self.vmax = vmax if vmax is not None else psu_control.VMAX
         self.csv = csv or PSU_LOG
@@ -944,6 +950,19 @@ class Alimentatore:
         self._muto_segnalato = False
         self.storia = self._carica_storia()
         threading.Thread(target=self._ciclo, daemon=True).start()
+
+    def _apri(self):
+        """La connessione, solo se all'indirizzo risponde il modello atteso."""
+        psu = psu_control.PLH(self.host, timeout=2.0)
+        if self.modello:
+            idn = psu.idn()
+            if self.modello not in idn:
+                psu.close()
+                raise RuntimeError("%s answers \"%s\", which is not the expected %s: "
+                                   "refusing to drive it. Wrong address (DHCP)? Use Find."
+                                   % (self.host, idn.strip(), self.modello))
+            self.idn = idn
+        return psu
 
     # -- lettura -----------------------------------------------------------
     def _leggi(self, psu):
@@ -1040,7 +1059,7 @@ class Alimentatore:
         while True:
             with self.lock:
                 try:
-                    psu = psu_control.PLH(self.host, timeout=2.0)
+                    psu = self._apri()
                     try:
                         self._registra(self._leggi(psu))
                     finally:
@@ -1114,7 +1133,7 @@ class Alimentatore:
             return False, "A ramp is in progress: wait, or press Output OFF."
         with self.lock:
             try:
-                psu = psu_control.PLH(self.host, timeout=2.0)
+                psu = self._apri()
                 try:
                     msg = fn(psu)
                     self._registra(self._leggi(psu))
@@ -1166,7 +1185,7 @@ class Alimentatore:
             self._spento_comandato = time.time()
             with self.lock:
                 try:
-                    psu = psu_control.PLH(self.host, timeout=2.0)
+                    psu = self._apri()
                     try:
                         psu.send("OP1 0")
                         self._registra(self._leggi(psu))
@@ -1212,7 +1231,7 @@ class Alimentatore:
             self._registra(self._leggi(psu))
         try:
             with self.lock:
-                psu = psu_control.PLH(self.host, timeout=2.0)
+                psu = self._apri()
                 try:
                     self.rampa["da"] = psu.vset()
                     finita = psu_control.ramp(psu, volt, PSU_PASSO_V, PSU_ATTESA_S,
@@ -1231,9 +1250,10 @@ class Alimentatore:
 
     def trova(self):
         trovati = [(ip, idn) for ip, idn in psu_control.find(
-            self.host.rsplit(".", 1)[0] + ".0", stampa=False) if "PLH" in idn]
+            self.host.rsplit(".", 1)[0] + ".0", stampa=False) if (self.modello or "PLH") in idn]
         if not trovati:
-            return False, "No PLH supply found on %s.0/24." % self.host.rsplit(".", 1)[0]
+            return False, "No %s supply found on %s.0/24." % (self.modello or "PLH",
+                                                             self.host.rsplit(".", 1)[0])
         self.host, self.idn = trovati[0][0], None
         return True, "Supply found at %s." % self.host
 
@@ -1278,9 +1298,9 @@ class Controllo:
         # Due strumenti diversi con due tetti diversi: 57 V sul PLH250-P,
         # 13 V sul CPX400SP, che la scheda vuole 12.
         self.psu = Alimentatore(psu_host, "bias", psu_control.VMAX, PSU_LOG,
-                                "SiPM bias") if psu_host else None
+                                "SiPM bias", modello="PLH") if psu_host else None
         self.psu_ampli = (Alimentatore(psu_ampli_host, "ampli", AMPLI_VMAX,
-                                       AMPLI_LOG, "amplifier board")
+                                       AMPLI_LOG, "amplifier board", modello="CPX")
                           if psu_ampli_host else None)
         # Si conoscono a vicenda: l'ordine di accensione lo controlla chi
         # riceve il comando, guardando lo stato dell'altro.

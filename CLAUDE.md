@@ -541,8 +541,10 @@ Nello stesso crate, dietro lo stesso bridge V4718:
   del DRS4 da cui parte la lettura, una colonna per gruppo, 0xFFFF se il
   gruppo manca), riga per riga con le forme d'onda, e
   `Board`/`BoardSerial`/`VMEBaseAddress` nell'header. Senza questi due numeri
-  gli eventi di due schede non si abbinano nemmeno offline. Il Trigger Time
-  Tag, da datasheet, e' a 30 bit da 8.5 ns: un giro ogni ~9 s.
+  gli eventi di due schede non si abbinano nemmeno offline. **Il Trigger
+  Time Tag conta a ~17.07 ns, non agli 8.5 ns del datasheet**: misurato il
+  2026-10-23 su 5461 trigger software in 27.84 s (intervallo medio 298755
+  conteggi = 5.098 ms). Con 30 bit fa un giro ogni ~18 s.
 - **Stato al 2026-10-20**: fase 1 (C++) committata e provata sulla scheda
   SiPM, **non installata in `build/`**. La scheda PMT risponde ma non
   acquisisce (reset in timeout, buffer non allocabile; registri: clock
@@ -552,7 +554,34 @@ Nello stesso crate, dietro lo stesso bridge V4718:
   partenza TRG-OUT -> S-IN) e' riassunta in `TODO.md` con le fonti. Prove
   rimaste, fase 2 (controllore) e fase 3 (monitor) sono in `TODO.md`.
 
-## Formato MIDAS (dal 2026-10-21, NON ancora compilato)
+## Prima prova al Gran Sasso (2026-10-23)
+
+Programma nuovo (schede, trigger software, MIDAS) compilato e INSTALLATO in
+`build/` il 2026-10-23, copia del precedente in
+`build/main/DAQ-WC.rollback-20261023-1456` (e la libreria accanto). Provato
+solo SENZA `--board`, sulla scheda dei SiPM: 30 s a trigger software 200 Hz.
+
+- **5461 trigger mandati, 5461 eventi**, 196 Hz misurati. Intervalli meno
+  dispersi di un'esponenziale (cv 0.84 contro 1): la lettura toglie gli
+  intervalli piu' corti. Per finestre cieche non conta.
+- **MIDAS identico all'HDF5**: 5461 eventi, zero campioni diversi. Ma pesa
+  ~20 kB per evento contro ~3.7 dell'HDF5 compresso, perche' la scheda legge
+  tutti e quattro i gruppi e nel .mid finiscono 32 canali veri.
+- **Le SIC dei quattro gruppi NON coincidono**: differiscono dal gruppo 0 di
+  -2..+3 celle (uguali in tutti e quattro solo in 491 eventi su 5461). Una
+  SIC sola per scheda, come nel formato di CYGNO, sbaglia di qualche cella
+  la correzione per cella sugli altri gruppi: usare `DSIC` /
+  `start_index_cell`. Forse vale anche per i dati del test beam (quale SIC
+  scrive CYGNO non lo so).
+- **Col trigger software a 750 MS/s la SIC prende solo ~40 posizioni** (piu'
+  la vicina), a passi di ~25.6 celle = 34.1 ns = 2 x 17.07 ns: il trigger e'
+  agganciato a un orologio della scheda, e il giro dell'anello (1024 x
+  1.333 ns = 1365 ns) ne contiene 40. Interpretazione, non verificata. Per il
+  DCR non conta; per la calibrazione PADME si', perche' ogni cella viene vista
+  solo in ~80 posizioni della traccia, e una struttura legata all'indice di
+  lettura non si separa bene da quella legata alla cella.
+
+## Formato MIDAS (dal 2026-10-21; installato il 2026-10-23)
 
 Decisione dell'utente: i dati devono uscire in MIDAS, il formato della DAQ di
 CYGNO, per usarli con gli strumenti del test beam (`wclib.py`,

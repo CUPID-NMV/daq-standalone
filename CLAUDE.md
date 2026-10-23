@@ -15,8 +15,22 @@ acquisisce quando almeno uno supera soglia.
 Si scrive sul **Mac**, si compila e si prova solo sul **PC DAQ**, che è l'unico
 ad avere hardware e librerie CAEN.
 
-- PC DAQ: alias SSH `daq-pc` → `192.168.99.104`, utente `daq`, repo in
-  `/home/daq/daq-standalone`. Login a chiave.
+- PC DAQ: alias SSH `daq-pc` → `192.168.99.108` (al Gran Sasso, dal
+  2026-10-23; a Frascati era .104), utente `daq`, repo in
+  `/home/daq/daq-standalone`. Login a chiave. Il Mac ci arriva da una VPN
+  (`utun`, 192.168.99.10).
+- **Al Gran Sasso, 2026-10-23**: PLH250-P (bias SiPM) a `.104`, CPX400SP
+  (amplificatore) a `.106` -- l'indirizzo di SERIE del bias, quindi il
+  controllore va avviato con `-- --psu-host 192.168.99.104 --psu-ampli-host
+  192.168.99.106`; ora comunque rifiuta un alimentatore del modello
+  sbagliato. `.102` e' il controller di gestione (BMC) di un server
+  Supermicro, `.107` risponde al ping e basta (sconosciuto). **Il bridge a
+  `.105` non risponde al ping** ma risponde su 22/80 e al VME: non darlo per
+  morto da un ping. Dal PC e dal Mac la rete non si vede uguale (il Mac via
+  VPN vede .5 e .102, il PC no): le prove si fanno dal PC.
+- **Dal Gran Sasso la posta non parte**: pmg1/pmg2.lnf.infn.it porta 25
+  danno "No route to host" (2026-10-23). Nessuna mail di allarme finche' non
+  si trova un'altra strada.
 - Bridge VME V4718: `192.168.99.105` (non è il PC DAQ). I digitizer stanno
   sul bus VME dietro di lui, distinti dall'indirizzo di base: vedi "Due V1742".
 - **Gli indirizzi sono assegnati da DHCP e cambiano.** Il PC DAQ è passato

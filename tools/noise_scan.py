@@ -27,6 +27,8 @@ import glob
 import json
 import math
 import os
+import re
+import subprocess
 import sys
 import time
 
@@ -70,7 +72,70 @@ def set_offset(data_dir, channels, offset, timeout=15):
             return {int(c["ch"]): (c["baseline"], int(c["threshold"]))
                     for c in st["channels"]}
         time.sleep(0.5)
-    sys.exit(f"La DAQ non ha applicato l'offset {offset} entro {timeout} s.")
+    sys.exit(perche_non_applica(data_dir, offset, timeout))
+
+
+def daq_viva():
+    """True se gira un processo della DAQ. pgrep solo per leggere."""
+    try:
+        return subprocess.run(["pgrep", "-f", "main/DAQ-WC"], capture_output=True).returncode == 0
+    except OSError:
+        return True          # non si sa: meglio non affermare il contrario
+
+
+def perche_non_applica(data_dir, offset, timeout):
+    """Il motivo per cui la soglia nuova non arriva, invece di un generico
+    "non applicata". Il caso piu' comune non e' un guasto: la run e' FINITA,
+    di solito perche' ha raggiunto NEvents. Successo il 2026-10-26: NEvents =
+    100000 col self-trigger saturo a ~940 Hz e' meno di due minuti, lo scan
+    si e' fermato al sesto passo dicendo che la DAQ "non aveva applicato"
+    l'offset, mentre la DAQ era chiusa da venti secondi."""
+    msg = f"La DAQ non ha applicato l'offset {offset:g} entro {timeout} s."
+    if not daq_viva():
+        log = ultimo_log(data_dir)
+        fine = ""
+        if log:
+            testo = open(log, errors="replace").read()
+            m = re.search(r"Total events recorded:\s*(\d+)", testo)
+            n = re.search(r"(?m)^NEvents\s*=\s*(\d+)", testo)
+            if m and n and int(m.group(1)) >= int(n.group(1)):
+                fine = (f" Ha raggiunto NEvents = {n.group(1)}: per uno scan del "
+                        "self-trigger va alzato (la DAQ satura a ~940 Hz).")
+            elif m:
+                fine = f" Si e' chiusa dopo {m.group(1)} eventi (vedi {os.path.basename(log)})."
+        return msg + " La DAQ NON E' PIU' IN ESECUZIONE: la run e' finita." + fine
+    try:
+        eta = time.time() - os.path.getmtime(os.path.join(data_dir, "live-status.json"))
+        if eta > 10:
+            return msg + (f" La DAQ gira, ma live-status.json non si aggiorna da {eta:.0f} s: "
+                          "e' bloccata, o scrive lo stato in un'altra cartella (OutputDir).")
+    except OSError:
+        pass
+    return msg
+
+
+def ultimo_log(data_dir):
+    logs = glob.glob(os.path.join(data_dir, "*.log"))
+    return max(logs, key=os.path.getmtime) if logs else None
+
+
+def eventi_previsti(path, n_passi, secondi):
+    """Avvisa PRIMA di partire se la run finira' a NEvents a meta' scan.
+    Il conto usa il rate di saturazione, ~1000 Hz: a bassa soglia si va li'."""
+    log = path[:-3] + ".log" if path.endswith(".h5") else None
+    try:
+        n = re.search(r"(?m)^NEvents\s*=\s*(\d+)", open(log, errors="replace").read())
+    except (OSError, TypeError):
+        return
+    if not n:
+        return
+    restano = int(n.group(1)) - n_events(path)
+    servono = n_passi * (secondi + 2) * 1000
+    if restano < servono:
+        print(f"ATTENZIONE: alla run restano {restano} eventi prima di NEvents = {n.group(1)}; "
+              f"a rate di saturazione (~1000 Hz) lo scan ne puo' chiedere fino a {servono}.\n"
+              "            La run potrebbe chiudersi a meta' scan: alza NEvents nel TOML e "
+              "riavvia la run.\n")
 
 
 def predicted(distances, sigma):
@@ -209,7 +274,9 @@ def main():
     print("baseline all'avvio della run (da live-status.json):")
     for c in st["channels"]:
         print(f"   ch{int(c['ch'])}: {c['baseline']:.3f}")
-    print("\nATTENZIONE: il segnale deve essere spento. Se i PMT sono attivi,")
+    print()
+    eventi_previsti(path, len(args.offsets), args.seconds)
+    print("ATTENZIONE: il segnale deve essere spento. Se i PMT sono attivi,")
     print("            quello che misuri e' segnale piu' rumore.\n")
     print(f"  {'offset':>7} {'soglie':>13} {'distanza':>10} {'rate misurato':>16} "
           f"{'atteso':>11} {'sigma implicito':>16}")

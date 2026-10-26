@@ -81,6 +81,12 @@ trap 'cp "$BACKUP" "$TOML"; echo; echo "TOML ripristinato da $BACKUP"' EXIT
 # Durante lo scan comanda il tempo, non il conteggio.
 sed -i -E "s|^NEvents *=.*|NEvents         = 100000000|" "$TOML"
 
+# Ogni punto si conta rileggendo il file DOPO che la DAQ si e' chiusa: con
+# SaveData = false la run e' "di prova" e il file viene cancellato a fine
+# run. Successo il 2026-10-26: primo punto contato, tutti gli altri "No such
+# file or directory" e zero eventi. Il ripristino rimette il valore di prima.
+sed -i -E "s|^SaveData *=.*|SaveData = true|" "$TOML"
+
 # Le run di uno scan vanno in una cartella loro. Sono decine di file che non
 # contengono fisica -- servono a misurare un rate contro una soglia -- e
 # mescolate a quelle dei cosmici rendono impossibile portare via "solo i dati"

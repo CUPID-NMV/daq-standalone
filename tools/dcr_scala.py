@@ -290,6 +290,11 @@ def main():
                     help="verso degli impulsi; di serie dal log della run (DCOffset), se no +1")
     ap.add_argument("--grezzo", action="store_true", help="senza il passa-basso a 50 MHz")
     ap.add_argument("--scarta-coda", type=int, default=SCARTA_CODA)
+    ap.add_argument("--intervallo-ns", type=float, nargs=2, metavar=("DA", "A"), default=None,
+                    help="analizza solo questo tratto della finestra, in ns dall'inizio. Col "
+                         "trigger software serve a tenersi lontani dall'istante del trigger, dove "
+                         "il segnale grezzo ha raffiche a ~176 MHz (CLAUDE.md, 2026-10-26), e "
+                         "dai primi ~85 ns, piu' rumorosi anche dopo il filtro")
     ap.add_argument("--forza", action="store_true",
                     help="analizza anche un file che non e' a solo trigger software")
     ap.add_argument("--json", default=None, help="di serie measurements/dcr_<run>.json")
@@ -307,6 +312,14 @@ def main():
     if a.scarta_coda:
         data = data[:, :, :max(data.shape[2] - a.scarta_coda, 10)]
     dt_ns = float(hdr.get("SamplingTime", 1e-9)) * 1e9
+    if a.intervallo_ns:
+        # Un tratto CONTINUO, non una finestra con un buco: alla giunzione di
+        # due pezzi la traccia salterebbe e il salto conterebbe come impulso.
+        i0 = max(0, int(round(a.intervallo_ns[0] / dt_ns)))
+        i1 = min(data.shape[2], int(round(a.intervallo_ns[1] / dt_ns)))
+        if i1 - i0 < 20:
+            sys.exit("Errore: l'intervallo %s ns lascia %d campioni." % (a.intervallo_ns, i1 - i0))
+        data = data[:, :, i0:i1]
     canali = [int(c) for c in hdr["ChannelList"]]
 
     run = efficienza.nome_run(a.file)
@@ -365,7 +378,8 @@ def main():
         return v
     with open(pj, "w") as f:
         json.dump({"file": os.path.abspath(a.file), "run": run, "trigger_mode": modo,
-                   "scarta_coda": a.scarta_coda, "mv_per_conteggio": MV_PER_CONTEGGIO,
+                   "scarta_coda": a.scarta_coda, "intervallo_ns": a.intervallo_ns,
+                   "mv_per_conteggio": MV_PER_CONTEGGIO,
                    "canali": {str(ch): {k: serial(v) for k, v in r.items()}
                               for ch, r in risultati.items()}}, f, indent=1)
     grafico(risultati, "%s — dark count rate vs threshold (software trigger, blind windows)" % run, pp)

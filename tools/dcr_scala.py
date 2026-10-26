@@ -85,7 +85,7 @@ def piedistallo_dal_basso(y, giri=4):
     return b, s
 
 
-def conta_blocco(y, soglie, isteresi):
+def conta_blocco(y, soglie, isteresi, tratto=None):
     """Conteggi di un blocco di tracce gia' filtrate e senza piedistallo.
 
     Un impulso conta quando la traccia passa da SOTTO soglia - isteresi a
@@ -97,11 +97,22 @@ def conta_blocco(y, soglie, isteresi):
     gia' sopra soglia (dentro la coda di un impulso precedente) non conta
     finche' non e' scesa.
 
+    `tratto` = (i0, i1) conta solo i passaggi che cadono fra quei campioni.
+    Lo stato dell'isteresi si segue comunque sull'intera traccia: ripartendo
+    da zero all'inizio del tratto, un impulso non conterebbe finche' la
+    traccia non e' scesa sotto soglia - isteresi, e a MHz di impulsi con code
+    di centinaia di ns la traccia comincia spesso dentro una coda. Misurato
+    sulla run 0039: il primo mezzo tratto perdeva il 10% dei conteggi a
+    1.5 p.e. (il 30% tagliando la traccia prima del filtro).
+
     Ritorna, per ogni soglia: impulsi (totali, prima meta', seconda meta'),
     eventi con almeno un impulso, campioni sopra soglia.
     """
     n, S = y.shape
-    meta = (S - 1) // 2
+    i0, i1 = tratto if tratto else (0, S)
+    # passa[:, j] e' il passaggio fra il campione j e j+1: nel tratto se j+1 vi cade
+    j0, j1 = max(i0 - 1, 0), i1 - 1
+    meta = j0 + (j1 - j0) // 2
     righe = np.arange(n)[:, None]
     pos = np.arange(S, dtype=np.int32)[None, :]
     k = len(soglie)
@@ -113,18 +124,26 @@ def conta_blocco(y, soglie, isteresi):
         idx = np.maximum.accumulate(idx, axis=1)
         ultimo = np.where(idx >= 0, stato[righe, np.maximum(idx, 0)], 0)
         passa = (ultimo[:, 1:] == 1) & (ultimo[:, :-1] == -1)     # passaggio in t+1
+        passa = passa[:, j0:j1]
         tot[i] = np.count_nonzero(passa)
-        prima[i] = np.count_nonzero(passa[:, :meta])
+        prima[i] = np.count_nonzero(passa[:, :meta - j0])
         seconda[i] = tot[i] - prima[i]
         con[i] = np.count_nonzero(passa.any(axis=1))
-    tutti = np.sort(y, axis=None)
+    tutti = np.sort(y[:, i0:i1], axis=None)
     sopra = tutti.size - np.searchsorted(tutti, soglie, "right")
     return tot, prima, seconda, con, sopra
 
 
-def analizza_canale(x, dt_ns, segno=1, soglie=None, filtro=True, isteresi_sigma=3.0, n_soglie=160):
-    """Scala del DCR per un canale. x: (eventi, campioni), conteggi ADC grezzi."""
+def analizza_canale(x, dt_ns, segno=1, soglie=None, filtro=True, isteresi_sigma=3.0, n_soglie=160,
+                    tratto=None):
+    """Scala del DCR per un canale. x: (eventi, campioni), conteggi ADC grezzi.
+
+    `tratto` = (i0, i1): si contano solo gli impulsi che cadono fra quei
+    campioni, ma filtro, piedistallo e isteresi lavorano sulla traccia intera.
+    Tagliare PRIMA del filtro creava all'inizio del tratto un buco di
+    conteggi (il 30% a 1.5 p.e. sulla run 0039)."""
     n, S = x.shape
+    i0, i1 = tratto if tratto else (0, S)
     sos = butter(LP_ORDINE, LP_MHZ * 1e6, btype="low", fs=1e9 / dt_ns, output="sos") if filtro else None
     # Una prima passata su pochi eventi per il rumore e l'escursione: fissa la
     # griglia delle soglie, uguale per tutti i blocchi.
@@ -152,12 +171,13 @@ def analizza_canale(x, dt_ns, segno=1, soglie=None, filtro=True, isteresi_sigma=
     for i in range(0, n, BLOCCO):
         y, s = prepara(x[i:i + BLOCCO])
         sigme.append(s)
-        for a, v in zip(acc, conta_blocco(y, soglie, isteresi)):
+        for a, v in zip(acc, conta_blocco(y, soglie, isteresi, (i0, i1))):
             a += v
     tot, prima, seconda, con, sopra = acc
     sigma = float(np.median(np.concatenate(sigme)))
 
-    T = (S - 1) * dt_ns * 1e-9                 # s: dove puo' cadere un attraversamento
+    L = (i1 - max(i0 - 1, 0)) - 1 if tratto else S - 1   # passaggi possibili
+    T = L * dt_ns * 1e-9                       # s: dove puo' cadere un attraversamento
     m = tot / (n * T)                          # Hz, conteggio diretto
     with np.errstate(divide="ignore", invalid="ignore"):
         tau = np.where(tot > 0, sopra * dt_ns * 1e-9 / tot, np.nan)
@@ -167,10 +187,10 @@ def analizza_canale(x, dt_ns, segno=1, soglie=None, filtro=True, isteresi_sigma=
         # errore statistico della stima di Poisson: binomiale su P0
         poisson_err = np.where((p0 > 0) & (p0 < 1), np.sqrt((1 - p0) / (n * p0)) / T, np.nan)
     m_err = np.sqrt(tot) / (n * T)
-    T2 = np.array([(S - 1) // 2, (S - 1) - (S - 1) // 2]) * dt_ns * 1e-9
+    T2 = np.array([L // 2, L - L // 2]) * dt_ns * 1e-9
 
     return {
-        "eventi": int(n), "campioni": int(S), "dt_ns": dt_ns, "finestra_s": T,
+        "eventi": int(n), "campioni": int(S), "tratto": [int(i0), int(i1)], "dt_ns": dt_ns, "finestra_s": T,
         "sigma_rumore": sigma, "isteresi": isteresi, "filtro": ("passa-basso %g MHz" % LP_MHZ) if filtro else "nessuno",
         "soglie": soglie, "attraversamenti": tot, "eventi_con_impulso": con,
         "dcr_conteggio": m, "dcr_conteggio_err": m_err,
@@ -312,21 +332,24 @@ def main():
     if a.scarta_coda:
         data = data[:, :, :max(data.shape[2] - a.scarta_coda, 10)]
     dt_ns = float(hdr.get("SamplingTime", 1e-9)) * 1e9
+    tratto = None
     if a.intervallo_ns:
-        # Un tratto CONTINUO, non una finestra con un buco: alla giunzione di
-        # due pezzi la traccia salterebbe e il salto conterebbe come impulso.
+        # Un tratto CONTINUO, non una finestra con un buco. Non si taglia la
+        # traccia: lo dice analizza_canale perche'.
         i0 = max(0, int(round(a.intervallo_ns[0] / dt_ns)))
         i1 = min(data.shape[2], int(round(a.intervallo_ns[1] / dt_ns)))
         if i1 - i0 < 20:
             sys.exit("Errore: l'intervallo %s ns lascia %d campioni." % (a.intervallo_ns, i1 - i0))
-        data = data[:, :, i0:i1]
+        tratto = (i0, i1)
     canali = [int(c) for c in hdr["ChannelList"]]
 
     run = efficienza.nome_run(a.file)
     pol = efficienza.polarita_dal_log(os.path.splitext(a.file.replace(".h5.gz", ".h5"))[0] + ".log")
     risultati = {}
-    print("%s: %d finestre da %.2f µs, campionamento %.3g ns" % (
-        run, data.shape[0], (data.shape[2] - 1) * dt_ns / 1000, dt_ns))
+    print("%s: %d finestre da %.2f µs, campionamento %.3g ns%s" % (
+        run, data.shape[0], (data.shape[2] - 1) * dt_ns / 1000, dt_ns,
+        ", contati solo gli impulsi fra %.0f e %.0f ns" % (tratto[0] * dt_ns, tratto[1] * dt_ns)
+        if tratto else ""))
     print("%4s %4s %7s %8s  %-30s %-30s %-30s %6s" % (
         "ch", "pol", "rumore", "1 p.e.", "DCR 0.5 p.e. [kHz]", "DCR 1.5 p.e. [kHz]",
         "DCR 2.5 p.e. [kHz]", "xtalk"))
@@ -339,7 +362,7 @@ def main():
             segno = pol
         else:
             segno = 1
-        r = analizza_canale(data[:, j, :], dt_ns, segno=segno, filtro=not a.grezzo)
+        r = analizza_canale(data[:, j, :], dt_ns, segno=segno, filtro=not a.grezzo, tratto=tratto)
         picchi, spettro = picchi_pe(r)
         r["picchi"], r["spettro"], r["soglie_pe"], r["segno"] = picchi, spettro, soglie_pe(picchi), segno
         risultati[ch] = r

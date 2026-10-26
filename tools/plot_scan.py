@@ -24,6 +24,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import daqio
 import calibrazione
+import efficienza
 
 import matplotlib
 matplotlib.use("Agg")
@@ -88,6 +89,171 @@ def _canali(c, magg=1):
 MV_PER_CONTEGGIO = 1000.0 / 4096      # V1742, ingresso 1 Vpp a 12 bit
 
 
+_INDICE_FILE = None
+
+
+def trova_file(nome):
+    """Il file di una run, dovunque stia sotto data/.
+
+    Il JSON di uno scan registra solo il nome. Gli scan del V812 scrivono in
+    <OutputDir>/scan, e OutputDir cambia (data/, data/LNGS/...): cercato solo
+    in data/, il file non si trovava mai e il grafico per canale si
+    fermava con "nessun dato" -- e' il motivo per cui "non ha mai funzionato".
+    """
+    global _INDICE_FILE
+    if _INDICE_FILE is None:
+        _INDICE_FILE = {}
+        for cartella, _, file in os.walk(os.path.join(ROOT, "data")):
+            for f in file:
+                _INDICE_FILE.setdefault(f, os.path.join(cartella, f))
+    for n in (nome, nome + ".gz"):
+        if n in _INDICE_FILE:
+            return _INDICE_FILE[n]
+    return None
+
+
+# Un canale ha "partecipato" al trigger se ha un impulso sopra 5 sigma del
+# suo rumore entro 25 ns dal SUO istante tipico rispetto al trigger. Il
+# criterio non converte la soglia del CFD in ampiezza al digitizer: le due
+# catene non vedono la stessa ampiezza (sdoppiatori, cavi), e il rapporto
+# cambia a ogni ricablaggio. Si chiede solo "c'era un impulso li'?".
+CHI_SIGMA = 5.0
+CHI_FINESTRA_NS = 25.0
+# Un canale e' nel trigger se, almeno in un punto dello scan, ha l'impulso
+# allineato nel 30% degli eventi. Gli impulsi al buio di un SiPM (~1.5 MHz)
+# cadono per caso nei 50 ns della finestra nel ~7% degli eventi.
+CHI_FRAZIONE = 0.30
+
+
+def chi_ha_sparato(d, voluti=None):
+    """Per ogni punto di uno scan del V812, quale canale ha fatto scattare il
+    trigger, dalle forme d'onda registrate.
+
+    Il rate di uno scan e' quello dell'OR, un filo solo: non dice quale
+    ingresso abbia sparato. Ma all'istante del trigger, nelle forme d'onda,
+    l'impulso di chi ha sparato c'e'. Ogni evento finisce in una sola
+    categoria -- solo un canale, piu' canali insieme, nessuno -- e le
+    categorie sommano al rate del trigger.
+
+    "Nessuno" sono i trigger senza un impulso visibile al digitizer: il CFD
+    che scatta sul suo rumore, sotto quello che la catena del digitizer
+    risolve. Misurato il 2026-10-26: a 5 mV 385 Hz su 507, da 7 mV 0.05 Hz.
+
+    I canali del trigger, se non indicati, si trovano dai dati: hanno un
+    impulso a un istante fisso rispetto al trigger. Ritorna None se non si
+    rilegge nessun punto.
+    """
+    punti = sorted(d.get("punti", []), key=lambda p: p.get("soglia_mv", 0))
+    letti = []
+    for p in punti:
+        nome, durata = p.get("file"), p.get("durata_s")
+        if not nome or not durata:
+            continue
+        percorso = trova_file(nome)
+        if percorso is None:
+            print("  (salto %s: file non trovato sotto data/)" % nome, file=sys.stderr)
+            continue
+        try:
+            hdr, dd = daqio.load(percorso, live=not percorso.endswith(".gz"))
+        except Exception as e:
+            print("  (salto %s: %s)" % (nome, str(e).splitlines()[0][:60]), file=sys.stderr)
+            continue
+        canali = [int(c) for c in hdr["ChannelList"]]
+        dt = float(hdr.get("SamplingTime", 1e-9)) * 1e9
+        log = percorso.replace(".h5.gz", ".log").replace(".h5", ".log")
+        pol = efficienza.polarita_dal_log(log)
+        dd = dd.astype(float)
+        # Mediana dell'intera traccia come piedistallo: gli impulsi dei PMT
+        # occupano pochi campioni su mille. Per i SiPM non varrebbe, ma i
+        # SiPM qui interessano solo per essere esclusi.
+        y = dd - np.median(dd, axis=2, keepdims=True)
+        segno = np.ones(len(canali))
+        for i, c in enumerate(canali):
+            if isinstance(pol, dict) and c in pol:
+                segno[i] = pol[c]
+            elif pol in (1, -1):
+                segno[i] = pol
+            else:
+                # senza log: il verso con le escursioni piu' grandi
+                segno[i] = 1 if np.median(y[:, i].max(1)) >= np.median(-y[:, i].min(1)) else -1
+        ys = y * segno[None, :, None]
+        amp = ys.max(axis=2) * MV_PER_CONTEGGIO
+        tt = ys.argmax(axis=2) * dt
+        mad = np.median(np.abs(y), axis=(0, 2))
+        sig = 1.4826 * np.maximum(mad, 0.5) * MV_PER_CONTEGGIO
+        letti.append((p, canali, amp, tt, sig))
+    if not letti:
+        return None
+
+    canali = letti[0][1]
+    # Istante tipico di ogni canale: la moda dei tempi dei suoi impulsi.
+    t0, frazione = {}, {}
+    for i, c in enumerate(canali):
+        tutti = np.concatenate([l[3][l[2][:, i] > CHI_SIGMA * l[4][i], i] for l in letti])
+        if len(tutti) < 5:
+            continue
+        h, b = np.histogram(tutti, bins=np.arange(0, tutti.max() + 10, 10))
+        m = 0.5 * (b[h.argmax()] + b[h.argmax() + 1])
+        vicini = tutti[np.abs(tutti - m) < CHI_FINESTRA_NS]
+        t0[c] = float(np.median(vicini)) if len(vicini) else m
+        frazione[c] = max(np.mean((np.abs(l[3][:, i] - t0[c]) < CHI_FINESTRA_NS) &
+                                  (l[2][:, i] > CHI_SIGMA * l[4][i])) for l in letti)
+    if voluti:
+        scelti = [c for c in canali if c in voluti]
+        mancano = sorted(set(voluti) - set(canali))
+        if mancano:
+            print("  (canali non registrati: %s)" % mancano, file=sys.stderr)
+    else:
+        scelti = [c for c in canali if frazione.get(c, 0) >= CHI_FRAZIONE]
+    scelti = [c for c in scelti if c in t0]
+    if not scelti:
+        return None
+
+    idx = [canali.index(c) for c in scelti]
+    soglie, durate, tot, solo, insieme, nessuno = [], [], [], {c: [] for c in scelti}, [], []
+    for p, _, amp, tt, sig in letti:
+        su = np.stack([(np.abs(tt[:, i] - t0[c]) < CHI_FINESTRA_NS) & (amp[:, i] > CHI_SIGMA * sig[i])
+                       for c, i in zip(scelti, idx)], axis=1)
+        k = su.sum(axis=1)
+        soglie.append(p["soglia_mv"])
+        durate.append(p["durata_s"])
+        tot.append(len(k))
+        for j, c in enumerate(scelti):
+            solo[c].append(int(((k == 1) & su[:, j]).sum()))
+        insieme.append(int((k >= 2).sum()))
+        nessuno.append(int((k == 0).sum()))
+    return {"canali": scelti, "t0": t0, "soglie": np.array(soglie), "durate": np.array(durate),
+            "totale": np.array(tot), "solo": {c: np.array(v) for c, v in solo.items()},
+            "insieme": np.array(insieme), "nessuno": np.array(nessuno)}
+
+
+def disegna_chi_ha_sparato(ax, r, d):
+    """Rate del trigger e sua scomposizione per canale, su scala logaritmica:
+    le categorie stanno su decadi diverse (a bassa soglia il rumore del CFD
+    vale centinaia di Hz, le coincidenze decimi)."""
+    du = r["durate"]
+    voci = [("trigger rate (%s)" % _canali(d.get("canali"), d.get("maggioranza", 1)).replace(
+                "ch ", "V812 inputs "), r["totale"], "#0b0b0b", "-", "s", 1.5)]
+    for j, c in enumerate(r["canali"]):
+        voci.append(("only ch%d at the trigger" % c, r["solo"][c], PALETTE[j], "-", "o", 2.0))
+    if len(r["canali"]) > 1:
+        lab = ("ch%d and ch%d together" % tuple(r["canali"]) if len(r["canali"]) == 2
+               else "2 or more channels together")
+        voci.append((lab, r["insieme"], PALETTE[len(r["canali"])], "--", "D", 2.0))
+    # grigio, non un colore della tavolozza: non e' un canale
+    voci.append(("no pulse at the trigger (CFD noise)", r["nessuno"], "#9a9893", ":", "v", 2.0))
+    for lab, n, col, ls, mk, lw in voci:
+        y = n / du
+        e = np.sqrt(n) / du
+        ok = n > 0
+        ax.errorbar(r["soglie"][ok], y[ok], yerr=e[ok], color=col, ls=ls, marker=mk, ms=7, lw=lw,
+                    mec="white", mew=1, capsize=0, label=lab)
+        if (~ok).any():
+            # zero eventi: limite superiore a un evento nella durata del punto
+            ax.plot(r["soglie"][~ok], 1.0 / du[~ok], "v", color=col, ms=7, alpha=.45, ls="none")
+    ax.set_yscale("log")
+
+
 def per_canale(d, tipo, k_mv_offset):
     """Quante volte OGNI canale ha superato la soglia, punto per punto.
 
@@ -108,7 +274,6 @@ def per_canale(d, tipo, k_mv_offset):
 
     Ritorna {canale: (soglie_mV, rate_Hz)}.
     """
-    dati = os.path.join(ROOT, "data")
     fuori = {}
 
     for p in d.get("punti", []):
@@ -126,11 +291,9 @@ def per_canale(d, tipo, k_mv_offset):
         if not nome or not durata:
             continue
 
-        percorso = os.path.join(dati, nome)
-        if not os.path.exists(percorso):
-            percorso += ".gz"
-        if not os.path.exists(percorso):
-            print("  (salto %s: file non trovato)" % nome, file=sys.stderr)
+        percorso = trova_file(nome)
+        if percorso is None:
+            print("  (salto %s: file non trovato sotto data/)" % nome, file=sys.stderr)
             continue
 
         try:
@@ -310,6 +473,53 @@ def main():
         if note.count(s[4]) > 1:
             quando = (s[5].get("quando") or "")[5:16].replace("-", "/")
             serie[i] = s[:4] + (s[4] + ("   [%s]" % quando if quando else "   [%d]" % (i + 1)),) + s[5:]
+
+    if args.per_channel and any(s[0] == "v812" for s in serie):
+        # Per il V812 "per canale" vuol dire CHI ha fatto scattare il trigger
+        # a ogni soglia (chi_ha_sparato). Il conteggio di per_canale, che
+        # confrontava la soglia del CFD con l'ampiezza al digitizer, misurava
+        # un'altra cosa: le due catene non vedono la stessa ampiezza.
+        if len(serie) > 1:
+            raise SystemExit("Per canale si disegna uno scan del V812 alla volta: con le "
+                             "categorie di ogni canale, due scan sullo stesso grafico non "
+                             "si leggono piu'.")
+        d = serie[0][5]
+        voluti = ({int(x) for x in args.channels.replace(",", " ").split()}
+                  if args.channels else None)
+        r = chi_ha_sparato(d, voluti)
+        if r is None:
+            raise SystemExit("Non sono riuscito a rileggere i dati dello scan (i file delle "
+                             "run sono ancora sotto data/?), o nessun canale ha impulsi "
+                             "allineati al trigger. Con --channels li si indica a mano.")
+        print("canali del trigger: %s (istante tipico: %s)" % (
+            ", ".join("ch%d" % c for c in r["canali"]),
+            ", ".join("%.0f ns" % r["t0"][c] for c in r["canali"])))
+        disegna_chi_ha_sparato(ax, r, d)
+        quando = (d.get("quando") or "")[5:16].replace("-", "/")
+        ax.set_title("V812 threshold scan%s - who fired the trigger"
+                     % (", " + quando if quando else ""), fontsize=11, loc="left")
+        ax.set_xlabel("V812 threshold  [mV at the CFD input]")
+        ax.set_ylabel("rate  [Hz]")
+        ax.grid(alpha=.3, which="both")
+        if args.xmin is not None or args.xmax is not None:
+            ax.set_xlim(left=args.xmin, right=args.xmax)
+        if args.ymin is not None or args.ymax is not None:
+            ax.set_ylim(bottom=args.ymin, top=args.ymax)
+        ax.legend(fontsize=8.5, loc="upper center", bbox_to_anchor=(0.5, -0.15),
+                  ncol=2, frameon=False)
+        ax.annotate("Per channel: pulse within %.0f ns of that channel's trigger time and above "
+                    "%.0f sigma of its noise, on the recorded waveforms. Error bars: Poisson."
+                    % (CHI_FINESTRA_NS, CHI_SIGMA),
+                    xy=(0.5, -0.36), xycoords="axes fraction", ha="center", va="top",
+                    fontsize=7.5, color=INCHIOSTRO)
+        out = args.out or os.path.join(ROOT, "plots",
+                                       "scan_%s.png" % time.strftime("%Y%m%d_%H%M%S"))
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        fig.tight_layout()
+        fig.savefig(out, dpi=130, bbox_inches="tight")
+        plt.close(fig)
+        print("grafico: %s" % out)
+        return
 
     if args.per_channel:
         # Una curva per canale, ricontata sui dati: il rate del trigger non

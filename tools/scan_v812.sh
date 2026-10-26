@@ -253,4 +253,7 @@ PY
 
 echo
 echo "=== Grafico ==="
-python3 "$ROOT/tools/plot_scan.py" "$JSON"
+# Il rate dell'OR scomposto per canale: chi ha fatto scattare il trigger a
+# ogni soglia, dalle forme d'onda. Se i dati non si rileggono, almeno il rate.
+python3 "$ROOT/tools/plot_scan.py" --per-channel "$JSON" \
+    || python3 "$ROOT/tools/plot_scan.py" "$JSON"

@@ -581,6 +581,23 @@ solo SENZA `--board`, sulla scheda dei SiPM: 30 s a trigger software 200 Hz.
   solo in ~80 posizioni della traccia, e una struttura legata all'indice di
   lettura non si separa bene da quella legata alla cella.
 
+- **Col trigger software le tracce hanno raffiche agganciate al trigger**
+  (2026-10-26, run 0036, 0037 e una prova senza il secondo V1742): in
+  ~95-100% degli eventi, comuni a ch20 e ch21, ~176 MHz, ~8-11 conteggi
+  rms, SEMPRE all'istante del trigger (661-704 ns a PostTrigger 50%,
+  576-619 a 55%: si spostano col trigger). La rms delle tracce raddoppia
+  (PMT ~4 contro ~2.1 col trigger hardware), anche lontano dal trigger.
+  Escluso: la singola run, il cablaggio dei PMT, il secondo digitizer, il
+  traffico VME di lettura (100000 letture/s sul V812 durante un trigger
+  hardware: niente). Non distinto: una scrittura sulla scheda contro il
+  trigger software in se'. **Anche la baseline all'avvio si misura cosi'**:
+  le sue rms (~4 sui PMT) sono il doppio di quelle dei dati, la media no.
+  Per decisione dell'utente PADME si applica offline, non dalle run a
+  trigger software; `tools/padme.py` sulla 0036 dava 6-10% di guadagno,
+  misura falsata da questo rumore. Il DCR della 0036
+  (`measurements/dcr_test__54-0V_0036_*`, 1.7-2.1 MHz a 0.5 p.e.) e'
+  filtrato a 50 MHz, che taglia gran parte dei 176 MHz: non quantificato.
+
 - **Run di prova** (`SaveData = false`, chiesta dall'utente il 2026-10-23
   per non perdere tempo nella compressione): il file si scrive comunque,
   perche' il monitor lo legge in diretta, ma si chiama `TEST_...` (niente

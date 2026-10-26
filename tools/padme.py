@@ -313,7 +313,9 @@ def main():
     with open(pj, "w") as f:
         json.dump({"file": os.path.abspath(a.file), "run": run, "trigger_mode": modo,
                    "sampling_rate": hdr.get("SamplingRate"), "correzione_caen": caen,
-                   "board": hdr.get("Board"), "board_serial": hdr.get("BoardSerial"),
+                   "board": hdr.get("Board"),
+                   # L'header lo da' come uint32 di numpy, che json non sa scrivere.
+                   "board_serial": (int(hdr["BoardSerial"]) if "BoardSerial" in hdr else None),
                    "mv_per_conteggio": MV_PER_CONTEGGIO,
                    "nota": "tabella_cella[c] = scostamento della cella c dalla mediana delle "
                            "celle, in conteggi; S_cor(k) = S(k) - tabella_cella[(k+SIC) mod 1024], "

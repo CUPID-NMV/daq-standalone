@@ -594,9 +594,22 @@ solo SENZA `--board`, sulla scheda dei SiPM: 30 s a trigger software 200 Hz.
   le sue rms (~4 sui PMT) sono il doppio di quelle dei dati, la media no.
   Per decisione dell'utente PADME si applica offline, non dalle run a
   trigger software; `tools/padme.py` sulla 0036 dava 6-10% di guadagno,
-  misura falsata da questo rumore. Il DCR della 0036
-  (`measurements/dcr_test__54-0V_0036_*`, 1.7-2.1 MHz a 0.5 p.e.) e'
-  filtrato a 50 MHz, che taglia gran parte dei 176 MHz: non quantificato.
+  misura falsata da questo rumore.
+
+- **DCR dei SiPM a 54 V, prima misura su dati veri** (run 0039, 2026-10-26:
+  trigger software 100 Hz, solo ch16-18, PostTrigger 10%, 100000 finestre),
+  contando solo nel tratto 100-850 ns (`dcr_scala.py --intervallo-ns 100
+  850`, lontano dalle raffiche a ~900 e ~1230 ns e dall'inizio traccia),
+  stima di Poisson: 1 p.e. = 2.75 / 3.02 / 2.92 mV; DCR a 0.5 p.e. 1.40 /
+  1.44 / 1.61 MHz, a 1.5 p.e. 266 / 266 / 415 kHz, a 2.5 p.e. 38 / 40 /
+  67 kHz (ch16/17/18). La finestra INTERA da' l'8-15% in piu': il DCR
+  della 0036 (1.6-1.7 MHz) e' gonfiato da raffiche e inizio traccia. A
+  ~1.4 MHz il pile-up di due 1 p.e. pesa a 1.5 p.e. (in simulazione +30%
+  gia' a 1 MHz): i valori a 1.5 p.e., e il crosstalk 0.18-0.26 che ne
+  viene, sono LIMITI SUPERIORI. Resta fra le due meta' del tratto un 3-8%
+  in piu' nella seconda, compatibile con la base che sale di ~0.07 mV.
+  `--intervallo-ns` conta solo nel tratto ma filtra e segue l'isteresi
+  sulla traccia intera: tagliare prima toglieva il 30% alla prima meta'.
 
 - **Run di prova** (`SaveData = false`, chiesta dall'utente il 2026-10-23
   per non perdere tempo nella compressione): il file si scrive comunque,

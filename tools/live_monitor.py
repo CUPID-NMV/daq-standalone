@@ -34,6 +34,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")          # nessun display: si generano solo PNG
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import daqio
@@ -1500,6 +1501,7 @@ class Monitor:
                 if imp["qlog"] is None or imp["qlog"]:
                     ax.set_yscale("log")
                 ax.set_xlabel(unita, fontsize=7, labelpad=1)
+                _assi_carica(ax)
         ax.tick_params(labelsize=6, pad=1)
         ax.grid(alpha=0.25)
         fig.tight_layout(pad=0.25)
@@ -2012,6 +2014,7 @@ class Monitor:
                 if logy:
                     ax.set_yscale("log")
                 ax.set_xlabel("charge [%s]" % unita)
+                _assi_carica(ax)
                 ax.set_ylabel("events" + (" (log)" if logy else ""))
                 ax.grid(alpha=0.25)
 
@@ -3009,6 +3012,13 @@ MURO_MX, MURO_MY = 0.012, 0.030      # margini laterali e in basso
 MURO_TOP = 0.90         # sotto il titolo
 MURO_GX, MURO_GY = 0.012, 0.055      # spazio fra le celle
 MURO_CELLA_MAX = 300    # lato massimo di una cella quadrata, in pixel
+
+
+def _assi_carica(ax):
+    """In ADC*ns le cariche hanno cinque o sei cifre e le etichette dell'asse
+    si accavallavano: meno tacche, e un x10^n in fondo quando servono."""
+    ax.xaxis.set_major_locator(MaxNLocator(4))
+    ax.ticklabel_format(axis="x", style="sci", scilimits=(-3, 4))
 
 
 def _q(x):

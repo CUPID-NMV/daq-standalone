@@ -34,7 +34,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")          # nessun display: si generano solo PNG
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import FuncFormatter, MaxNLocator
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import daqio
@@ -3016,9 +3016,12 @@ MURO_CELLA_MAX = 300    # lato massimo di una cella quadrata, in pixel
 
 def _assi_carica(ax):
     """In ADC*ns le cariche hanno cinque o sei cifre e le etichette dell'asse
-    si accavallavano: meno tacche, e un x10^n in fondo quando servono."""
+    si accavallavano: meno tacche, e le migliaia scritte "40k". Non un x10^n
+    in fondo all'asse, che finiva sopra l'etichetta."""
     ax.xaxis.set_major_locator(MaxNLocator(4))
-    ax.ticklabel_format(axis="x", style="sci", scilimits=(-3, 4))
+    lo, hi = ax.get_xlim()
+    if max(abs(lo), abs(hi)) >= 1e4:
+        ax.xaxis.set_major_formatter(FuncFormatter(lambda x, _: "%gk" % (x / 1000.0)))
 
 
 def _q(x):

@@ -58,7 +58,10 @@ private:
     std::vector<int64_t> fThresholdMv;  // soglie, in mV (modulo: il segnale e' negativo)
     int64_t  fWidth;            // conteggi 0..255
     int64_t  fDeadTime;         // conteggi 0..255
-    int64_t  fMajority;         // livello di maggioranza 1..20 (1 = OR)
+    int64_t  fMajority;         // canali in coincidenza richiesti (1 = OR)
+    int64_t  fMajThrRaw;        // soglia grezza del registro 0x48, -1 = calcolata
+    double   fSumMvPerCh;       // peso di un canale nella somma S [mV]
+    double   fSumOffsetMv;      // spostamento della somma S [mV]
 
     // ---- REGISTRI (V812 User's Manual rev.7, Tab. 3.1) ----
     // Parole da 16 bit: i cicli VME devono essere D16, non D32.

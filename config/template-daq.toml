@@ -356,9 +356,22 @@ IPAddress = "192.168.99.105"
 # Width       = 0
 # DeadTime    = 0
 #
-# # Livello di maggioranza: 1 = OR. Conta solo per l'uscita MAJ, non per l'OR,
-# # ma va scritto comunque perche' all'accensione il registro e' indeterminato.
+# # Canali in coincidenza richiesti all'uscita MAJ: 1 = OR. Conta solo per
+# # l'uscita MAJ, ma va scritto comunque perche' all'accensione il registro e'
+# # indeterminato. NON e' piu' il livello della formula del manuale: quella
+# # (50N - 25 mV) con questo modulo fa scattare il livello N gia' con N-1
+# # canali da N = 3 in su. La DAQ mette la soglia a meta' fra la somma di N-1
+# # e di N canali misurata il 2026-10-27 (~55 mV per canale + ~17 mV; bordi
+# # misurati fino a 3 canali, oltre estrapolati). Il log scrive la soglia, i
+# # bordi attesi e il margine.
 # Majority    = 1
+#
+# # Facoltative. La calibrazione della somma S, se andasse rimisurata (scan del
+# # registro 0x48 con /tmp/majthr.c), e una soglia grezza 0-255 che scavalca
+# # tutto: il log dice comunque quanti canali richiede secondo la calibrazione.
+# MajoritySumMvPerChannel = 55.0
+# MajoritySumOffsetMv     = 17.0
+# MajorityThreshold       = 39
 
 # ===========================================================================
 #  PIU' DIGITIZER

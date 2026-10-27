@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <set>
@@ -34,6 +35,9 @@ CFD::CFD( Config& config, Bridge& bridge )
   , fWidth(0)
   , fDeadTime(0)
   , fMajority(1)
+  , fMajThrRaw(-1)
+  , fSumMvPerCh(55.0)
+  , fSumOffsetMv(17.0)
 {
     // La sezione e' facoltativa: se manca non si legge nulla e non si avvisa
     // di nulla, altrimenti ogni run senza CFD stamperebbe una pioggia di
@@ -72,6 +76,14 @@ void CFD::ReadConfig()
     fWidth      = fConfig.GetEntry<int64_t>("cfd", "Width", 0);
     fDeadTime   = fConfig.GetEntry<int64_t>("cfd", "DeadTime", 0);
     fMajority   = fConfig.GetEntry<int64_t>("cfd", "Majority", 1);
+    // Facoltative, lette senza GetEntry per non stampare "default" a ogni run:
+    // chi non le scrive vuole la calibrazione misurata.
+    {
+        auto cfd = fConfig.GetTbl()["cfd"];
+        if( auto v = cfd["MajorityThreshold"].value<int64_t>() )  fMajThrRaw   = *v;
+        if( auto v = cfd["MajoritySumMvPerChannel"].value<double>() ) fSumMvPerCh  = *v;
+        if( auto v = cfd["MajoritySumOffsetMv"].value<double>() )     fSumOffsetMv = *v;
+    }
     fChannels   = fConfig.GetEntryList<int64_t>("cfd", "Channels", 0, 0);
     fThresholdMv= fConfig.GetEntryList<int64_t>("cfd", "Threshold", 20,
                                                 fChannels.empty() ? 1 : fChannels.size());
@@ -143,10 +155,30 @@ void CFD::Validate()
             exit(1);
         }
 
-    if( fMajority < 1 || fMajority > 20 )
+    if( fMajority < 1 || fMajority > 16 )
         {
             Log::OutError("[cfd] Majority = " + std::to_string(fMajority) +
-                          " fuori range: ammessi da 1 a 20 (1 = OR). Abort.");
+                          " fuori range: sono i canali in coincidenza, da 1 a 16 (1 = OR). Abort.");
+            exit(1);
+        }
+
+    // Majority ora e' il numero di canali, non il livello della formula del
+    // manuale: chi chiede piu' canali di quelli abilitati non avrebbe mai un
+    // trigger, e la run vuota sembrerebbe solo assenza di eventi. E' il caso
+    // del vecchio "Majority = 6 con cinque ingressi", che con la formula del
+    // manuale faceva una 5 su 5 per sbaglio.
+    if( fMajThrRaw < 0 && fMajority > static_cast<int64_t>(fChannels.size()) )
+        {
+            Log::OutError("[cfd] Majority = " + std::to_string(fMajority) + " ma gli ingressi "
+                          "abilitati sono " + std::to_string(fChannels.size()) + ": il trigger "
+                          "non arriverebbe mai. Majority e' il numero di canali in coincidenza "
+                          "(non piu' il livello della formula del manuale). Abort.");
+            exit(1);
+        }
+
+    if( fMajThrRaw > 255 )
+        {
+            Log::OutError("[cfd] MajorityThreshold e' il valore grezzo del registro, da 0 a 255. Abort.");
             exit(1);
         }
 }
@@ -255,11 +287,45 @@ void CFD::Configure()
     Write16( REG_DEADTIME_0_7,  static_cast<uint16_t>(fDeadTime),   "tempo morto ch0-7" );
     Write16( REG_DEADTIME_8_15, static_cast<uint16_t>(fDeadTime),   "tempo morto ch8-15" );
 
-    // MAJTHR = NINT[(MAJLEV*50 - 25)/4]  (manuale §3.7)
-    const uint16_t majthr =
-        static_cast<uint16_t>( std::lround( (fMajority * 50.0 - 25.0) / 4.0 ) );
-    Write16( REG_MAJORITY, majthr, "soglia di maggioranza (livello " +
-                                   std::to_string(fMajority) + ")" );
+    // Soglia di maggioranza. Il modulo confronta la somma S (una corrente per
+    // canale sopra soglia) con 4 mV x il valore del registro. Il manuale
+    // (§4.11) assume 50 mV per canale e mette il livello N a 50N - 25 mV, ma
+    // misurato il 2026-10-27 (run 0050, measurements/v812_majthr_20261027.json)
+    // la somma vale ~55 mV x canali + ~17 mV: con la formula del manuale il
+    // livello 3 scatta gia' con due canali, il 4 con tre. La soglia va quindi a
+    // META' fra la somma di N-1 e quella di N canali secondo la misura. Misurati
+    // solo i bordi a 1, 2 e 3 canali; da 4 in su e' un'estrapolazione.
+    auto somma = [this]( double k ) { return fSumMvPerCh * k + fSumOffsetMv; };
+    const double meta = 0.5 * ( somma(fMajority - 1) + somma(fMajority) );
+    const uint16_t majthr = static_cast<uint16_t>(
+        fMajThrRaw >= 0 ? fMajThrRaw : std::lround( meta / 4.0 ) );
+    const double thrMv = 4.0 * majthr;
+
+    // Quanti canali servono davvero con la soglia scritta, secondo la misura:
+    // vale anche per una soglia grezza imposta a mano.
+    int richiesti = 0;
+    while( somma(richiesti) <= thrMv && richiesti < 17 ) richiesti++;
+    const double margine = std::min( thrMv - somma(richiesti - 1), somma(richiesti) - thrMv );
+
+    std::ostringstream nota;
+    nota << std::fixed << std::setprecision(0)
+         << "soglia grezza " << majthr << " = " << thrMv << " mV; somma attesa "
+         << somma(richiesti - 1) << " mV con " << (richiesti - 1) << " canali, "
+         << somma(richiesti) << " con " << richiesti << ", margine " << margine << " mV";
+    Write16( REG_MAJORITY, majthr, "soglia di maggioranza (" + std::to_string(richiesti) +
+                                   " canali; " + nota.str() + ")" );
+    if( fMajThrRaw >= 0 && richiesti != fMajority )
+        Log::OutWarning("→ CFD V812: MajorityThreshold = " + std::to_string(fMajThrRaw) +
+                        " richiede " + std::to_string(richiesti) + " canali, non i " +
+                        std::to_string(fMajority) + " di Majority: vale la soglia grezza.");
+    if( richiesti > 3 )
+        Log::OutWarning("→ CFD V812: la somma per " + std::to_string(richiesti) + " canali e' "
+                        "estrapolata (misurati solo i bordi fino a 3): verificare con una run "
+                        "breve contando i canali con l'impulso.");
+    if( margine < 10.0 )
+        Log::OutWarning("→ CFD V812: soglia di maggioranza a meno di 10 mV da un bordo: "
+                        "la coincidenza puo' scattare con un canale in piu' o in meno.");
+    fMajority = richiesti;   // quello che va nel riepilogo e nell'e-log
 
     std::ostringstream canali;
     for( size_t i=0; i<fChannels.size(); i++ )
@@ -268,7 +334,7 @@ void CFD::Configure()
     Log::OutSummary("→ CFD V812 configurato: " + canali.str());
     Log::OutSummary("→ CFD V812: inibizione " + Hex(inibizione, 4) + ", larghezza " +
                     std::to_string(fWidth) + ", tempo morto " + std::to_string(fDeadTime) +
-                    " (conteggi), maggioranza " + std::to_string(fMajority));
+                    " (conteggi), maggioranza " + std::to_string(fMajority) + " (" + nota.str() + ")");
     Log::OutSummary("→ CFD V812: i registri sono write-only, quindi questi valori sono quelli "
                     "scritti, non riletti dal modulo.");
 }

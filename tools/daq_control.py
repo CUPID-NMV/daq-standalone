@@ -156,7 +156,7 @@ CAMPI = [
     ("cfd", "Channels",  "CFD inputs used",     "lista", (0, 15)),
     ("cfd", "Width",     "output width [counts]", "intero", (0, 255)),
     ("cfd", "DeadTime",  "dead time [counts]",    "intero", (0, 255)),
-    ("cfd", "Majority",  "majority (1 = OR)", "intero", (1, 20)),
+    ("cfd", "Majority",  "channels in coincidence (1 = OR)", "intero", (1, 16)),
 
     ("settings", "verbosity", "on-screen verbosity", "intero", (0, 4)),
 ]

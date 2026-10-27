@@ -3018,7 +3018,7 @@ def _assi_carica(ax):
     """In ADC*ns le cariche hanno cinque o sei cifre e le etichette dell'asse
     si accavallavano: meno tacche, e le migliaia scritte "40k". Non un x10^n
     in fondo all'asse, che finiva sopra l'etichetta."""
-    ax.xaxis.set_major_locator(MaxNLocator(4))
+    ax.xaxis.set_major_locator(MaxNLocator(3))
     lo, hi = ax.get_xlim()
     if max(abs(lo), abs(hi)) >= 1e4:
         ax.xaxis.set_major_formatter(FuncFormatter(lambda x, _: "%gk" % (x / 1000.0)))

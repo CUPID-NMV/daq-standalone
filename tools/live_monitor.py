@@ -71,7 +71,7 @@ class Impostazioni:
         # che nessuno vedeva, e il range della carica sembrava non funzionare.
         "wfx": "scala",       # scala x delle forme d'onda [ns]
         "wfy": "scala",       # scala y delle forme d'onda [ADC]
-        "qx": "scala",        # scala x della carica [pC]
+        "qx": "scala",        # scala x della carica, nell'unita' scelta
         "qbin": "intero",     # intervalli dell'istogramma di carica
         "qlog": "booleano",   # scala logaritmica della carica
     }
@@ -152,9 +152,31 @@ class Impostazioni:
                 self.dati.pop(str(int(ch)), None)
         self._salva()
 
+    # Unita' degli spettri di carica, UNA per tutto il monitor e salvata con
+    # le altre impostazioni: le scale "qx" dei canali sono scritte in
+    # quell'unita', e con un'unita' scelta da ciascun browser la stessa scala
+    # varrebbe pC per uno e ADC*ns per l'altro.
+    UNITA = ("pC", "ADC\u00b7ns")
+
+    def unita(self):
+        u = self.dati.get("_unita")
+        return u if u in self.UNITA else "pC"
+
+    def imposta_unita(self, nuova, rapporto):
+        """Cambia unita' e riscrive le scale qx gia' fissate (x rapporto),
+        cosi' che il grafico mostri lo stesso tratto di spettro."""
+        if nuova not in self.UNITA:
+            raise ValueError("unit must be one of " + ", ".join(self.UNITA))
+        for k, v in self.dati.items():
+            if k != "_unita" and isinstance(v, dict) and v.get("qx"):
+                v["qx"] = [None if x is None else x * rapporto for x in v["qx"]]
+        self.dati["_unita"] = nuova
+        self._salva()
+
     def azzera(self, ch=None):
         if ch is None:
-            self.dati = {}
+            # L'unita' non e' un'impostazione di canale: resta.
+            self.dati = {k: v for k, v in self.dati.items() if k == "_unita"}
         else:
             self.dati.pop(str(int(ch)), None)
         self._salva()
@@ -172,6 +194,18 @@ class Monitor:
     # VPERS1742. L'ADC e' a 12 bit, quindi il passo in mV segue da qui.
     def mv_per_count(self):
         return 1000.0 * self.vpp / 4096.0
+
+    def unita_carica(self, u=None):
+        """Unita' degli spettri di carica e fattore che la ricava dai pC.
+
+        Le cariche si accumulano sempre in pC e si convertono solo nel
+        disegno: cambiare unita' non deve azzerare la statistica della run.
+        ADC*ns e' l'integrale come lo vede il digitizer, somma dei conteggi
+        per il passo di campionamento, senza le due ipotesi dei pC (1 Vpp
+        esatti su 4096 conteggi e 50 ohm esatti): 1 pC = 204.8 ADC*ns.
+        """
+        u = u or self.imp.unita()
+        return u, (50.0 / self.mv_per_count() if u != "pC" else 1.0)
 
     # Il primo percentile su poche centinaia di eventi e' di fatto il secondo
     # valore piu' piccolo e fluttua di +-8 conteggi fra un aggiornamento e
@@ -1450,6 +1484,9 @@ class Monitor:
         else:
             fig, ax = plt.subplots(figsize=(w_in, 1.45 * k))
             v = dep["val"].get(ch)
+            unita, fq = self.unita_carica()
+            if v is not None:
+                v = v * fq
             if v is None or not len(v):
                 ax.text(.5, .5, "no charges yet", ha="center", va="center",
                         transform=ax.transAxes, color="#888", fontsize=8)
@@ -1462,7 +1499,7 @@ class Monitor:
                 ax.set_xlim(lo, hi)
                 if imp["qlog"] is None or imp["qlog"]:
                     ax.set_yscale("log")
-                ax.set_xlabel("pC", fontsize=7, labelpad=1)
+                ax.set_xlabel(unita, fontsize=7, labelpad=1)
         ax.tick_params(labelsize=6, pad=1)
         ax.grid(alpha=0.25)
         fig.tight_layout(pad=0.25)
@@ -1511,6 +1548,7 @@ class Monitor:
                 "ped_da": (getattr(self, "ped_origine", None) or [""] * len(channels))[j],
                 "set": self.imp.di(c),
             }
+        fuori["_unita"] = self.imp.unita()
         return fuori
 
     # Moltiplicatore delle figure. La dimensione giusta dipende dallo schermo
@@ -1805,11 +1843,14 @@ class Monitor:
                 if kind == "muro_car":
                     carica, a_i, b_i, nscamp, k_pc, dep = self._carica(
                         corr, t_ns, gate, channels, gates_ch)
-                    etich = "charge [pC]"
+                    unita, fq = self.unita_carica()
+                    etich = "charge [%s]" % unita
                 else:
                     dep = self.accumula("ampiezze", q, channels, self.gen)
                     etich = "amplitude [offset units]"
-                dati = {int(c): dep["val"].get(int(c)) for c in canali_dis}
+                    fq = 1.0
+                dati = {int(c): (None if dep["val"].get(int(c)) is None
+                                 else dep["val"][int(c)] * fq) for c in canali_dis}
                 # Intervalli comuni DENTRO ogni gruppo di canali con lo stesso
                 # verso: con PMT e SiPM sulla stessa scheda le cariche
                 # differiscono di 30-60 volte (2026-10-16: ~15 pC contro
@@ -1874,6 +1915,7 @@ class Monitor:
         elif kind == "integrals":
             carica, a_i, b_i, nscamp, k_pc, dep_q = self._carica(corr, t_ns, gate,
                                                                  channels, gates_ch)
+            unita, fq = self.unita_carica()
 
             # Piu' alto degli altri pannelli: sotto gli assi ci vanno
             # etichetta, legenda e il pie' di pagina, e con 3.4 pollici il
@@ -1892,6 +1934,7 @@ class Monitor:
                 val = dep_q["val"].get(int(ch))
                 if val is None or val.size == 0:
                     val = carica[:, i]
+                val = val * fq
                 xlo, xhi, logy, nbin = (qset or {}).get(
                     int(ch), (None, None, False, None))
 
@@ -1948,9 +1991,9 @@ class Monitor:
                 # linea di base e non rumore, e va stretto.
                 sparso = 1.4826 * float(np.median(np.abs(val - med)))
                 rms = float(np.median(noise[:, i]))
-                bianco = rms * np.sqrt(nscamp[i]) * k_pc
+                bianco = rms * np.sqrt(nscamp[i]) * k_pc * fq
 
-                ax.set_title("ch%s \u2014 median %.2f pC" % (ch, med),
+                ax.set_title("ch%s \u2014 median %s %s" % (ch, _q(med), unita),
                              fontsize=10, pad=16)
                 # Il cancello di QUESTO canale: con un cancello per canale il
                 # pie' di pagina non puo' dirlo per tutti.
@@ -1959,16 +2002,16 @@ class Monitor:
                     {"auto": " (auto)", "manual": " (set)"}.get(
                         (self.gate_origine or [""] * (i + 1))[i], ""))
                 ax.text(0.5, 1.02,
-                        ("%s \u00b7 spread %.1f \u00b7 floor %.1f pC"
-                         % (gate_txt, sparso, bianco)) if dettagli
-                        else ("%s \u00b7 spread %.1f pC" % (gate_txt, sparso)),
+                        ("%s \u00b7 spread %s \u00b7 floor %s %s"
+                         % (gate_txt, _q(sparso), _q(bianco), unita)) if dettagli
+                        else ("%s \u00b7 spread %s %s" % (gate_txt, _q(sparso), unita)),
                         transform=ax.transAxes, ha="center", va="bottom",
                         fontsize=7.5,
                         color="#1a6b1a" if abs(med) > 3 * sparso else "#d62728")
 
                 if logy:
                     ax.set_yscale("log")
-                ax.set_xlabel("charge [pC]")
+                ax.set_xlabel("charge [%s]" % unita)
                 ax.set_ylabel("events" + (" (log)" if logy else ""))
                 ax.grid(alpha=0.25)
 
@@ -2000,8 +2043,10 @@ class Monitor:
                     t_ns[a_i[0]], t_ns[b_i[0] - 1], nscamp[0])
             else:
                 testo_gate = "gate per channel, in each title"
-            righe_pie = ["50 \u03a9   \u00b7   %s   \u00b7   %s pulses"
-                         % (testo_gate, self._descrivi_segni()),
+            righe_pie = [("50 \u03a9   \u00b7   " if unita == "pC" else
+                          "%.3f mV/ADC \u00b7 %.3f ns/sample   \u00b7   "
+                          % (self.mv_per_count(), t_ns[1] - t_ns[0]))
+                         + "%s   \u00b7   %s pulses" % (testo_gate, self._descrivi_segni()),
                          ("baseline per channel, ending 20 ns before its pulse, per event"
                           if self.base_auto else
                           (("baseline from %.0f-%.0f ns (%d samples), per event"
@@ -2378,6 +2423,11 @@ PAGE = """<!DOCTYPE html>
   <label class="chk" title="gate, baseline window, calibration, noise floor and the
 set-up warnings. Off during a run, on when you need to know with which numbers a plot was made.">
     <input type="checkbox" id="det"> details</label>
+  <label title="unit of the charge spectra, the same for everyone who opens the monitor.
+pC = integral / 50 ohm, assumes exactly 1 Vpp on 4096 counts.
+ADC&middot;ns = sum of the counts times the sampling period, no assumption (1 pC = 204.8 ADC&middot;ns).
+Changing it does not reset the accumulated spectra.">charge in<select id="qunit" style="font:13px inherit;padding:5px 7px">
+    <option>pC</option><option>ADC&middot;ns</option></select></label>
   <button id="azzera" title="discards the events already acquired and starts from now">Reset data</button>
 </div>
 <div id="boot" class="err">JavaScript did not run: the page cannot update.
@@ -2409,7 +2459,7 @@ Open the browser console to see the error.</div>
     <tr><td class="k">baseline [ns]</td><td><input id="pp0"> &ndash; <input id="pp1"></td></tr>
     <tr><td class="k">waveform x [ns]</td><td><input id="px0" placeholder="auto"> &ndash; <input id="px1" placeholder="auto"></td></tr>
     <tr><td class="k">waveform y [ADC]</td><td><input id="py0" placeholder="auto"> &ndash; <input id="py1" placeholder="auto"></td></tr>
-    <tr><td class="k">charge x [pC]</td><td><input id="pq0" placeholder="auto"> &ndash; <input id="pq1" placeholder="auto"></td></tr>
+    <tr><td class="k">charge x [<span class="qu">pC</span>]</td><td><input id="pq0" placeholder="auto"> &ndash; <input id="pq1" placeholder="auto"></td></tr>
     <tr><td class="k">charge bins</td><td><input id="pqb" placeholder="50"> &nbsp;
       <label><input type="checkbox" id="pql" style="width:auto"> log y</label></td></tr>
   </table>
@@ -2656,7 +2706,7 @@ function aggiornaInfo() {
     const st = u.set || {};
     if (st.wfx) pezzi.push('wf x ' + coppia(st.wfx));
     if (st.wfy) pezzi.push('wf y ' + coppia(st.wfy));
-    if (st.qx) pezzi.push('charge ' + coppia(st.qx) + ' pC');
+    if (st.qx) pezzi.push('charge ' + coppia(st.qx) + ' ' + (IMP._unita || 'pC'));
     sc.querySelector('.info').innerHTML = pezzi.filter(x => x).join(' &middot; ');
   });
 }
@@ -2839,6 +2889,11 @@ async function giro() {
       IMP = await (await fetch('impostazioni.json', {cache: 'no-store'})).json();
     } catch (e) {}
     aggiornaInfo();
+    if (IMP._unita) {
+      const sel = document.getElementById('qunit');
+      if (document.activeElement !== sel) sel.value = IMP._unita;
+      document.querySelectorAll('.qu').forEach(e => { e.textContent = IMP._unita; });
+    }
 
     const p = params();
     p.set('t', Date.now());
@@ -2884,6 +2939,15 @@ try {
     document.getElementById('det').checked = true;
 } catch (e) {}
 document.getElementById('det').addEventListener('change', tick);
+document.getElementById('qunit').addEventListener('change', async ev => {
+  const q = new URLSearchParams({azione: 'unita', u: ev.target.value});
+  try {
+    await fetch('imposta?' + q.toString(), {cache: 'no-store'});
+  } catch (e) {}
+  // Tutte le immagini, non solo le schede: anche lo spettro grande e il muro.
+  document.querySelectorAll('img').forEach(im => { im.dataset.t = ''; });
+  tick();
+});
 try {
   if (localStorage.getItem('daqmon.ezoom') === '1')
     document.getElementById('ezoom').checked = true;
@@ -2945,6 +3009,13 @@ MURO_MX, MURO_MY = 0.012, 0.030      # margini laterali e in basso
 MURO_TOP = 0.90         # sotto il titolo
 MURO_GX, MURO_GY = 0.012, 0.055      # spazio fra le celle
 MURO_CELLA_MAX = 300    # lato massimo di una cella quadrata, in pixel
+
+
+def _q(x):
+    """Una carica scritta con le cifre che servono: 0.53 pC e 184320 ADC*ns
+    con lo stesso formato darebbero 0.53 e 184320.00, o 1 e 184320."""
+    a = abs(x)
+    return "%.0f" % x if a >= 1000 else "%.1f" % x if a >= 10 else "%.2f" % x
 
 
 def _estremi_utili(valori, xlo, xhi, taglio=0.3):
@@ -3107,6 +3178,12 @@ def make_handler(monitor, refresh, defaults):
                             a = [int(x) for x in qs.get("a", [""])[0].replace(" ", ",").split(",") if x]
                             monitor.imp.copia(da, a)
                             msg = "settings of ch%d copied to %s" % (da, ", ".join("ch%d" % c for c in a))
+                        elif azione == "unita":
+                            nuova = qs.get("u", ["pC"])[0]
+                            _, f_vecchio = monitor.unita_carica()
+                            _, f_nuovo = monitor.unita_carica(nuova)
+                            monitor.imp.imposta_unita(nuova, f_nuovo / f_vecchio)
+                            msg = "charge spectra in " + nuova
                         elif azione == "azzera":
                             ch = qs.get("ch", ["all"])[0]
                             monitor.imp.azzera(None if ch == "all" else int(ch))

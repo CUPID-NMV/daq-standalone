@@ -307,11 +307,18 @@ SiPM a -30 mV, `Width = 255`, run da 38 s 0045-0047): `Majority = 2` 1808
 eventi, `3` 1730, `4` **17** (che con tre ingressi dovrebbe dare zero). Nella
 0047 il 97% degli eventi ha solo due canali sopra 30 mV e il terzo piatto
 (4 mV in mediana su tutta la traccia); nella 0045 tutti e 17 ne hanno tre.
-Registri scritti secondo la formula del manuale (0x13, 0x1F, 0x2C). I numeri
-tornano se ogni uscita pesa nella somma fra ~62 e ~76 mV invece dei 50 del
-manuale, ma non e' misurato. **Per una coincidenza a N si scrive N+1**, e va
-verificato ogni volta con una run da 30 s guardando quanti canali hanno
-l'impulso.
+Registri scritti secondo la formula del manuale (0x13, 0x1F, 0x2C).
+**Misurato lo stesso giorno** (run 0050, `measurements/v812_majthr_20261027.json`):
+scrivendo valori grezzi nel registro 0x48 a run aperta, con la molteplicita'
+contata evento per evento, i bordi stanno a 68-72 mV (1 -> 2 canali),
+128-132 (2 -> 3) e 176-184 (3 -> nessuno), in unita' di 4 mV del registro.
+Cioe' **somma ~ 55 mV x canali + ~17 mV**: il peso per canale e' nella
+tolleranza del manuale (+10%), e' lo spostamento di ~17 mV che porta il
+livello N della formula (50N - 25) sotto il bordo di N-1 canali. I bordi
+sono netti (un passo di registro). Per 4 e 5 canali l'estrapolazione da'
+~237 e ~292 mV: per una 5 su 5 il valore grezzo ~66 (264 mV), da verificare
+con un impulsatore su tutti gli ingressi. Il registro grezzo lo scrive
+`/tmp/majthr.c` sul PC DAQ; la DAQ per ora scrive solo la formula.
 
 Corollario generale: **prima di dare la colpa al software, guardare cosa e'
 cambiato al banco.** Qui lavorano piu' persone sulla stessa catena.

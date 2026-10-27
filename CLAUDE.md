@@ -318,7 +318,18 @@ livello N della formula (50N - 25) sotto il bordo di N-1 canali. I bordi
 sono netti (un passo di registro). Per 4 e 5 canali l'estrapolazione da'
 ~237 e ~292 mV: per una 5 su 5 il valore grezzo ~66 (264 mV), da verificare
 con un impulsatore su tutti gli ingressi. Il registro grezzo lo scrive
-`/tmp/majthr.c` sul PC DAQ; la DAQ per ora scrive solo la formula.
+`/tmp/majthr.c` sul PC DAQ.
+
+**Dal 2026-10-27 (commit 5f2aa7f, installato) `Majority` e' il NUMERO DI
+CANALI in coincidenza**, non piu' il livello della formula: la DAQ mette la
+soglia a meta' fra la somma di N-1 e di N canali secondo la misura, e il log
+scrive soglia, somme attese e margine. Verificato con tre ingressi: 2 -> 1803
+coppie + 59 triple, 3 -> 14 triple su 14 (run 0051-0052). `Majority` maggiore
+degli ingressi abilitati ferma la DAQ (il vecchio "6 con cinque ingressi").
+`MajorityThreshold` (grezza) scavalca il calcolo; `MajoritySumMvPerChannel` e
+`MajoritySumOffsetMv` cambiano la calibrazione. Le run fino alla 0050 vanno
+lette col livello del manuale: "maggioranza N" nel log voleva dire N-1 canali
+per N >= 3.
 
 Corollario generale: **prima di dare la colpa al software, guardare cosa e'
 cambiato al banco.** Qui lavorano piu' persone sulla stessa catena.

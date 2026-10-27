@@ -9,7 +9,9 @@ le credenziali (il Mac), perche' una chiave di servizio non va copiata in giro.
 
 Due fogli, e la separazione e' il punto:
 
-  runs_auto   riscritto da zero a ogni giro. Solo roba che la DAQ sa.
+  runs_auto   una riga per run, solo roba che la DAQ sa. Le run del CSV si
+              aggiornano, le altre restano: il CSV puo' contenere solo le
+              ultime N run.
   elog        le colonne a mano -- scopo, sorgente, setup, esito, note -- piu'
               i dati richiamati per nome della run.
 
@@ -60,15 +62,36 @@ def main():
     if len(righe) < 2:
         sys.exit("il CSV e' vuoto")
 
-    # --- 1. runs_auto: riscritto per intero ---------------------------------
+    # --- 1. runs_auto: le run del CSV si aggiornano, le altre RESTANO ---------
+    # Il controllore versa solo le ultime 20 run a ogni fine run. Riscrivendo
+    # il foglio da zero, le run piu' vecchie sparivano da runs_auto e nell'e-log
+    # i loro dati richiamati per nome restavano vuoti, finche' qualcuno non
+    # lanciava un sync completo. Il CSV dice quali run AGGIORNARE, non quali
+    # devono esistere.
     try:
         ws = sh.worksheet("runs_auto")
-        ws.clear()
+        vecchie = ws.get_all_values()
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title="runs_auto", rows=len(righe) + 500,
                               cols=len(righe[0]) + 2)
+        vecchie = []
+    intest = righe[0]
+    tutte = {}
+    if len(vecchie) > 1:
+        # Per nome di colonna: se elog.py guadagna una colonna, le run vecchie
+        # restano al loro posto con la casella nuova vuota.
+        vint = vecchie[0]
+        for r in vecchie[1:]:
+            if r and r[0]:
+                tutte[r[0]] = [r[vint.index(c)] if c in vint and vint.index(c) < len(r) else ""
+                               for c in intest]
+    for r in righe[1:]:
+        tutte[r[0]] = r
+    ordinate = sorted(tutte.values(), key=lambda r: (r[1], r[2], r[0]))
+    righe = [intest] + ordinate
     if ws.row_count < len(righe) + 10:
         ws.add_rows(len(righe) + 100 - ws.row_count)
+    ws.clear()
     ws.update(values=righe, range_name="A1")
     ws.freeze(rows=1)
 

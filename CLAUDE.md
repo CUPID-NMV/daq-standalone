@@ -302,6 +302,17 @@ sono quelli del manuale (soglie `0x00+2n`, maggioranza `0x48`, inibizione
 il modulo risponde -- si fa riconoscere dal codice fisso `0xFAF5` e **alle
 soglie obbedisce**, come mostra qualunque scan in soglia.
 
+**Il livello 3 si comporta come 2** (2026-10-27, LNGS, tre ingressi attivi,
+SiPM a -30 mV, `Width = 255`, run da 38 s 0045-0047): `Majority = 2` 1808
+eventi, `3` 1730, `4` **17** (che con tre ingressi dovrebbe dare zero). Nella
+0047 il 97% degli eventi ha solo due canali sopra 30 mV e il terzo piatto
+(4 mV in mediana su tutta la traccia); nella 0045 tutti e 17 ne hanno tre.
+Registri scritti secondo la formula del manuale (0x13, 0x1F, 0x2C). I numeri
+tornano se ogni uscita pesa nella somma fra ~62 e ~76 mV invece dei 50 del
+manuale, ma non e' misurato. **Per una coincidenza a N si scrive N+1**, e va
+verificato ogni volta con una run da 30 s guardando quanti canali hanno
+l'impulso.
+
 Corollario generale: **prima di dare la colpa al software, guardare cosa e'
 cambiato al banco.** Qui lavorano piu' persone sulla stessa catena.
 

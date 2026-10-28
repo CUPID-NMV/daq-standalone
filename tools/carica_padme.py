@@ -3,6 +3,7 @@
 cella del DRS4 presa dalla run stessa.
 
     python3 tools/carica_padme.py data/LNGS/LNGS__54-0V_0011_750Ms_55PT.h5.gz
+    python3 tools/carica_padme.py RUN.h5.gz --ped 0 150 --gate 240 500
     python3 tools/carica_padme.py RUN.h5.gz --canali 20 21 --cancello 20 590 640
 
 Carica in ADC*ns: somma dei campioni meno il piedistallo dell'evento, per il
@@ -165,7 +166,13 @@ def main():
     ap.add_argument("-n", "--max-eventi", type=int, default=0, help="0 = tutti (di serie)")
     ap.add_argument("--cancello", type=float, nargs=3, action="append", default=[],
                     metavar=("CH", "DA_NS", "A_NS"),
-                    help="cancello scritto a mano per un canale; ripetibile")
+                    help="cancello scritto a mano per un canale; ripetibile, vince su --gate")
+    ap.add_argument("--gate", type=float, nargs=2, metavar=("DA_NS", "A_NS"),
+                    help="cancello per tutti i canali (di serie automatico)")
+    ap.add_argument("--ped", type=float, nargs=2, metavar=("DA_NS", "A_NS"),
+                    help="finestra del piedistallo per tutti i canali, che e' anche quella "
+                         "da cui si prende la tabella PADME (di serie da 10 ns a 20 ns "
+                         "prima del cancello)")
     ap.add_argument("--out", default=None,
                     help="prefisso dei file di uscita (di serie measurements/carica_<run>)")
     a = ap.parse_args()
@@ -194,12 +201,13 @@ def main():
 
         # Primo giro sui dati grezzi solo per sapere dove sta l'impulso, e
         # quindi quali campioni possono entrare nella tabella.
-        canc = a_mano.get(ch) or finestre(y, segno, t_ns)
+        canc = a_mano.get(ch) or (tuple(a.gate) if a.gate else None) or finestre(y, segno, t_ns)
         if canc is None:
             print("ch%d: nessun impulso riconoscibile nella forma d'onda media; "
                   "dare il cancello con --cancello %d DA A" % (ch, ch))
             continue
-        pi = indici_ped(t_ns, canc)
+        pi = ((int(np.searchsorted(t_ns, a.ped[0])), int(np.searchsorted(t_ns, a.ped[1])))
+              if a.ped else indici_ped(t_ns, canc))
         if pi[1] - pi[0] < MIN_CAMPIONI_PED:
             print("ch%d: cancello a %.0f ns, troppo presto per un piedistallo prima" % (ch, canc[0]))
             continue
@@ -208,9 +216,10 @@ def main():
         yp = y - tab[celle]
 
         # Secondo giro sui dati corretti: e' su quelli che si fa la carica.
-        if ch not in a_mano:
+        if ch not in a_mano and not a.gate:
             canc = finestre(yp, segno, t_ns) or canc
-            pi = indici_ped(t_ns, canc)
+            if not a.ped:
+                pi = indici_ped(t_ns, canc)
         gi = (int(np.searchsorted(t_ns, canc[0])), int(np.searchsorted(t_ns, canc[1])))
         # A vuoto: la finestra all'inizio del tratto di piedistallo, il
         # piedistallo da quello che resta dopo. Separati, come nella carica

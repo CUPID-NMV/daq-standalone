@@ -574,6 +574,15 @@ Nello stesso crate, dietro lo stesso bridge V4718:
   Time Tag conta a ~17.07 ns, non agli 8.5 ns del datasheet**: misurato il
   2026-10-23 su 5461 trigger software in 27.84 s (intervallo medio 298755
   conteggi = 5.098 ms). Con 30 bit fa un giro ogni ~18 s.
+- **Il clock in daisy chain non aggancia senza un file di CAEN** (2026-10-28,
+  CLK-OUT della 51639 sul CLK-IN della 202): la 202 resta 0x8104 = 0x420
+  (clock esterno, PLL sganciato, non pronta), la 51639 0x580. Dal manuale
+  UM4279 §9.5 e §9.10: il CLK-OUT del master porta **58.594 MHz**, mentre il
+  PLL di una scheda con la configurazione di fabbrica, su EXT, si aspetta
+  **50 MHz**; lo slave va riprogrammato con un file del PLL che CAEN manda su
+  richiesta (si carica con CAENUpgrader, che sul PC c'e'). Sul PC non c'e'
+  nessun file del PLL. Senza quel file, la 202 acquisisce solo col
+  commutatore SW2 su INT, cioe' con clock indipendenti.
 - **Stato al 2026-10-20**: fase 1 (C++) committata e provata sulla scheda
   SiPM, **non installata in `build/`**. La scheda PMT risponde ma non
   acquisisce (reset in timeout, buffer non allocabile; registri: clock

@@ -583,6 +583,17 @@ Nello stesso crate, dietro lo stesso bridge V4718:
   richiesta (si carica con CAENUpgrader, che sul PC c'e'). Sul PC non c'e'
   nessun file del PLL. Senza quel file, la 202 acquisisce solo col
   commutatore SW2 su INT, cioe' con clock indipendenti.
+- **La 202 non aggancia il PLL nemmeno col clock INTERNO** (2026-10-28,
+  SW2 messo su INT dall'utente): 0x8104 = 0x400 (bit 5 = 0, interno; bit 7 =
+  0 anche dopo il riarmo con la lettura di 0xEF04; bit 8 = 0, non pronta),
+  contro 0x580 della 51639. Aperta dalla DAQ: reset all'avvio fallito e
+  "Cannot allocate readout buffer", come a Frascati. Stesso firmware della
+  51639 (ROC 04.30, AMC 01.08), che con lo stesso TOML acquisisce 200 eventi
+  su 200: il guasto e' della scheda, non del bridge ne' del codice. Ipotesi
+  non verificate: configurazione del PLL non di serie nella flash (per
+  esempio da slave a 58.594 MHz), o guasto. Da chiedere a CAEN.
+  NB: il bit 4 di 0x8178 (perdita del PLL) vale 0x14 su TUTTE e due le
+  schede dopo l'accensione, quindi non distingue niente.
 - **Stato al 2026-10-20**: fase 1 (C++) committata e provata sulla scheda
   SiPM, **non installata in `build/`**. La scheda PMT risponde ma non
   acquisisce (reset in timeout, buffer non allocabile; registri: clock

@@ -190,13 +190,15 @@ def main():
                     help="finestra del piedistallo per tutti i canali, che e' anche quella "
                          "da cui si prende la tabella PADME (di serie da 10 ns a 20 ns "
                          "prima del cancello)")
-    ap.add_argument("--padme", choices=("testbeam", "piedistallo"), default="testbeam",
-                    help="ricetta della tabella PADME (vedi sopra; di serie testbeam)")
+    ap.add_argument("--padme", choices=("testbeam", "piedistallo", "nessuna"), default="testbeam",
+                    help="ricetta della tabella PADME (vedi sopra; di serie testbeam). 'nessuna' "
+                         "per i file senza SIC (formato fino al 2, run fino al 2026-10-20)")
     ap.add_argument("--out", default=None,
                     help="prefisso dei file di uscita (di serie measurements/carica_<run>)")
     a = ap.parse_args()
 
-    hdr, canali, dati, sic = padme.leggi(a.file, a.canali, a.max_eventi or None)
+    hdr, canali, dati, sic = padme.leggi(a.file, a.canali, a.max_eventi or None,
+                                         serve_sic=(a.padme != "nessuna"))
     run = efficienza.nome_run(a.file)
     ns = dati.shape[2]
     dt = 1000.0 / float(str(hdr.get("SamplingRate", "750")).rstrip("MHzmhz") or 750)
@@ -212,8 +214,8 @@ def main():
     for j, ch in enumerate(canali):
         segno = versi.get(ch, 1) if isinstance(versi, dict) else (versi or 1)
         g = ch // CANALI_PER_GRUPPO
-        s = sic[:, g]
-        if np.any(s > N_CELLE - 1):
+        s = sic[:, g] if sic is not None else None
+        if s is not None and np.any(s > N_CELLE - 1):
             print("ch%d: gruppo %d senza SIC, salto" % (ch, g))
             continue
         y = dati[:, j, :].astype(np.float32)
@@ -230,9 +232,13 @@ def main():
         if pi[1] - pi[0] < MIN_CAMPIONI_PED:
             print("ch%d: cancello a %.0f ns, troppo presto per un piedistallo prima" % (ch, canc[0]))
             continue
-        tab, conta = tabella_padme(y, s, *pi, ricetta=a.padme)
-        celle = (np.arange(ns)[None, :] + s[:, None]) % N_CELLE
-        yp = y - tab[celle]
+        if a.padme == "nessuna":
+            tab, conta = np.zeros(N_CELLE), np.zeros(N_CELLE, dtype=int)
+            yp = y
+        else:
+            tab, conta = tabella_padme(y, s, *pi, ricetta=a.padme)
+            celle = (np.arange(ns)[None, :] + s[:, None]) % N_CELLE
+            yp = y - tab[celle]
 
         # Secondo giro sui dati corretti: e' su quelli che si fa la carica.
         if ch not in a_mano and not a.gate:

@@ -57,15 +57,16 @@ MV_PER_CONTEGGIO = efficienza.MV_PER_CONTEGGIO
 EVENTI_DI_SERIE = 20000
 
 
-def leggi(path, canali, n_max):
+def leggi(path, canali, n_max, serve_sic=True):
     """Forme d'onda (int16, eventi x canali x campioni), SIC (eventi x 4) e
     header. Si legge con h5py invece che con daqio.load perche' serve
     /events/start_index_cell, e perche' 20000 eventi in float64 sono un
-    giga di memoria per niente."""
+    giga di memoria per niente. Con serve_sic=False un file senza SIC
+    (formato fino al 2) si legge lo stesso, e la SIC torna None."""
     f, tmp = daqio.open_file(path)
     try:
         hdr = daqio.read_header(f)
-        if "/events/start_index_cell" not in f:
+        if "/events/start_index_cell" not in f and serve_sic:
             sys.exit("Errore: il file non ha /events/start_index_cell (formato %s): "
                      "senza SIC la correzione per cella non si puo' fare."
                      % hdr.get("FormatVersion"))
@@ -79,7 +80,8 @@ def leggi(path, canali, n_max):
         n = min(ds.shape[0], n_max) if n_max else ds.shape[0]
         dati = np.stack([np.asarray(ds[:n, tutti.index(c) * ns:(tutti.index(c) + 1) * ns],
                                     dtype=np.int16) for c in voluti], axis=1)
-        sic = np.asarray(f["/events/start_index_cell"][:n], dtype=np.int64)
+        sic = (np.asarray(f["/events/start_index_cell"][:n], dtype=np.int64)
+               if "/events/start_index_cell" in f else None)
     finally:
         f.close()
         daqio._cleanup(tmp)

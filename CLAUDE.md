@@ -331,6 +331,18 @@ degli ingressi abilitati ferma la DAQ (il vecchio "6 con cinque ingressi").
 lette col livello del manuale: "maggioranza N" nel log voleva dire N-1 canali
 per N >= 3.
 
+**Rimisurata il 2026-10-28 con l'uscita S terminata su 50 ohm** (prima era
+aperta; run 0007, `measurements/v812_majthr_20261028.json`, stessi passi):
+bordi a 60-64 mV (1 -> 2), 108-120 (2 -> 3), 160-172 (3 -> nessuno), cioe'
+**somma ~ 52 mV x canali + ~11 mV**, piu' vicina ai 50 del manuale. Che la
+terminazione sposti la somma vuol dire che il ponticello della maggioranza
+e' quasi certamente su External (dedotto, non visto): **S va lasciata
+terminata**, o la calibrazione torna quella vecchia. Verifica diretta sugli
+stessi dati: a 88 mV (soglia nuova per 2 canali) passano solo eventi con 2-3
+canali, a 140 mV (per 3) solo triple. Valori predefiniti della DAQ aggiornati
+a 52 / 11; le soglie calcolate con 55 / 17 selezionavano ancora il numero
+giusto di canali, con margini di 11 mV a 3 e 4 canali e ~7 a 5 invece di 26.
+
 Corollario generale: **prima di dare la colpa al software, guardare cosa e'
 cambiato al banco.** Qui lavorano piu' persone sulla stessa catena.
 

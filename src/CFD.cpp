@@ -36,8 +36,13 @@ CFD::CFD( Config& config, Bridge& bridge )
   , fDeadTime(0)
   , fMajority(1)
   , fMajThrRaw(-1)
-  , fSumMvPerCh(55.0)
-  , fSumOffsetMv(17.0)
+  // Somma S misurata il 2026-10-28 con l'uscita S terminata su 50 ohm
+  // (measurements/v812_majthr_20261028.json). Con S aperta, il 2026-10-27,
+  // era 55 mV per canale + 17: la terminazione sposta la somma, quindi il
+  // ponticello della maggioranza e' quasi certamente su External e S va
+  // lasciata terminata.
+  , fSumMvPerCh(52.0)
+  , fSumOffsetMv(11.0)
 {
     // La sezione e' facoltativa: se manca non si legge nulla e non si avvisa
     // di nulla, altrimenti ogni run senza CFD stamperebbe una pioggia di

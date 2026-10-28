@@ -122,7 +122,7 @@ def sigma_centrale(q):
     return padme.sigma_robusta(q)
 
 
-def grafico(ris, titolo, path, t_ns):
+def grafico(ris, titolo, path, t_ns, con_padme=True):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -154,12 +154,14 @@ def grafico(ris, titolo, path, t_ns):
         bins = np.linspace(lo, hi, 200)
         a.hist(r["v_caen"], bins, histtype="step", color="#aaa", lw=1,
                label="blank %.0f ns, CAEN only  σ = %.0f" % (r["vuoto_ns"], r["sigma_vuoto_caen"]))
-        a.hist(r["v_padme"], bins, histtype="step", color="#555", lw=1,
-               label="blank %.0f ns, + PADME  σ = %.0f" % (r["vuoto_ns"], r["sigma_vuoto_padme"]))
+        if con_padme:
+            a.hist(r["v_padme"], bins, histtype="step", color="#555", lw=1,
+                   label="blank %.0f ns, + PADME  σ = %.0f" % (r["vuoto_ns"], r["sigma_vuoto_padme"]))
         a.hist(r["q_caen"], bins, histtype="step", color="#e8710a", lw=1.2,
                label="gate, CAEN only")
-        a.hist(r["q_padme"], bins, histtype="step", color="#2a6fdb", lw=1.4,
-               label="gate, + PADME")
+        if con_padme:
+            a.hist(r["q_padme"], bins, histtype="step", color="#2a6fdb", lw=1.4,
+                   label="gate, + PADME")
         a.set_yscale("log")
         a.set_xlabel("charge [ADC·ns]   (1 pC = 204.8 ADC·ns)")
         a.set_ylabel("events / bin")
@@ -306,8 +308,10 @@ def main():
                    "canali": {str(c): {k: (list(v) if isinstance(v, tuple) else v)
                                        for k, v in r.items() if not isinstance(v, np.ndarray)}
                               for c, r in ris.items()}}, f, indent=1)
-    grafico(ris, "%s — charge per channel, PADME (%s recipe) from the run itself" % (run, a.padme),
-            pref + ".png", t_ns)
+    grafico(ris, ("%s — charge per channel, PADME (%s recipe) from the run itself" % (run, a.padme)
+                  if a.padme != "nessuna" else
+                  "%s — charge per channel, CAEN correction only (no SIC in the file: no PADME)" % run),
+            pref + ".png", t_ns, con_padme=(a.padme != "nessuna"))
     print("scritti %s.png, .json, .npz" % pref)
 
 

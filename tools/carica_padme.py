@@ -17,14 +17,23 @@ Qui la tabella si prende dalla run stessa e NON da una run a trigger
 software, per decisione dell'utente: le run a trigger software portano
 raffiche agganciate al trigger (CLAUDE.md, 2026-10-26).
 
-Perche' si puo' prendere dalla run stessa: il self-trigger e' asincrono
-rispetto all'anello del DRS4, quindi la SIC gira su tutte le celle e ogni
-cella si vede migliaia di volte. Dalla tabella si escludono i campioni dal
-cancello in poi, perche' l'impulso cade sempre allo stesso indice di
-lettura e, per i PMT amplificati, e' seguito da ~800 ns di coda di verso
-opposto: la mediana regge gli impulsi rari, non uno spostamento sistematico
-di meta' della traccia. Restano i campioni della finestra del piedistallo,
-che e' piu' di un terzo della traccia.
+Due ricette per la tabella, scelte con --padme:
+
+  testbeam   (di serie, decisione dell'utente del 2026-10-28) quella di
+             wclib.py del test beam 2026: mediana per cella su TUTTA la
+             traccia dei primi 1000 eventi della run. Unica differenza: la
+             SIC e' quella del gruppo del canale, non una per scheda (qui i
+             gruppi 0 e 1 non sono letti e la loro SIC vale 65535).
+  piedistallo  mediana per cella dei soli campioni della finestra del
+             piedistallo, su tutti gli eventi: l'impulso cade sempre allo
+             stesso indice di lettura e i PMT amplificati hanno ~800 ns di
+             coda di verso opposto, che la mediana su tutta la traccia vede.
+
+Tutte e due si possono prendere dalla run stessa perche' il self-trigger e'
+asincrono rispetto all'anello del DRS4: la SIC gira su tutte le celle.
+Misurato sulla 0011 (PMT, rms del piedistallo 0-150 ns): solo CAEN 2.21 /
+2.11 conteggi, testbeam 2.04 / 1.99, piedistallo 1.94 / 1.91, con la
+seconda favorita dall'essere misurata dove si e' calibrata.
 
 Cancello e piedistallo sono quelli automatici del monitor (live_monitor.py,
 _finestre_auto): forma d'onda media del 20% di eventi piu' alti, cancello da
@@ -83,8 +92,16 @@ def indici_ped(t_ns, cancello):
     return i0, i1
 
 
-def tabella_padme(y, sic, i0, i1):
-    """Scostamento per cella, in conteggi, dai soli campioni [i0, i1)."""
+EVENTI_TESTBEAM = 1000     # PEDESTAL_CALIB_EVENTS di wclib.py
+
+
+def tabella_padme(y, sic, i0, i1, ricetta="testbeam"):
+    """Scostamento per cella, in conteggi: col metodo del test beam dai primi
+    1000 eventi, tutta la traccia; altrimenti dai soli campioni [i0, i1) di
+    tutti gli eventi. La tabella si tiene a mediana nulla: il livello lo
+    toglie il piedistallo per evento, e per la carica e' lo stesso."""
+    if ricetta == "testbeam":
+        y, sic, i0, i1 = y[:EVENTI_TESTBEAM], sic[:EVENTI_TESTBEAM], 0, y.shape[1]
     k = np.arange(i0, i1)
     cella = (k[None, :] + sic[:, None]) % N_CELLE
     tab, conta = padme.mediana_per_gruppo(cella, y[:, i0:i1], N_CELLE)
@@ -173,6 +190,8 @@ def main():
                     help="finestra del piedistallo per tutti i canali, che e' anche quella "
                          "da cui si prende la tabella PADME (di serie da 10 ns a 20 ns "
                          "prima del cancello)")
+    ap.add_argument("--padme", choices=("testbeam", "piedistallo"), default="testbeam",
+                    help="ricetta della tabella PADME (vedi sopra; di serie testbeam)")
     ap.add_argument("--out", default=None,
                     help="prefisso dei file di uscita (di serie measurements/carica_<run>)")
     a = ap.parse_args()
@@ -185,8 +204,8 @@ def main():
     log = os.path.splitext(a.file[:-3] if a.file.endswith(".gz") else a.file)[0] + ".log"
     versi = efficienza.polarita_dal_log(log)
     a_mano = {int(c): (da, al) for c, da, al in a.cancello}
-    print("%s: %d eventi, %d campioni a %.3f ns, correzione CAEN %s"
-          % (run, dati.shape[0], ns, dt,
+    print("%s: %d eventi, %d campioni a %.3f ns, PADME %s, correzione CAEN %s"
+          % (run, dati.shape[0], ns, dt, a.padme,
              {True: "ACCESA", False: "spenta", None: "sconosciuta"}[padme.correzione_caen(a.file)]))
 
     ris = {}
@@ -211,7 +230,7 @@ def main():
         if pi[1] - pi[0] < MIN_CAMPIONI_PED:
             print("ch%d: cancello a %.0f ns, troppo presto per un piedistallo prima" % (ch, canc[0]))
             continue
-        tab, conta = tabella_padme(y, s, *pi)
+        tab, conta = tabella_padme(y, s, *pi, ricetta=a.padme)
         celle = (np.arange(ns)[None, :] + s[:, None]) % N_CELLE
         yp = y - tab[celle]
 
@@ -273,14 +292,15 @@ def main():
                         **{"q_padme_ch%d" % c: r["q_padme"] for c, r in ris.items()},
                         **{"q_caen_ch%d" % c: r["q_caen"] for c, r in ris.items()},
                         **{"vuoto_padme_ch%d" % c: r["v_padme"] for c, r in ris.items()},
+                        **{"vuoto_caen_ch%d" % c: r["v_caen"] for c, r in ris.items()},
                         **{"tabella_padme_ch%d" % c: r["tabella"] for c, r in ris.items()})
     with open(pref + ".json", "w") as f:
-        json.dump({"file": os.path.abspath(a.file), "run": run, "dt_ns": dt,
+        json.dump({"file": os.path.abspath(a.file), "run": run, "dt_ns": dt, "padme": a.padme,
                    "unita": "ADC*ns (1 pC = 204.8)",
                    "canali": {str(c): {k: (list(v) if isinstance(v, tuple) else v)
                                        for k, v in r.items() if not isinstance(v, np.ndarray)}
                               for c, r in ris.items()}}, f, indent=1)
-    grafico(ris, "%s — charge per channel, PADME per-cell correction from the run itself" % run,
+    grafico(ris, "%s — charge per channel, PADME (%s recipe) from the run itself" % (run, a.padme),
             pref + ".png", t_ns)
     print("scritti %s.png, .json, .npz" % pref)
 

@@ -4,6 +4,29 @@ Cose decise ma non ancora applicate, con il motivo per cui aspettano.
 Quando una e' fatta si toglie da qui: il posto della documentazione sono
 CLAUDE.md e i commenti nel codice, questa e' solo una lista di lavoro.
 
+## PRIORITARIO: poter committare dal PC DAQ (deciso il 2026-10-29)
+
+Oggi il PC DAQ non puo' fare push (nessuna credenziale GitHub per
+`CUPID-NMV/daq-standalone`) e il suo git e' configurato come *Giovanni
+Mazzitelli*, quindi un commit fatto li' risulterebbe suo. Ogni file nato sul
+PC (notebook, misure, script in `/tmp`) va portato sul Mac a mano, confrontato
+con gli md5, committato dal Mac, e poi tolto dal PC prima del pull: fatto il
+2026-10-29 per 26 file, con il backup in
+`/home/daq/backup-allineamento-20261029/`.
+
+Da decidere con l'utente, prima di toccare qualcosa:
+- **chi firma i commit dal PC**: la macchina e' condivisa. Un'identita' per
+  sessione (`git -c user.name=... commit`), oppure un utente "DAQ LNGS" che
+  dica da dove viene il commit;
+- **con quale credenziale si fa push**: una deploy key SSH del repository
+  (scrive solo su quel repository, non e' personale) e' preferibile a un
+  token personale in chiaro su una macchina condivisa -- la stessa ragione per
+  cui le mail non passano da `smtp.lnf.infn.it` con una password;
+- il remote passa da `https://` a `git@github.com:` e va provato con un
+  `git push --dry-run`.
+
+Finche' non e' fatto vale la procedura di CLAUDE.md ("Due macchine").
+
 ## Calibrazione: il punto a 20 ns — da fare lunedi 2026-10-12
 
 Nota del 2026-10-14: la premessa e' in dubbio. Sulle run al buio del

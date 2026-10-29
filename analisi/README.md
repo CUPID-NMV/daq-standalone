@@ -1,0 +1,105 @@
+# analisi/
+
+Script di analisi e di diagnostica scritti per una misura precisa, conservati
+perche' i grafici si possano rifare. Gli strumenti generali stanno in
+`tools/` (`carica_padme.py`, `padme.py`, `daqio.py`, ...); qui c'e' cio' che
+li usa per rispondere a una domanda.
+
+Tutti gli script Python trovano da soli la radice del repository (`ROOT`) e
+importano da `tools/`: si lanciano da qualunque cartella, sul PC DAQ o sul
+Mac, purche' abbiano i dati. I file di dati si passano come argomento; i
+risultati intermedi (`.npz`, `.npy`, `.json`) stanno in `measurements/`. I PNG
+non vanno su git (`*.png` e' in `.gitignore`): si rifanno dagli script.
+
+Sul Mac servono `numpy`, `h5py`, `matplotlib`; i `.c` invece si compilano e
+girano solo sul PC DAQ, che ha la libreria CAEN:
+`gcc -O2 -o majthr majthr.c -lCAENVME`.
+
+I JSON delle misure registrano il file di dati col percorso del PC DAQ
+(`/home/daq/daq-standalone/data/...`): sul Mac va passato quello locale.
+
+---
+
+## 20261028_carica_pmt_sipm/ -- carica dei PMT e dei SiPM, LNGS e Frascati
+
+Domanda: com'e' fatta la carica dei PMT al Gran Sasso, dove stanno i muoni,
+e perche' i SiPM con un cancello lungo hanno code negative. Run usate:
+
+| run | dove | trigger | cosa |
+|---|---|---|---|
+| `LNGS__54-0V_0011_750Ms_55PT` | LNGS | self-trigger OR su ch20/21 (PMT) | 5337 ev., 3.3 h |
+| `LNGS__51-0V_0000_750Ms_55PT` | LNGS | idem, SiPM a 51 V (sotto breakdown) | 128 ev. |
+| `LNGS__54-0V_0000_750Ms_55PT` | LNGS | V812, 4 canali su 5 | 38 ev. in 23.4 h |
+| `test_54-0V_0005_750Ms_60PT` | Frascati | V812 (in realta' 2 su 3, vedi CLAUDE.md) | 77382 ev., 13.6 h, senza SIC |
+
+Prima le cariche per evento, con `tools/carica_padme.py` (dalla radice):
+
+```
+R=data/LNGS/LNGS__54-0V_0011_750Ms_55PT.h5.gz
+python3 tools/carica_padme.py $R --ped 0 150 --gate 240 500 --out measurements/carica_0011_testbeam
+python3 tools/carica_padme.py $R --ped 0 150 --gate 240 500 --padme piedistallo --out measurements/carica_0011_piedistallo
+python3 tools/carica_padme.py $R --canali 16 17 18 --ped 0 150 --gate 200 1350 --out measurements/carica_0011_sipm_g200-fine
+python3 tools/carica_padme.py $R --canali 16 17 18 --ped 0 150 --gate 240 500 --out measurements/carica_0011_sipm_g240-500
+F=data/test_54-0V_0005_750Ms_60PT.h5.gz
+python3 tools/carica_padme.py $F --canali 24 26 --padme nessuna --out measurements/carica_frascati_0005_auto
+python3 tools/carica_padme.py $F --canali 24 26 --padme nessuna --ped 0 150 --gate 150 600 --out measurements/carica_frascati_0005_p0-150_g150-600
+```
+
+Poi gli script, nell'ordine in cui sono stati fatti. `F` = file di dati,
+`OUT` = PNG (o prefisso) da scrivere.
+
+| script | argomenti | cosa mostra |
+|---|---|---|
+| `finestre_diag.py` | F(0011) OUT | SiPM: frazione dell'impulso nel cancello; oscillazione nei primi 100 ns |
+| `wf_ped.py` | F(0011) CANALE OUT | 20 forme d'onda di solo piedistallo di un PMT, con e senza PADME (ricetta del test beam) |
+| `padme_confronto.py` | F(0011) OUT | PADME del test beam (`wclib.py`) contro quella sulla finestra del piedistallo |
+| `confronto_ricette.py` | NPZ_testbeam NPZ_piedistallo OUT | carica con le due ricette e senza PADME, differenza evento per evento |
+| `sipm_gate.py` | F(0011) OUT | SiPM: cancello 200-fine contro 240-500 |
+| `blank_vs_L.py` | F(0011) OUT | rumore sulla carica contro la lunghezza della finestra (cresce linearmente) |
+| `raw_charge.py` | F(0011) OUT | SiPM: integrale senza sottrazione del piedistallo |
+| `dove_vanno.py` | F(0011) OUT | dove finiscono senza sottrazione gli eventi con carica negativa |
+| `sipm_51_54.py` | F(51 V) F(0011) PREFISSO | SiPM a 51 V contro 54 V: piedistallo senza dark count (`_A`, `_B`, `_C`) |
+| `raw_bassi.py` | F(51 V) F(0011) OUT | integrale grezzo assoluto e forme d'onda degli eventi piu' bassi |
+| `fra_lngs.py` | OUT | PMT Frascati contro LNGS, non normalizzati |
+| `fra_taglio_sipm.py` | F(Frascati) OUT | taglio "3 SiPM > 500000 ADC·ns grezzi"; scrive `frascati_0005_sel_3sipm_500k.npy` |
+| `fra_mezzo.py` | F(Frascati) OUT | eventi dei SiPM fra piedistallo e saturazione: tempo, pannelli, ampiezza, WC |
+| `fra_lngs_sel.py` | OUT | PMT Frascati con il taglio sui SiPM contro LNGS |
+| `lngs24.py` | F(LNGS 0000) OUT | i 38 eventi della run da 24 h; scrive `lngs_0000_eventi.npz` |
+| `muoni_overlay.py` | OUT | dove cadono i due muoni LNGS (eventi 17 e 24) |
+| `lngs_3sigma.py` | OUT | LNGS 0011 con entrambi i PMT > 3σ del piedistallo |
+| `lngs_3sigma_norm.py` | OUT | idem, normalizzati in area |
+| `lngs24_pe.py` | F(LNGS 0000) OUT | i SiPM dei 38 eventi in fotoelettroni: nessun evento con due dark count |
+| `muoni_con_wf.py` | F(LNGS 0000) OUT | spettri normalizzati con sotto le forme d'onda dei PMT dei due muoni |
+| `muoni_con_wf_sipm.py` | F(LNGS 0000) OUT | idem con anche i SiPM, PMT in polarita' vera: e' la figura da mostrare |
+
+## v812_maggioranza/ -- calibrazione della somma del V812 (27 e 28/10)
+
+**`scan_c.py` e `scan_c2.py` comandano la DAQ**: avviano e fermano run dal
+controllore (porta 8766), scrivono il registro 0x48 del V812 con `majthr` e
+riscrivono `run-local.toml`. Non lanciarli durante una presa dati. Scrivono i
+confini dei passi in `/tmp/scan_c*.json`; le versioni conservate sono
+`measurements/v812_majthr_2026102{7,8}.json`.
+
+| file | cosa |
+|---|---|
+| `majthr.c` | scrive un valore grezzo nel registro della soglia di maggioranza (0xDDDD0048) |
+| `scan_c.py`, `scan_c2.py` | scan della soglia a run aperta (27/10 con S aperta, 28/10 con S terminata) |
+| `analisi_c.py`, `analisi_c2.py` | molteplicita' dei SiPM per passo, dai JSON in `measurements/` |
+| `plot_c.py` | grafico dello scan del 27/10 (il confronto dei due e' `tools/plot_majthr.py`) |
+| `provamaj.py` | prova di 30 s per livello di maggioranza (la verifica "Majority = 20") |
+| `allin.py` | molteplicita' dei SiPM sulle run di scan del 27/10 |
+
+## v1742_clock/ -- diagnostica del clock della scheda 202 (28/10)
+
+| file | cosa |
+|---|---|
+| `leggireg.c` | legge 0x8104, 0x8178, 0x8100, ... sulle due schede (base 0x32100000 e 0x11110000) |
+| `riarma.c` | riarma il flag di sgancio del PLL (lettura di 0xEF04) e rilegge 0x8104 |
+
+## 20261026_raffiche_dcr/ -- raffiche col trigger software e DCR (26/10)
+
+| file | cosa |
+|---|---|
+| `raffiche.py`, `raffiche_nomask.py` | cerca le raffiche a ~176 MHz agganciate al trigger software sui PMT |
+| `confronto_dcr.py` | confronto delle stime di DCR (run 0036 e 0039, tratto pulito e finestra intera) |
+| `toml_dcr.py` | **riscrive `run-local.toml`** per la run di DCR a trigger software |

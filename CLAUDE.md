@@ -865,7 +865,16 @@ LNGS; solo correzione CAEN):
   tre pannelli) hanno nell'acqua una traccia mediana di 111 mm contro i 102
   dei muoni MC usati per tarare K. A parita' di selezione K = 1580 invece di
   1696 (-7%), qualunque sia la posizione del WC: la resa delle fibre salirebbe
-  di ~10%. Misurare il PE singolo toglie la dipendenza dai muoni. Gli altri 36 hanno nei pannelli 10-90 p.e. in tempo (3-30% di
+  di ~10%. Misurare il PE singolo toglie la dipendenza dai muoni.
+- **Tempi e asimmetria dei 34 eventi a pannelli deboli** (con entrambi i PMT,
+  `dt_asimmetria_24h.py`): dt fra i PMT come nel fondo della 0013
+  (correlazione con ln(Q20/Q21) -0.26 contro -0.29, la stessa distorsione
+  dei tempi degli impulsi deboli). Due differenze, piccole statistiche: la
+  luce pende verso ch21 nel 71% (fondo 49%, P = 0.01), e 6 eventi stanno a
+  dt +32..+44 ns contro 0.8 attesi (P = 2e-4 prima del fattore per la
+  finestra scelta guardando), tutti con piu' luce su ch21. Da guardare nelle
+  forme d'onda; la pendenza verso ch21 potrebbe venire dal lato dei pannelli
+  dove stanno i SiPM (non verificato). Gli altri 36 hanno nei pannelli 10-90 p.e. in tempo (3-30% di
   una MIP): non sono dark count (1-3 p.e. a caso), ne' muoni;
 - **non e' noto se PMT, HV e scheda di amplificazione siano gli stessi nelle
   due sedi**: chiesto all'utente il 2026-10-28, senza risposta. Prima di

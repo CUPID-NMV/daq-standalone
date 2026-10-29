@@ -121,3 +121,16 @@ confini dei passi in `/tmp/scan_c*.json`; le versioni conservate sono
 (sul Mac c'e' in `~/venvs/jupyter-global`). La scala ADC·ns per fotoelettrone
 non e' misurata: lo script la ricava dai muoni (Frascati e LNGS) e mostra le
 due stime.
+
+## 20261030_digit_mc/ -- MC digitalizzato come i dati LNGS
+
+| script | argomenti | cosa fa |
+|---|---|---|
+| `digit_mc.py` | MC_DIR NOME OUT.npz [REPLICHE] [--k] [--rate] | fotoni del MC -> QE del PMT H14600-103 (datasheet TPMO1097E05) -> PE con TTS e risoluzione -> forma dell'impulso misurata -> somma a tracce vere di piedistallo della 0013 -> stessa analisi e stesso trigger dei dati |
+| `calibra_k.py` | MUONI_DIGIT.npz | scala ADC·ns per PE (PMT x scheda di amplificazione) dai muoni MC contro i muoni LNF; scrive `measurements/mc_digit_K.json` |
+| `confronto_0013.py` | OUT | fondo LNGS 0013 contro Compton (righe e NaI) e muoni MC digitalizzati, in rate |
+
+Perche' non `Signal_maker.ipynb`: rappresenta la catena del test beam (PMT senza
+amplificatore, PE da ~3 mV su 3.5 conteggi di rumore bianco); portato alla scala
+LNGS il rumore integrato nel cancello valeva ~6 PE.
+Richiede `measurements/libreria_digit_0013.npz` (da `20261030_fondo_0013/libreria_digit.py`).

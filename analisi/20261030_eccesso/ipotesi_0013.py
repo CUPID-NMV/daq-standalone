@@ -83,14 +83,16 @@ on = ys[:, :, ON].max(2)                 # p.e., massimo per pannello in tempo
 off = ys[:, :, OFF].max(2)
 on_max, off_max = on.max(1), off.max(1)
 
-# tempo: Trigger Time Tag a 17.07 ns, 30 bit (un giro ogni ~18 s); al rate
-# della run gli intervalli sono sempre sotto un giro
+# tempo: Trigger Time Tag a 17.07 ns su 31 bit, un giro ogni ~36.7 s. Non 30:
+# srotolato a 30 bit la 0013 durava 1213 s contro i 2367 del log e del
+# registro del controllore (eventi regolari a 4.2 Hz, nessuna pausa).
+# Al rate della run gli intervalli fra eventi stanno sempre sotto un giro.
 f, tmp = daqio.open_file(F)
 ttt = np.asarray(f["/events/trigger_time_tag"][:n], dtype=np.int64)
 f.close()
 daqio._cleanup(tmp)
 dtt = np.diff(ttt)
-dtt[dtt < 0] += 2 ** 30
+dtt[dtt < 0] += 2 ** 31
 tempo = np.concatenate([[0.0], np.cumsum(dtt) * 17.07e-9])
 
 print("eventi %d in %.0f s di Trigger Time Tag; sigma ped %.0f %.0f ADC*ns" % (n, tempo[-1], S[0], S[1]))

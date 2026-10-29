@@ -12,13 +12,16 @@ e i 2.7 ns del colorante. Se l'eccesso viene dalle fibre, i suoi impulsi
 devono avere piu' coda dei muoni ALLA STESSA AMPIEZZA: l'ampiezza conta
 perche' gli impulsi della catena si allargano anche da soli salendo d'ampiezza.
 
-Gruppi (cariche e classi come in analisi/20261030_eccesso/ipotesi_0013.py):
-  LNGS C    0013, entrambi i PMT > 3 sigma e carica massima >= 10000 ADC*ns:
-            il PMT dominante (l'eccesso)
-  LNGS B    0013, entrambi > 3 sigma e carica massima < 7000: il dominante
-  LNGS A    0013, un solo PMT > 3 sigma: impulsi locali del PMT, la risposta
+Gruppi:
+  LNGS 2    0013, entrambi i PMT > 3 sigma: il PMT dominante, SENZA tagli sulla
+            sua carica. Ad alta ampiezza e' l'eccesso.
+  LNGS 1    0013, un solo PMT > 3 sigma: impulsi locali del PMT, la risposta
             piu' veloce che abbiamo (riferimento)
   LNF mu    Frascati 0005, tre SiPM sopra soglia: i due PMT
+Niente tagli sulla carica dell'impulso che si misura: a parita' d'ampiezza un
+taglio in carica sceglie la forma (carica >= 10000 a 500-800 conteggi lascia
+passare solo impulsi con molta coda). La prima versione di questo script lo
+faceva, e mostrava l'eccesso piu' lento anche dove non lo e'.
 
 Per ogni impulso (verso reso positivo, piedistallo da 180 a 40 ns prima del
 picco): ampiezza A; t50, il passaggio al 50% sul fronte, interpolato; FWHM;
@@ -122,11 +125,9 @@ dom = q13.argmax(1)
 qmax = q13.max(1)
 i0, i1 = np.searchsorted(t13, 230), np.searchsorted(t13, 330)
 G = {}
-G["LNGS C: excess (both > 3σ, max Q ≥ 10000), dominant PMT"] = raccogli(
-    d13, [(e, dom[e]) for e in np.where(both & (qmax >= 10000))[0]], t13, i0, i1)
-G["LNGS B: both > 3σ, max Q < 7000, dominant PMT"] = raccogli(
-    d13, [(e, dom[e]) for e in np.where(both & (qmax < 7000))[0]], t13, i0, i1)
-G["LNGS A: one PMT only (PMT-local, fastest reference)"] = raccogli(
+G["LNGS 2: both PMT > 3σ, dominant PMT, no charge cut"] = raccogli(
+    d13, [(e, dom[e]) for e in np.where(both)[0]], t13, i0, i1)
+G["LNGS 1: one PMT only (PMT-local, fastest reference)"] = raccogli(
     d13, [(e, int(np.argmax(sopra[e]))) for e in np.where(sopra.sum(1) == 1)[0]], t13, i0, i1)
 del d13
 
@@ -147,9 +148,11 @@ passo = float(lib["fine_ns"])
 tk = np.arange(0, 200, passo)
 k_col = np.exp(-tk / TAU_COLORANTE)
 k_ps = sum(f * np.exp(-tk / tau) / tau for f, tau in PS)
-PREV = {"R (fast reference)": R,
-        "R ⊗ WLS dye 2.7 ns: prompt light, e.g. Cherenkov": np.convolve(R, k_col)[:len(R)],
-        "R ⊗ dye ⊗ polystyrene: fibre scintillation": np.convolve(np.convolve(R, k_col)[:len(R)], k_ps)[:len(R)]}
+# R contiene gia' il colorante: i muoni (luce che passa dalle fibre) hanno la
+# stessa forma del riferimento veloce. Riconvolverlo per i 2.7 ns lo
+# conterebbe due volte.
+PREV = {"R: prompt light (as the muons)": R,
+        "R ⊗ polystyrene: fibre scintillation": np.convolve(R, k_ps)[:len(R)]}
 # le curve previste si misurano come i dati, su una traccia allungata con
 # zeri davanti perche' la finestra del piedistallo (180-40 ns prima del
 # picco) cada sul vuoto
@@ -161,7 +164,7 @@ for nome, w in PREV.items():
     prev[nome] = r
     print("previsione %-55s FWHM %.1f ns  f20 %.3f  f40 %.3f" % (nome, r[2], r[3], r[4]))
 
-COL = {"LNGS C": "#d62728", "LNGS B": "#2a6fdb", "LNGS A": "#888", "LNF mu": "k"}
+COL = {"LNGS 2": "#d62728", "LNGS 1": "#888", "LNF mu": "k"}
 fig, ax = plt.subplots(2, 3, figsize=(20, 11))
 bc = np.sqrt(BINS_A[1:] * BINS_A[:-1])
 print("%-60s %-12s %6s %8s %7s %7s" % ("gruppo", "ampiezza", "n", "FWHM", "f20", "f40"))
@@ -188,7 +191,7 @@ for nome, g in G.items():
         f = g["forme"][s_].mean(0)
         ax[0, 0].plot(GRIGLIA, -f, color=col, lw=1.4, label="%s: %d pulses" % (nome, s_.sum()))
         ax[0, 1].plot(GRIGLIA, -f, color=col, lw=1.4)
-for (nome, w), ls in zip(PREV.items(), (":", "--", "-.")):
+for (nome, w), ls in zip(PREV.items(), ("--", "-.")):
     for a in ax[0, :2]:
         a.plot(GRIGLIA, -prev[nome][5], color="#e8710a", lw=1.2, ls=ls,
                label="prediction: %s" % nome if a is ax[0, 0] else None)
@@ -224,7 +227,8 @@ for a, tit in ((ax[1, 0], "FWHM [ns]"), (ax[1, 1], "f20: charge fraction after +
     a.set_title(tit + " vs amplitude (median per bin)", fontsize=10, loc="left")
     a.grid(alpha=0.25, which="both")
 ax[1, 0].legend(fontsize=7, frameon=False)
-fig.suptitle("Is the LNGS excess slower than the LNF muons at equal amplitude? (fibre scintillation test)", fontsize=12)
+fig.suptitle("Is the LNGS excess slower than the LNF muons at equal amplitude? (fibre scintillation test; no charge cut "
+             "on the measured pulse)", fontsize=12)
 fig.tight_layout()
 fig.savefig(OUT, dpi=95)
 np.savez_compressed(_os.path.join(MIS, "forma_coda_gruppi.npz"),

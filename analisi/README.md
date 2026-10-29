@@ -114,6 +114,7 @@ confini dei passi in `/tmp/scan_c*.json`; le versioni conservate sono
 | `sovrapposizione_tempo.py` | MC_DIR OUT | come `sovrapposizione.py`, con il Compton normalizzato al tempo della 0011 e LNF riscalato sulla coda LNGS |
 | `sovrapposizione_area_tempo.py` | MC_DIR OUT | come `sovrapposizione.py` (dati normalizzati in area), con il Compton normalizzato al tempo della 0011 in unita' di eventi LNGS |
 | `sovrapposizione.py` | MC_DIR OUT | LNF, LNGS, candidati muoni e Compton simulato, normalizzati in area |
+| `verifica_mc_gamma.py` | MC_DIR OUT | verifica del MC dei gamma: spettro generato contro la macro, soglia Cherenkov, processi che fanno luce |
 | `compton_vs_dati.py` | MC_DIR OUT | spettro Compton dei gamma di Hall A visto dal WC prototipo (Geant4 di `Testbeam2026_WC_unified`, geometria `single`) e muoni LNGS simulati, in rate assoluto, sopra la carica dei PMT della 0011 |
 
 `MC_DIR` e' la cartella `data/` di `~/Testbeam2026_WC_unified`; serve `uproot`

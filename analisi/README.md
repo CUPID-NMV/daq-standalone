@@ -108,6 +108,8 @@ confini dei passi in `/tmp/scan_c*.json`; le versioni conservate sono
 
 | script | argomenti | cosa mostra |
 |---|---|---|
+| `gate_frascati.py` | F(Frascati) F(0011) OUT | muoni di Frascati col cancello della 0011 allineato sull'impulso (+78 ns) |
+| `sovrapposizione.py` | MC_DIR OUT | LNF, LNGS, candidati muoni e Compton simulato, normalizzati in area |
 | `compton_vs_dati.py` | MC_DIR OUT | spettro Compton dei gamma di Hall A visto dal WC prototipo (Geant4 di `Testbeam2026_WC_unified`, geometria `single`) e muoni LNGS simulati, in rate assoluto, sopra la carica dei PMT della 0011 |
 
 `MC_DIR` e' la cartella `data/` di `~/Testbeam2026_WC_unified`; serve `uproot`

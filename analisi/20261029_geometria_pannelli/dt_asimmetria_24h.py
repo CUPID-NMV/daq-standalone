@@ -93,15 +93,21 @@ for e in range(len(q24)):
 
 fig, ax = plt.subplots(1, 2, figsize=(18, 7), width_ratios=[1, 1.35])
 a = ax[0]
-b = np.arange(-30, 31, 2.0)
+# +-60 ns: fra 30 e 41 ns ci sono sei dei 34 eventi; oltre resta solo l'evento 37,
+# col massimo di ch20 in fondo al cancello, dichiarato in legenda
+LIM = 60.0
+b = np.arange(-LIM, LIM + 1, 4.0)
+fuori = m36 & (np.abs(dt24) > LIM)
 h13 = np.histogram(dt13[np.isfinite(dt13)], b)[0]
 a.stairs(h13 / h13.sum() * m36.sum(), b, color="#9a9a9a", lw=1.4,
          label="LNGS 0013 background, both PMTs > 3σ (%d events), scaled to %d" % (len(dt13), m36.sum()))
 a.hist(dt24[m36], b, histtype="stepfilled", color="#2a6fdb", alpha=0.75,
-       label="24-hour run: the %d non-muon events with both PMTs > 3σ" % m36.sum())
+       label="24-hour run: the %d non-muon events with both PMTs > 3σ%s"
+             % (m36.sum(), "" if not fuori.any() else "\n(outside ±%.0f ns: %s)"
+                % (LIM, ", ".join("event %d at %+.0f ns" % (e, dt24[e]) for e in np.where(fuori)[0]))))
 a.axvline(dt24[17], color="#d62728", lw=2, label="event 17 (muon candidate): Δt = %.1f ns" % dt24[17])
 a.set_xlabel("Δt = t(ch20) − t(ch21)  [ns]   (50% of each pulse's maximum)")
-a.set_ylabel("events per 2 ns")
+a.set_ylabel("events per 4 ns")
 a.set_title("time difference between the two PMTs of the same event", fontsize=10, loc="left")
 a.legend(fontsize=8.5, frameon=False, loc="upper left")
 a.grid(alpha=0.25)
@@ -117,15 +123,21 @@ a.scatter(lr24[uno], dt24[uno], s=55, facecolor="none", edgecolor="#555", lw=1.2
           label="one PMT below 3σ (events %s): its time is noise" % ", ".join(str(e) for e in np.where(uno)[0]))
 a.scatter(lr24[17], dt24[17], s=260, marker="*", color="#d62728", edgecolor="k", lw=0.6, zorder=4,
           label="event 17, muon candidate")
+# eventi oltre la scala: al bordo con una freccia e il valore
+for e in np.where(altri & (np.abs(dt24) > LIM))[0]:
+    yb = np.sign(dt24[e]) * (LIM - 2)
+    a.scatter(lr24[e], yb, s=70, marker="^" if dt24[e] > 0 else "v", color="#555", zorder=4)
+    a.annotate("event %d: Δt = %+.0f ns%s" % (e, dt24[e], "" if both24[e] else " (one PMT below 3σ)"),
+               (lr24[e], yb), textcoords="offset points", xytext=(8, -4), fontsize=8.5, color="#333")
 a.axhline(0, color="k", lw=0.6)
 a.axvline(0, color="k", lw=0.6)
 a.set_xlim(-4, 4)
-a.set_ylim(-40, 40)
+a.set_ylim(-LIM, LIM)
 a.set_xlabel("ln(Q20 / Q21)   (> 0: more light on ch20)")
 a.set_ylabel("Δt = t(ch20) − t(ch21)  [ns]   (> 0: ch20 later)")
 a.set_title("Δt vs charge asymmetry (weak pulses: the 50%% crossing comes late; correlation %.2f, background %.2f)"
             % (r, r13), fontsize=10, loc="left")
-a.legend(fontsize=8.5, frameon=False, loc="upper right")
+a.legend(fontsize=8.5, frameon=True, framealpha=0.92, edgecolor="none", loc="lower left")
 a.grid(alpha=0.25)
 fig.suptitle("LNGS 24-hour run (V812 majority 4 of 5 with the panels): time and charge sharing between the two PMTs "
              "of the WC", fontsize=11)

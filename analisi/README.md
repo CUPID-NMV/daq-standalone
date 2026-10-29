@@ -103,3 +103,14 @@ confini dei passi in `/tmp/scan_c*.json`; le versioni conservate sono
 | `raffiche.py`, `raffiche_nomask.py` | cerca le raffiche a ~176 MHz agganciate al trigger software sui PMT |
 | `confronto_dcr.py` | confronto delle stime di DCR (run 0036 e 0039, tratto pulito e finestra intera) |
 | `toml_dcr.py` | **riscrive `run-local.toml`** per la run di DCR a trigger software |
+
+## 20261029_compton_mc/ -- gamma di Hall A simulati contro i dati LNGS
+
+| script | argomenti | cosa mostra |
+|---|---|---|
+| `compton_vs_dati.py` | MC_DIR OUT | spettro Compton dei gamma di Hall A visto dal WC prototipo (Geant4 di `Testbeam2026_WC_unified`, geometria `single`) e muoni LNGS simulati, in rate assoluto, sopra la carica dei PMT della 0011 |
+
+`MC_DIR` e' la cartella `data/` di `~/Testbeam2026_WC_unified`; serve `uproot`
+(sul Mac c'e' in `~/venvs/jupyter-global`). La scala ADC·ns per fotoelettrone
+non e' misurata: lo script la ricava dai muoni (Frascati e LNGS) e mostra le
+due stime.

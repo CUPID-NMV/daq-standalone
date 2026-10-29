@@ -7,8 +7,8 @@ Stesse normalizzazioni, selezione e scala di normalizzazione_tempo.py, da
 cui e' derivato. In basso il rapporto dati / MC.
 
 Normalizzazioni del progetto MC (Testbeam2026_WC_unified):
-  gamma: phi = 0.35 cm^-2 s^-1 (Hall A, < 3 MeV, arXiv:1101.5298), superficie
-         che genera 2*130*130 + 4*130*30 cm^2 -> R = phi/4 * A = 4322 Hz
+  gamma: J = 0.28 cm^-2 s^-1 (Hall A, < 3 MeV, arXiv:1101.5298; per cm^2 di superficie, = phi/4), superficie
+         che genera 2*130*130 + 4*130*30 cm^2 -> R = J * A = 13832 Hz (fino al 29/10: phi/4 * A con phi = 0.35, 4322 Hz)
          (CLAUDE.md, "La normalizzazione dei gamma"; Background_final.ipynb)
   muoni: gun_muons_lngs.mac, Mei & Hime, angoli da MACRO, piano 650x650 cm,
          3.0e-8 cm^-2 s^-1 -> 0.0127 Hz
@@ -38,7 +38,7 @@ import uproot
 
 MC, OUT = sys.argv[1], sys.argv[2]
 MIS = _os.path.join(ROOT, "measurements")
-R_GAMMA_HZ = 0.35 / 4.0 * (2 * 130 * 130 + 4 * 130 * 30)
+R_GAMMA_HZ = 0.28 * (2 * 130 * 130 + 4 * 130 * 30)   # J * A: analisi/20261029_normalizzazione_gamma/flusso_haffke.py
 R_MU_HZ = 3.0e-8 * 650.0 ** 2
 QE_WL = [200, 250, 300, 350, 380, 400, 420, 450, 500, 550, 600, 650, 700]
 QE = [0.18, 0.25, 0.30, 0.34, 0.35, 0.34, 0.32, 0.28, 0.18, 0.08, 0.03, 0.005, 0.0]
@@ -150,8 +150,8 @@ for col, (ch, qd, gq, mq) in enumerate(((20, q20, gA, mA), (21, q21, gB, mB))):
     r.set_xlabel("PMT charge, absolute value [ADC·ns]   (gate 240-500 ns, pedestal 0-150 ns)")
     r.set_ylabel("data / MC")
     r.grid(alpha=0.25, which="both")
-fig.suptitle("LNGS background: data vs MC (Hall A γ Compton, 4322 Hz, %.0f s simulated + Hall A μ, 0.0127 Hz, "
-             "%.0f days simulated) — self-trigger not simulated" % (ngg / R_GAMMA_HZ, ngm / R_MU_HZ / 86400),
+fig.suptitle("LNGS background: data vs MC (Hall A γ Compton, %.0f Hz, %.0f s simulated + Hall A μ, 0.0127 Hz, "
+             "%.0f days simulated) — self-trigger not simulated" % (R_GAMMA_HZ, ngg / R_GAMMA_HZ, ngm / R_MU_HZ / 86400),
              fontsize=11)
 fig.savefig(OUT, dpi=100, bbox_inches="tight")
 for lo, hi in ((0, 5000), (5000, 30000), (0, 30000)):

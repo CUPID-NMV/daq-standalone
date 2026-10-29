@@ -1,0 +1,30 @@
+{
+ "per_luogo": {
+  "Hall A": {
+   "conteggi_s": 69.15686276491331,
+   "flusso_tabella": 0.28,
+   "err": 0.02,
+   "area_cm2": 246.9887955889761
+  },
+  "Hall B": {
+   "conteggi_s": 80.65741431520298,
+   "flusso_tabella": 0.33,
+   "err": 0.03,
+   "area_cm2": 244.41640701576662
+  },
+  "Interferometer": {
+   "conteggi_s": 105.4515375087578,
+   "flusso_tabella": 0.42,
+   "err": 0.06,
+   "area_cm2": 251.07508930656618
+  }
+ },
+ "soglia_keV": 35.0,
+ "superficie_cristallo_cm2": 273.62203871264876,
+ "area_proiettata_media_cm2": 68.40550967816219,
+ "J_hallA": 0.28,
+ "phi_hallA": 1.12,
+ "phi_mc_vecchio": 0.35,
+ "fattore_mc": 3.2000000000000006,
+ "nota": "la Tab. 1 di arXiv:1101.5298 da' gamma entranti per cm^2 di superficie del NaI (J = phi/4); il MC va generato con rate J * A_gen, non phi/4 * A_gen con phi = valore della tabella"
+}

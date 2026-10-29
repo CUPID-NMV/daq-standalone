@@ -8,8 +8,8 @@ analisi/20261029_compton_mc/normalizzazione_tempo.py, da cui e' derivato.
 La sigma del piedistallo si misura run per run.
 
 Normalizzazioni del progetto MC (Testbeam2026_WC_unified):
-  gamma: phi = 0.35 cm^-2 s^-1 (Hall A, < 3 MeV, arXiv:1101.5298), superficie
-         che genera 2*130*130 + 4*130*30 cm^2 -> R = phi/4 * A = 4322 Hz
+  gamma: J = 0.28 cm^-2 s^-1 (Hall A, < 3 MeV, arXiv:1101.5298; per cm^2 di superficie, = phi/4), superficie
+         che genera 2*130*130 + 4*130*30 cm^2 -> R = J * A = 13832 Hz (fino al 29/10: phi/4 * A con phi = 0.35, 4322 Hz)
          (CLAUDE.md, "La normalizzazione dei gamma"; Background_final.ipynb)
   muoni: gun_muons_lngs.mac, Mei & Hime, angoli da MACRO, piano 650x650 cm,
          3.0e-8 cm^-2 s^-1 -> 0.0127 Hz
@@ -39,7 +39,7 @@ import uproot
 
 MC, OUT = sys.argv[1], sys.argv[2]
 MIS = _os.path.join(ROOT, "measurements")
-R_GAMMA_HZ = 0.35 / 4.0 * (2 * 130 * 130 + 4 * 130 * 30)
+R_GAMMA_HZ = 0.28 * (2 * 130 * 130 + 4 * 130 * 30)   # J * A: analisi/20261029_normalizzazione_gamma/flusso_haffke.py
 R_MU_HZ = 3.0e-8 * 650.0 ** 2
 QE_WL = [200, 250, 300, 350, 380, 400, 420, 450, 500, 550, 600, 650, 700]
 QE = [0.18, 0.25, 0.30, 0.34, 0.35, 0.34, 0.32, 0.28, 0.18, 0.08, 0.03, 0.005, 0.0]

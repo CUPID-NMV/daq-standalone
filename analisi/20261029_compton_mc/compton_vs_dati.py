@@ -14,8 +14,8 @@ la stessa di Signal_maker.ipynb), la risoluzione del singolo
 fotoelettrone e il rumore del piedistallo MISURATO nei dati.
 
 Normalizzazioni assolute, prese dal progetto MC (Background_final.ipynb):
-  gamma: phi = 0.35 cm^-2 s^-1 (Hall A, < 3 MeV), superficie che genera
-         2*130*130 + 4*130*30 cm^2  ->  R = phi/4 * A = 4322 Hz
+  gamma: J = 0.28 cm^-2 s^-1 (Hall A, < 3 MeV, per cm^2 di superficie = phi/4), superficie che genera
+         2*130*130 + 4*130*30 cm^2  ->  R = J * A = 13832 Hz (fino al 29/10: 4322)
   muoni: 3.0e-8 cm^-2 s^-1 su un piano di 650 x 650 cm -> 0.0127 Hz
 Il rate di ogni evento MC e' quindi R / N_generati.
 
@@ -42,7 +42,7 @@ MC, OUT = sys.argv[1], sys.argv[2]
 MIS = _os.path.join(ROOT, "measurements")
 
 # --- normalizzazioni del progetto MC ---
-R_GAMMA_HZ = 0.35 / 4.0 * (2 * 130 * 130 + 4 * 130 * 30)
+R_GAMMA_HZ = 0.28 * (2 * 130 * 130 + 4 * 130 * 30)   # J * A: analisi/20261029_normalizzazione_gamma/flusso_haffke.py
 R_MU_HZ = 3.0e-8 * 650.0 ** 2
 # --- PMT del prototipo (Signal_maker.ipynb) ---
 QE_WL = [200, 250, 300, 350, 380, 400, 420, 450, 500, 550, 600, 650, 700]

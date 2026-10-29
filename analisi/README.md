@@ -140,9 +140,24 @@ Richiede `measurements/libreria_digit_0013.npz` (da `20261030_fondo_0013/libreri
 | script | argomenti | cosa mostra |
 |---|---|---|
 | `forma_coda.py` | F(0013) F(Frascati 0005) OUT | forma degli impulsi a parita' d'ampiezza (FWHM, frazione di carica dopo +20 e +40 ns): coincidenze LNGS, impulsi di un solo PMT, muoni LNF, e le previsioni per luce pronta e per scintillazione del polistirene delle fibre |
-
-Niente tagli in carica sull'impulso che si misura: a parita' d'ampiezza sceglierebbero
-la forma (la prima versione lo faceva).
 | `mc_scint_vs_dati.py` | MC_SCINT.npz OUT [ETICHETTA] | fondo LNGS 0013 contro il MC digitalizzato senza e con la scintillazione del nucleo delle fibre (in rate, per classe) |
 | `macro_sorgente_pmt.py` | PROGETTO_MC | scrive `gun_gammas_pmt_{K40,U238,Th232}.mac` (gamma dal volume dei moduli dei PMT) e `measurements/sorgente_pmt_linee.json` |
 | `sorgente_pmt.py` | MC_DIR TAG_K40 TAG_U238 TAG_TH232 HALLA.npz OUT | attivita' nei moduli dei PMT necessaria per l'eccesso, e forma/asimmetria che ne verrebbero |
+
+Niente tagli in carica sull'impulso che si misura: a parita' d'ampiezza sceglierebbero
+la forma (la prima versione lo faceva).
+
+## 20261029_normalizzazione_gamma/ -- quanto vale il flusso dei gamma di Hall A
+
+| script | argomenti | cosa mostra |
+|---|---|---|
+| `flusso_haffke.py` | HAFFKE.pdf OUT | legge le curve della Fig. 2 di arXiv:1101.5298 dal PDF vettoriale e le integra: il "flusso" della Tab. 1 sono i gamma entranti per cm^2 di superficie del NaI (J = phi/4). Scrive `measurements/flusso_haffke.json` |
+| `confronto_rinormalizzato.py` | OUT [PRIMA.npz] | fondo LNGS 0013 contro i gamma di Hall A digitalizzati con la normalizzazione corretta, per classe di carica e come rapporto dati/MC; PRIMA.npz disegna anche una digitalizzazione vecchia |
+
+Il PDF non sta nel repository: si scarica da arXiv. `flusso_haffke.py` richiede
+`pymupdf` (sul Mac c'e' in `~/venvs/jupyter-global`).
+Dal 2026-10-29 i gamma si generano con J * A = 0.28 x 49400 cm^2 = 13832 Hz
+(`digit_mc.py` e gli script di `20261029_compton_mc/` e `20261030_fondo_0013/`);
+prima con 0.35/4 x A = 4322 Hz, 3.2 volte meno. I `.npz` di `measurements/`
+col MC digitalizzato sono rifatti cosi', con K = 1696 dai muoni con la
+scintillazione delle fibre.

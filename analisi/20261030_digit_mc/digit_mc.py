@@ -57,7 +57,7 @@ ap.add_argument("out")
 ap.add_argument("repliche", nargs="?", type=int, default=1)
 ap.add_argument("--k", type=float, default=None, help="ADC*ns per fotoelettrone")
 ap.add_argument("--rate", type=float, default=None,
-                help="Hz della sorgente (di serie: 4322 per i gamma, 0.0127 per i muoni)")
+                help="Hz della sorgente (di serie: 13832 per i gamma, 0.0127 per i muoni)")
 a = ap.parse_args()
 
 MIS = _os.path.join(ROOT, "measurements")
@@ -79,7 +79,11 @@ TTS_SIGMA = 0.3 / 2.355
 if a.k is None:
     a.k = json.load(open(_os.path.join(MIS, "mc_digit_K.json")))["K_adcns_per_pe"]
 if a.rate is None:
-    a.rate = 0.0127 if "mu" in a.nome else 0.35 / 4.0 * (2 * 130 * 130 + 4 * 130 * 30)
+    # gamma: J * A_gen, con A_gen la scatola delle macro (130 x 130 x 30 cm) e J = 0.28 cm^-2 s^-1
+    # il valore di Hall A di arXiv:1101.5298, che conta i gamma ENTRANTI per cm^2 di superficie
+    # del NaI, cioe' J = phi/4 (analisi/20261029_normalizzazione_gamma/flusso_haffke.py). Fino
+    # al 2026-10-29 qui c'era 0.35/4 * A_gen: il 4 veniva diviso due volte, 3.2 volte meno gamma.
+    a.rate = 0.0127 if "mu" in a.nome else 0.28 * (2 * 130 * 130 + 4 * 130 * 30)
 
 files = sorted(glob.glob(_os.path.join(a.mc_dir, "sim_single_%s_part*_X0mm_Y0mm_Th0deg.root" % a.nome))) \
     or [_os.path.join(a.mc_dir, "sim_single_%s_X0mm_Y0mm_Th0deg.root" % a.nome)]

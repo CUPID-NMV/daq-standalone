@@ -863,11 +863,34 @@ LNGS; solo correzione CAEN):
 - **la soglia del self-trigger nei dati** con offset 100 sta a ~310/319
   conteggi d'ampiezza (ch20/ch21), cioe' ~1.7 volte un PE;
 - **MC digitalizzato come i dati** (forma dell'impulso e rumore veri, trigger
-  simulato, `analisi/20261030_digit_mc/`): il Compton di Hall A da' 0.10-0.19
-  Hz col trigger contro 4.2 Hz misurati, e si ferma a ~6 PE;
+  simulato, `analisi/20261030_digit_mc/`): i gamma di Hall A danno 0.31 Hz
+  (spettro NaI) - 0.95 Hz (righe, scintillazione delle fibre accesa) col
+  trigger, contro 4.2 Hz misurati, quasi tutti eventi di un PMT solo;
+- **la normalizzazione dei gamma era sbagliata di un fattore 3.2** fino al
+  2026-10-29: il "flusso" di Haffke et al. (arXiv:1101.5298, Tab. 1, Hall A
+  0.28 +- 0.02 cm^-2 s^-1) conta i gamma che ENTRANO per cm^2 di superficie
+  del NaI, cioe' J = phi/4, e il MC lo divideva per 4 un'altra volta
+  (`0.35/4 * A`). L'articolo non lo dice: lo dicono i suoi numeri. Dalle
+  curve della Fig. 2, lette dal PDF vettoriale, conteggi/flusso = 247, 244,
+  251 cm^2 in Hall A, Hall B e tunnel, cioe' la superficie del cristallo
+  3"x3" (274 cm^2, efficienza ~0.9-0.95) e non l'area proiettata media
+  (68 cm^2). Quindi phi = 1.12 in Hall A e il MC si genera con J * A =
+  13832 Hz (`analisi/20261029_normalizzazione_gamma/flusso_haffke.py`).
+  Corretti `digit_mc.py` e gli 8 script delle sovrapposizioni. **Vale anche
+  per il progetto MC** (`Testbeam2026_WC_unified`, tempo morto del veto di
+  CUPID), dove la formula e' la stessa;
+- **con la normalizzazione giusta e la scintillazione delle fibre, il MC
+  riproduce gli eventi a carica bassa e l'eccesso resta solo in alto**
+  (`confronto_rinormalizzato.py`, 0013 contro 10 M gamma a righe, K = 1696):
+  entrambi i PMT > 3 sigma e carica massima < 7000 ADC·ns 0.185 Hz contro
+  0.185; 7000-10000 0.166 contro 0.084 (x2.0); classe C (>= 10000) 0.301
+  contro 0.082 (**x3.7**, non x12). Senza scintillazione il MC sopra 7000
+  ADC·ns non ha quasi niente (0.008 e 0.001 Hz): la carica alta del MC e'
+  tutta luce del polistirene delle fibre;
 - **il fotoelettrone singolo** dai pochi impulsi di buio veri della run a
   trigger software 0036 vale ~1700-2000 ADC·ns, come la scala ricavata dai
-  muoni (1726): conferma su 7 impulsi. Il buio vero dei PMT e' di decine di
+  muoni (1726; 1696 con la scintillazione delle fibre, che a un muone
+  aggiunge solo il 3% di PE): conferma su 7 impulsi. Il buio vero dei PMT e' di decine di
   Hz, non i kHz che si dedurrebbero dai 0.5 nA del datasheet. Il resto di
   quello che passa una soglia bassa sono i picchi spuri del V1742
   (~55 conteggi, 1-2 campioni, al 97-99% simultanei sui due PMT);
@@ -888,8 +911,8 @@ LNGS; solo correzione CAEN):
   e il colorante della BCF-9995XL assorbe proprio li' (280-390 nm): la fibra
   e' una fibra scintillante debole. Misurato su Kuraray Y11: 23% di una
   BCF-12, ~1200 fotoni/MeV, "tradizionalmente non considerato nelle
-  simulazioni" (arXiv 2604.14060). Nel MC la scintillazione e' SPENTA
-  (`PhysicsList.cc`). A parita' d'ampiezza, frazione di carica dopo +20 ns:
+  simulazioni" (arXiv 2604.14060). Nel MC era spenta; dal 2026-10-29 e'
+  accesa (`FiberScintillation`, 1750 fotoni/MeV di serie). A parita' d'ampiezza, frazione di carica dopo +20 ns:
   coincidenze LNGS 0.17 (300-500 conteggi, come la luce pronta) -> 0.27
   (800-1200) -> 0.32 (1200-2000), sulla previsione per la scintillazione
   (0.30); muoni LNF 0.10-0.19, impulsi di un solo PMT 0.14 a ogni ampiezza.

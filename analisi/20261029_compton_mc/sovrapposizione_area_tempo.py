@@ -33,7 +33,7 @@ import uproot
 
 MC, OUT = sys.argv[1], sys.argv[2]
 MIS = _os.path.join(ROOT, "measurements")
-R_GAMMA_HZ = 0.35 / 4.0 * (2 * 130 * 130 + 4 * 130 * 30)
+R_GAMMA_HZ = 0.28 * (2 * 130 * 130 + 4 * 130 * 30)   # J * A: analisi/20261029_normalizzazione_gamma/flusso_haffke.py
 QE_WL = [200, 250, 300, 350, 380, 400, 420, 450, 500, 550, 600, 650, 700]
 QE = [0.18, 0.25, 0.30, 0.34, 0.35, 0.34, 0.32, 0.28, 0.18, 0.08, 0.03, 0.005, 0.0]
 SPE_RES, REPLICHE, PE_MU_MC = 0.30, 400, 4.86

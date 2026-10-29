@@ -4,8 +4,8 @@ allo STESSO tempo di acquisizione (quello della 0011), invece che in area.
     python3 analisi/20261029_compton_mc/normalizzazione_tempo.py MC_DIR OUT.png
 
 Normalizzazioni del progetto MC (Testbeam2026_WC_unified):
-  gamma: phi = 0.35 cm^-2 s^-1 (Hall A, < 3 MeV, arXiv:1101.5298), superficie
-         che genera 2*130*130 + 4*130*30 cm^2 -> R = phi/4 * A = 4322 Hz
+  gamma: J = 0.28 cm^-2 s^-1 (Hall A, < 3 MeV, arXiv:1101.5298; per cm^2 di superficie, = phi/4), superficie
+         che genera 2*130*130 + 4*130*30 cm^2 -> R = J * A = 13832 Hz (fino al 29/10: phi/4 * A con phi = 0.35, 4322 Hz)
          (CLAUDE.md, "La normalizzazione dei gamma"; Background_final.ipynb)
   muoni: gun_muons_lngs.mac, Mei & Hime, angoli da MACRO, piano 650x650 cm,
          3.0e-8 cm^-2 s^-1 -> 0.0127 Hz
@@ -35,7 +35,7 @@ import uproot
 
 MC, OUT = sys.argv[1], sys.argv[2]
 MIS = _os.path.join(ROOT, "measurements")
-R_GAMMA_HZ = 0.35 / 4.0 * (2 * 130 * 130 + 4 * 130 * 30)
+R_GAMMA_HZ = 0.28 * (2 * 130 * 130 + 4 * 130 * 30)   # J * A: analisi/20261029_normalizzazione_gamma/flusso_haffke.py
 R_MU_HZ = 3.0e-8 * 650.0 ** 2
 QE_WL = [200, 250, 300, 350, 380, 400, 420, 450, 500, 550, 600, 650, 700]
 QE = [0.18, 0.25, 0.30, 0.34, 0.35, 0.34, 0.32, 0.28, 0.18, 0.08, 0.03, 0.005, 0.0]
@@ -137,7 +137,7 @@ for a, ch, qd, gq, mq, fq in ((ax[0], 20, q20, gA, mA, f24), (ax[1], 21, q21, gB
     a.grid(alpha=0.25, which="both")
     sec = a.secondary_xaxis("top", functions=(lambda x: x / K, lambda p: p * K))
     sec.set_xlabel("photoelectrons (scale %.0f ADC·ns/PE from LNF muons vs MC muons)" % K, fontsize=9)
-fig.suptitle("WC prototype at LNGS: data vs Geant4 Hall A γ (4322 Hz, %.0f s simulated) and μ (0.0127 Hz, %.0f days simulated), "
-             "time-normalised — self-trigger not simulated" % (ngg / R_GAMMA_HZ, ngm / R_MU_HZ / 86400), fontsize=11)
+fig.suptitle("WC prototype at LNGS: data vs Geant4 Hall A γ (%.0f Hz, %.0f s simulated) and μ (0.0127 Hz, %.0f days simulated), "
+             "time-normalised — self-trigger not simulated" % (R_GAMMA_HZ, ngg / R_GAMMA_HZ, ngm / R_MU_HZ / 86400), fontsize=11)
 fig.tight_layout()
 fig.savefig(OUT, dpi=100)

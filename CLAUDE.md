@@ -41,6 +41,18 @@ ad avere hardware e librerie CAEN.
 - Sincronizzazione **solo via git** (`CUPID-NMV/daq-standalone`, branch `main`).
   Mai `scp`: fa divergere le copie, è già costato un allineamento manuale.
 - Sul Mac **non si può compilare**: mancano libCAENDigitizer e HDF5.
+- **Il PC DAQ non puo' fare push** (nessuna credenziale GitHub) e il suo git
+  e' configurato come *Giovanni Mazzitelli*: un commit fatto li' risulta suo.
+  Si committa e si fa push dal Mac; sul PC solo `git pull`. Per portare su git
+  file nati sul PC: copiarli sul Mac (`ssh daq-pc 'tar cf - ...' | tar xf -`),
+  confrontare gli md5, committare dal Mac, poi sul PC metterli da parte e
+  fare pull. Fatto cosi' il 2026-10-29.
+- **L'analisi si spostera' sul Mac**: i dati andranno su cloud (deciso il
+  2026-10-29). Gli script di analisi non devono quindi dare per scontati i
+  percorsi del PC: quelli in `analisi/` trovano da soli la radice del
+  repository e prendono i file di dati come argomento. Sul Mac servono solo
+  `numpy`, `h5py`, `matplotlib`. I JSON delle misure registrano i file col
+  percorso del PC (`/home/daq/daq-standalone/data/...`).
 
 ## Compilare, e verificare di averlo fatto
 
@@ -318,7 +330,8 @@ livello N della formula (50N - 25) sotto il bordo di N-1 canali. I bordi
 sono netti (un passo di registro). Per 4 e 5 canali l'estrapolazione da'
 ~237 e ~292 mV: per una 5 su 5 il valore grezzo ~66 (264 mV), da verificare
 con un impulsatore su tutti gli ingressi. Il registro grezzo lo scrive
-`/tmp/majthr.c` sul PC DAQ.
+`analisi/v812_maggioranza/majthr.c` (si compila sul PC DAQ, vedi
+`analisi/README.md`).
 
 **Dal 2026-10-27 (commit 5f2aa7f, installato) `Majority` e' il NUMERO DI
 CANALI in coincidenza**, non piu' il livello della formula: la DAQ mette la
@@ -746,6 +759,93 @@ eventi totali. Misurato il 2026-10-15 su run intere (SiPM su ch16-18, 52 V):
   1 evento su 200 000 nelle 0057-0066. **Questo conteggio e' la verifica
   della maggioranza su una run gia' presa**, senza rifarne una.
 
+## Carica di PMT e SiPM, LNGS e Frascati (analisi del 2026-10-28)
+
+Script, comandi e run in `analisi/README.md` (cartella
+`analisi/20261028_carica_pmt_sipm/`); cariche per evento in
+`measurements/carica_*.npz`. Tutte le cariche in ADC·ns (1 pC = 204.8).
+
+**PADME.**
+- Si usa la **ricetta del test beam** (`wclib.py`: mediana per cella su tutta
+  la traccia dei primi 1000 eventi), presa dalla run stessa, con la SIC del
+  gruppo del canale. Decisione dell'utente; e' il valore di serie di
+  `carica_padme.py`.
+- **Per i SiPM, per ora, niente PADME** (decisione dell'utente: "hanno altri
+  problemi").
+- **Le run fino al 2026-10-20 (formato v2) non hanno la SIC**: li' la PADME
+  non si puo' fare (`--padme nessuna`). Al LNGS non c'e' nessuna run con SIC
+  che legga il gruppo 3 a 750 MS/s da cui prestare una tabella.
+- **Sulla carica conta poco.** Sui PMT della 0011 la carica a vuoto passa da
+  σ 63-68 a 57-61 ADC·ns; gli spettri con e senza PADME sono indistinguibili.
+- **Quello che toglie e' un gradino lungo l'anello** (celle 0-450 ~+1
+  conteggio, 450-1023 ~-1), non una struttura cella per cella: spostando la
+  SIC di ±1-3 celle il risultato non cambia (1.950 conteggi in tutti i casi),
+  e una correzione per INDICE di lettura rende un po' meglio (1.91/1.83
+  contro 1.94/1.91). Interpretazione, non dimostrata.
+
+**Il rumore sulla carica cresce LINEARMENTE con la lunghezza del cancello**,
+non come la radice: ogni evento ha la base spostata in blocco rispetto alla
+finestra del piedistallo. A 54 V ~2.5 conteggi rms da evento a evento (SiPM,
+eventi senza impulsi), a 51 V ~1.2-1.5. La σ del piedistallo misurata su una
+finestra corta **non** vale per un cancello lungo: sui PMT della 0011, 57-61
+ADC·ns su 75 ns contro 244-269 sul picco del piedistallo nel cancello da
+260 ns.
+
+**Oscillazione nei primi ~100 ns della traccia**: periodo ~35 ns, ±2.5
+conteggi, su tutti i canali, identica a 51 V (SiPM sotto breakdown): e'
+dell'elettronica. Cade dentro una finestra del piedistallo che parta da 0.
+
+**SiPM a 54 V con cancello lungo (200 ns -> fine traccia):**
+- la finestra 0-150 ns e' sporca in ~20% degli eventi (impulsi al buio, o la
+  coda di un impulso precedente): il piedistallo esce alto di 2-30 conteggi e
+  la carica va a -25000 ADC·ns. Gli stessi eventi, senza sottrazione, stanno
+  nel picco;
+- **anche senza dark count (51 V) la sottrazione per evento peggiora la
+  carica**: σ 1500-2000 ADC·ns con la sottrazione 0-150, ~600 senza. La base
+  assoluta del canale e' piu' stabile della stima evento per evento;
+- in alcuni eventi a 54 V la base di tutti e tre i SiPM e' 10-20 conteggi
+  sotto il normale per tutta la traccia (eventi 914, 2240, 3445 della 0011),
+  mai a 51 V. Ipotesi non verificata: sottoelongazione dell'accoppiamento in
+  alternata dopo un impulso grande prima della finestra;
+- l'impulso medio dei SiPM (0011, PostTrigger 55%, 750 MS/s) ha il picco a
+  ~390 ns; 240-500 ns ne contiene il 55-58%, e a 1350 ns non e' finito.
+
+**Frascati, run `test_54-0V_0005_750Ms_60PT`** (77382 ev., 13.6 h; tre
+pannelli impilati coi SiPM ch16-18, WC sopra coi PMT ch24/26):
+- **il trigger chiedeva 2 ingressi su 3, non 3**: "maggioranza 3" con la
+  formula del manuale (0x1F = 124 mV). Ingressi: PMT24, PMT26 e il TRG-OUT
+  del self-trigger dei SiPM (OR di ch16 e ch18). Il 37.8% degli eventi non
+  ha nessun pannello: li fa la sola coppia di PMT;
+- **i SiPM saturano il digitizer**: il picco della MIP e' oltre i ~3800
+  conteggi disponibili. Fra gli eventi coi tre pannelli sopra soglia, il 74%
+  satura su tutti e tre; ch17 ha meno luce (il suo picco e' appena sopra il
+  fondo scala). Per misurare l'energia nei pannelli il segnale va portato
+  dentro la dinamica;
+- gli eventi fra piedistallo e saturazione sono **in tempo** col trigger
+  (>99% fra 380 e 480 ns) e quasi sempre **un solo pannello basso con gli
+  altri due saturi** (8441 eventi contro 87 con tutti e tre bassi), con la
+  stessa carica nel WC: geometria (traccia che prende il pannello di
+  striscio o lontano dal SiPM), non un'altra particella. Interpretazione.
+
+**Spettri dei PMT** (piedistallo 0-150; cancello 150-600 Frascati, 240-500
+LNGS; solo correzione CAEN):
+- Frascati coi tre SiPM sopra soglia: massimo stretto a ~6000 ADC·ns
+  (~29 pC);
+- LNGS 0011 (self-trigger OR): il massimo largo a ~10000 viene soprattutto
+  dagli eventi con UN solo PMT; con entrambi sopra 3σ (2841 eventi su 5337)
+  lo spettro e' quasi piatto fra ~2000 e ~15000; sopra ~10000 ha la stessa
+  forma di Frascati, sotto ~5000 molti piu' eventi;
+- **muoni al LNGS**: run `LNGS__54-0V_0000_750Ms_55PT` (23.4 h, V812 4 su 5,
+  38 eventi). Muone = tutti e tre i SiPM saturi: **eventi 17 e 24**, PMT a
+  3633-5827 ADC·ns, cioe' sul massimo dei muoni di Frascati e non su quello
+  della 0011. Gli altri 36 hanno nei pannelli 10-90 p.e. in tempo (3-30% di
+  una MIP): non sono dark count (1-3 p.e. a caso), ne' muoni;
+- **non e' noto se PMT, HV e scheda di amplificazione siano gli stessi nelle
+  due sedi**: chiesto all'utente il 2026-10-28, senza risposta. Prima di
+  confrontare le posizioni dei massimi, saperlo.
+- **ch18 (SiPM) parte ~40-50 ns prima di ch16 e ch17** in tutti gli eventi
+  della run da 24 h: ritardo della catena, non fisica.
+
 ## Strumenti
 
 | | |
@@ -763,6 +863,10 @@ eventi totali. Misurato il 2026-10-15 su run intere (SiPM su ch16-18, 52 V):
 | `tools/notifiche.py` | lista delle persone, invio in sottofondo, storico, riepilogo all'ora fissata, diagnosi di fine run |
 | `tools/dcr_scala.py` | DCR dei SiPM contro soglia da una run a trigger software: scala a gradini, crosstalk, DCR a 0.5/1.5/2.5 p.e. (tre stime) |
 | `tools/WCFastCheck.ipynb` | analisi offline; legge i due formati e i `.gz` via `daqio` |
+| `tools/carica_padme.py` | carica per canale (ADC·ns) con PADME; `--ped`, `--gate`, `--cancello CH DA A`, `--padme testbeam/piedistallo/nessuna`; scrive PNG, JSON e le cariche evento per evento in `.npz` |
+| `tools/padme.py` | tabella PADME per cella da una run a trigger software, e verifica del guadagno |
+| `tools/plot_majthr.py` | confronto delle due calibrazioni della somma del V812 |
+| `analisi/` | script delle singole analisi, con l'indice e i comandi in `analisi/README.md` |
 
 Le misure stanno in `measurements/*.json` con i dati grezzi, e gli script di
 plot li rileggono da lì: i grafici si rifanno, i numeri no.
@@ -822,6 +926,17 @@ se un grafico si legge, se la pagina dice la verita' su cosa sta mostrando.
 **Per le interfacce, prima una proposta da guardare.** Un PNG, o la pagina su
 una porta di prova, e poi si implementa su quello che e' stato approvato o
 corretto. Discutere un layout a parole costa piu' giri che mostrarlo.
+
+**Ogni analisi si consegna coi suoi grafici, mostrati nella risposta**, non
+con un percorso da aprire: le scelte (finestre, tagli, ricette) le fa
+l'utente guardandoli, non io. Il PNG si copia dal PC in `measurements/` sul
+Mac (i `.png` sono gitignorati) e si inserisce nella risposta. Anche un punto
+aperto ("il cancello taglia meta' del segnale") va col grafico che lo fa
+vedere. Prima di mostrarlo, guardarlo: un'etichetta sbagliata ("+ PADME"
+dove la PADME non c'e', una "blank" che sembra confrontabile e non lo e')
+costa piu' di un grafico in meno. **I segnali si disegnano con la loro
+polarita' vera** (PMT negativi): la carica si da' positiva, la forma d'onda
+no -- sono grafici che finiscono davanti ai colleghi.
 
 **Commenti e messaggi di log in italiano**, come il resto del codice.
 **Le pagine web invece sono in inglese** — monitor e controllore — perche'

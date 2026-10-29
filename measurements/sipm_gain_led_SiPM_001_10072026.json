@@ -1,6 +1,6 @@
 {
  "cosa": "SiPM con LED: carica per fotoelettrone nel gate e su tutto l'impulso, crosstalk, breakdown",
- "scritto_il": "2026-10-14T14:12:50",
+ "scritto_il": "2026-10-16T16:49:36",
  "notebook": "tools/SiPM_Characterization_Gain_Study.ipynb",
  "dati": "data/10072026/SiPM_001",
  "canale": 16,

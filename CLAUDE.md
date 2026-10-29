@@ -600,7 +600,7 @@ Nello stesso crate, dietro lo stesso bridge V4718:
   2026-10-23 su 5461 trigger software in 27.84 s (intervallo medio 298755
   conteggi = 5.098 ms). **Il contatore e' a 31 bit: un giro ogni ~36.7 s**,
   non 30 bit e 18 s come era scritto qui (la misura del 23/10 durava 27.8 s
-  e un giro non lo vedeva). Verificato il 2026-10-30 sulla 0013: srotolato a
+  e un giro non lo vedeva). Verificato il 2026-10-29 sulla 0013: srotolato a
   2^31 da' 2367 s, come il log e il registro del controllore; a 2^30 dava
   1213 s, cioe' meta' del tempo e rate doppi.
 - **Il clock in daisy chain non aggancia senza un file di CAEN** (2026-10-28,
@@ -852,7 +852,7 @@ LNGS; solo correzione CAEN):
 - **E' lo stesso modulo** in tutte e due le sedi (detto dall'utente il
   2026-10-29); PMT Hamamatsu H14600-103 (datasheet TPMO1097E05 in Downloads).
 
-**L'eccesso ad alta carica al LNGS (2026-10-29/30, analisi in
+**L'eccesso ad alta carica al LNGS (2026-10-29, analisi in
 `analisi/20261030_*`)**:
 - **il "massimo" dello spettro con entrambi i PMT sopra 3 sigma e' il
   trigger, non fisica**: sta dove cade la soglia in carica (~4000 ADC·ns

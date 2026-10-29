@@ -1,0 +1,46 @@
+{
+ "casi": {
+  "WC centred on the panels": {
+   "muoni_in_acqua": 9.468951699901625,
+   "trigger_4su5": 9.329509919571874,
+   "con_3_saturi": 9.133970871293375,
+   "con_1_o_2_saturi": 0.1955390482785,
+   "senza_saturi": 0.0,
+   "tre_pannelli_e_serbatoio_non_acqua": 0.756511727766
+  },
+  "WC against a corner of the panels": {
+   "muoni_in_acqua": 9.468951699901625,
+   "trigger_4su5": 8.843066467502,
+   "con_3_saturi": 8.54762085630525,
+   "con_1_o_2_saturi": 0.29544561119675,
+   "senza_saturi": 0.0,
+   "tre_pannelli_e_serbatoio_non_acqua": 0.620542635452125
+  }
+ },
+ "K": {
+  "LNGS angles, three panels crossed | WC centred on the panels": {
+   "mediana_traccia_mm": 101.95967722707383,
+   "mediana_carica": 8401.58112094398,
+   "K_corretto": 1695.6903285751894
+  },
+  "LNGS angles, three panels crossed | WC against a corner of the panels": {
+   "mediana_traccia_mm": 101.82881352637241,
+   "mediana_carica": 8382.336283185803,
+   "K_corretto": 1699.5834299921532
+  },
+  "Frascati (cos\u00b2 \u03b8), three panels crossed | WC centred on the panels": {
+   "mediana_traccia_mm": 110.86455779910784,
+   "mediana_carica": 9019.362831858383,
+   "K_corretto": 1579.5439342126128
+  },
+  "Frascati (cos\u00b2 \u03b8), three panels crossed | WC against a corner of the panels": {
+   "mediana_traccia_mm": 110.50670892984044,
+   "mediana_carica": 9021.793510324518,
+   "K_corretto": 1579.1183687834318
+  }
+ },
+ "K_usato": 1696.42294816437,
+ "T24_s": 84135.385,
+ "P_SAT_mm": 15.0,
+ "P_CFD_mm": 1.0
+}

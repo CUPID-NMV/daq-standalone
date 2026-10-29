@@ -164,3 +164,12 @@ Dal 2026-10-29 i gamma si generano con J * A = 0.28 x 49400 cm^2 = 13832 Hz
 prima con 0.35/4 x A = 4322 Hz, 3.2 volte meno. I `.npz` di `measurements/`
 col MC digitalizzato sono rifatti cosi', con K = 1696 dai muoni con la
 scintillazione delle fibre.
+
+## 20261029_geometria_pannelli/ -- muoni attraverso il WC e i tre pannelli (LNGS)
+
+| script | argomenti | cosa mostra |
+|---|---|---|
+| `geometria_muoni.py` | MC_DIR OUT | MC geometrico col generatore dei muoni del MC (stesso piano, theta e phi campionati come GPS; validato sulla traccia in acqua e sul rate di Geant4): muoni attesi nella run da 24 ore e come li vedono i pannelli, col WC al centro o in un angolo dei pannelli; luce del WC contro lunghezza della traccia; K coi muoni di Frascati scelti coi tre pannelli. Scrive `measurements/geometria_muoni.json` |
+
+`MC_DIR` e' la cartella `data/` del progetto MC: lo script legge `../gun_muons_lngs.mac`.
+

@@ -846,7 +846,26 @@ LNGS; solo correzione CAEN):
   vuoto) e il WC fra 3600 e 15000 ADC·ns (2-9 PE). **Nessuno sopra 15000**,
   dove nella 0013 sta il 23% degli eventi: se fossero come il fondo se ne
   aspetterebbero 8 (P(0) = 3e-4). La coincidenza coi pannelli non prende la
-  coda ad alta carica (`sovrapposizione_0011_0013.py --v812`). Gli altri 36 hanno nei pannelli 10-90 p.e. in tempo (3-30% di
+  coda ad alta carica (`sovrapposizione_0011_0013.py --v812`).
+- **Geometria WC + pannelli** (`analisi/20261029_geometria_pannelli/`, MC
+  geometrico col generatore del MC, validato: stessa traccia in acqua e
+  stesso rate di Geant4, 1.13e-4 Hz). In 23.4 h si aspettano **9.5 muoni
+  attraverso l'acqua, ~9 con tutti e tre i pannelli saturi** (WC al centro
+  o in un angolo: non cambia), 0.2-0.3 con uno o due, 0 con nessuno, e ~0.7
+  che passano pannelli e serbatoio senza l'acqua (come l'evento 24, un PMT
+  solo). Osservati: l'evento 17 e il 24. **La geometria non fa muoni coi
+  pannelli deboli**: il WC sta dentro l'area dei pannelli e i muoni del LNGS
+  sono ripidi (25% entro 5 gradi dalla verticale), quindi chi esce dal fondo
+  del WC attraversa tutti e tre i pannelli. I 34 eventi a pannelli deboli
+  con due PMT hanno nel WC una carica mediana di 7100 ADC·ns contro 11400 dei
+  muoni MC (KS p = 1e-6): non sono muoni. **Mancano ~8 muoni su 9** (P ~
+  1e-3): la causa va cercata nella catena pannelli -> V812 -> trigger, non
+  nella geometria (non verificato);
+- **K e la selezione coi pannelli**: i muoni di Frascati (superficie, cos^2,
+  tre pannelli) hanno nell'acqua una traccia mediana di 111 mm contro i 102
+  dei muoni MC usati per tarare K. A parita' di selezione K = 1580 invece di
+  1696 (-7%), qualunque sia la posizione del WC: la resa delle fibre salirebbe
+  di ~10%. Misurare il PE singolo toglie la dipendenza dai muoni. Gli altri 36 hanno nei pannelli 10-90 p.e. in tempo (3-30% di
   una MIP): non sono dark count (1-3 p.e. a caso), ne' muoni;
 - **non e' noto se PMT, HV e scheda di amplificazione siano gli stessi nelle
   due sedi**: chiesto all'utente il 2026-10-28, senza risposta. Prima di

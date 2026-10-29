@@ -598,7 +598,11 @@ Nello stesso crate, dietro lo stesso bridge V4718:
   gli eventi di due schede non si abbinano nemmeno offline. **Il Trigger
   Time Tag conta a ~17.07 ns, non agli 8.5 ns del datasheet**: misurato il
   2026-10-23 su 5461 trigger software in 27.84 s (intervallo medio 298755
-  conteggi = 5.098 ms). Con 30 bit fa un giro ogni ~18 s.
+  conteggi = 5.098 ms). **Il contatore e' a 31 bit: un giro ogni ~36.7 s**,
+  non 30 bit e 18 s come era scritto qui (la misura del 23/10 durava 27.8 s
+  e un giro non lo vedeva). Verificato il 2026-10-30 sulla 0013: srotolato a
+  2^31 da' 2367 s, come il log e il registro del controllore; a 2^30 dava
+  1213 s, cioe' meta' del tempo e rate doppi.
 - **Il clock in daisy chain non aggancia senza un file di CAEN** (2026-10-28,
   CLK-OUT della 51639 sul CLK-IN della 202): la 202 resta 0x8104 = 0x420
   (clock esterno, PLL sganciato, non pronta), la 51639 0x580. Dal manuale
@@ -845,6 +849,38 @@ LNGS; solo correzione CAEN):
   confrontare le posizioni dei massimi, saperlo.
 - **ch18 (SiPM) parte ~40-50 ns prima di ch16 e ch17** in tutti gli eventi
   della run da 24 h: ritardo della catena, non fisica.
+- **E' lo stesso modulo** in tutte e due le sedi (detto dall'utente il
+  2026-10-29); PMT Hamamatsu H14600-103 (datasheet TPMO1097E05 in Downloads).
+
+**L'eccesso ad alta carica al LNGS (2026-10-29/30, analisi in
+`analisi/20261030_*`)**:
+- **il "massimo" dello spettro con entrambi i PMT sopra 3 sigma e' il
+  trigger, non fisica**: sta dove cade la soglia in carica (~4000 ADC·ns
+  con offset 100, ~8000 con offset 200) e si sposta con lei. La somiglianza
+  col massimo dei muoni di Frascati e' un caso. Sopra ~10000 ADC·ns (~6 PE)
+  le due soglie danno lo stesso rate: quello e' l'eccesso, **~0.3 Hz**
+  (classe C della 0013), contro ~1e-4 Hz di muoni di Hall A;
+- **la soglia del self-trigger nei dati** con offset 100 sta a ~310/319
+  conteggi d'ampiezza (ch20/ch21), cioe' ~1.7 volte un PE;
+- **MC digitalizzato come i dati** (forma dell'impulso e rumore veri, trigger
+  simulato, `analisi/20261030_digit_mc/`): il Compton di Hall A da' 0.10-0.19
+  Hz col trigger contro 4.2 Hz misurati, e si ferma a ~6 PE;
+- **il fotoelettrone singolo** dai pochi impulsi di buio veri della run a
+  trigger software 0036 vale ~1700-2000 ADC·ns, come la scala ricavata dai
+  muoni (1726): conferma su 7 impulsi. Il buio vero dei PMT e' di decine di
+  Hz, non i kHz che si dedurrebbero dai 0.5 nA del datasheet. Il resto di
+  quello che passa una soglia bassa sono i picchi spuri del V1742
+  (~55 conteggi, 1-2 campioni, al 97-99% simultanei sui due PMT);
+- controlli sull'eccesso (`analisi/20261030_eccesso/ipotesi_0013.py`):
+  pannelli accesi in tempo solo nel 10-15% degli eventi ad alta carica
+  (1-3% fuori tempo): l'eccesso NON viene da particelle che attraversano
+  anche i pannelli. Rate stabile in 40 minuti, intervalli poissoniani: niente
+  grappoli. Sopra ~8000 ADC·ns l'altro PMT si accende nel ~60% dei casi
+  QUALUNQUE sia la carica: due popolazioni, ~40% di impulsi grandi su un PMT
+  solo e ~60% con la luce divisa fra i due;
+- **la correlazione fra Δt e asimmetria di carica non localizza la
+  sorgente**: col PMT debole a pochi PE il passaggio al 50% cade sul primo
+  fotone, tardi, e la pendenza negativa viene da quello.
 
 ## Strumenti
 

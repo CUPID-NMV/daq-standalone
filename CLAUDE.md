@@ -881,6 +881,24 @@ LNGS; solo correzione CAEN):
 - **la correlazione fra Δt e asimmetria di carica non localizza la
   sorgente**: col PMT debole a pochi PE il passaggio al 50% cade sul primo
   fotone, tardi, e la pendenza negativa viene da quello.
+- **gli impulsi dell'eccesso sono LENTI come la scintillazione del
+  polistirene** (`analisi/20261029_scint_fibre/forma_coda.py`, 2026-10-29).
+  Il nucleo delle fibre BCF-9995XL e' polistirene, che scintilla da solo
+  (~1750 fotoni/MeV a 324 nm, tempi 2.3 / 11.8 / 24.8 ns: arXiv 2605.12861),
+  e il colorante della BCF-9995XL assorbe proprio li' (280-390 nm): la fibra
+  e' una fibra scintillante debole. Misurato su Kuraray Y11: 23% di una
+  BCF-12, ~1200 fotoni/MeV, "tradizionalmente non considerato nelle
+  simulazioni" (arXiv 2604.14060). Nel MC la scintillazione e' SPENTA
+  (`PhysicsList.cc`). A parita' d'ampiezza, frazione di carica dopo +20 ns:
+  coincidenze LNGS 0.17 (300-500 conteggi, come la luce pronta) -> 0.27
+  (800-1200) -> 0.32 (1200-2000), sulla previsione per la scintillazione
+  (0.30); muoni LNF 0.10-0.19, impulsi di un solo PMT 0.14 a ogni ampiezza.
+  **Mai tagliare in carica l'impulso di cui si misura la forma**: a parita'
+  d'ampiezza sceglie la forma, e la prima versione ne era falsata;
+- gli impulsi di un solo PMT NON si allargano con l'ampiezza (8.0-8.3 ns da
+  300 a 2800 conteggi), i muoni si': l'allargamento attribuito alla catena
+  potrebbe venire in parte dalla luce (muoni che attraversano una fibra).
+  Interpretazione, non verificata.
 
 ## Strumenti
 

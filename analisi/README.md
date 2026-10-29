@@ -134,3 +134,12 @@ Perche' non `Signal_maker.ipynb`: rappresenta la catena del test beam (PMT senza
 amplificatore, PE da ~3 mV su 3.5 conteggi di rumore bianco); portato alla scala
 LNGS il rumore integrato nel cancello valeva ~6 PE.
 Richiede `measurements/libreria_digit_0013.npz` (da `20261030_fondo_0013/libreria_digit.py`).
+
+## 20261029_scint_fibre/ -- l'eccesso LNGS e la scintillazione delle fibre
+
+| script | argomenti | cosa mostra |
+|---|---|---|
+| `forma_coda.py` | F(0013) F(Frascati 0005) OUT | forma degli impulsi a parita' d'ampiezza (FWHM, frazione di carica dopo +20 e +40 ns): coincidenze LNGS, impulsi di un solo PMT, muoni LNF, e le previsioni per luce pronta e per scintillazione del polistirene delle fibre |
+
+Niente tagli in carica sull'impulso che si misura: a parita' d'ampiezza sceglierebbero
+la forma (la prima versione lo faceva).

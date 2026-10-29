@@ -146,6 +146,11 @@ CAMPI = [
     ("digitizer", "IOLevel",         "front panel level",  "scelta", ["NIM", "TTL"]),
     ("digitizer", "TriggerPolarity", "discrimination edge (0 = rising/positive pulses, 1 = falling/negative)", "intero", (0, 1)),
     ("digitizer", "SelfTrigger",     "self-trigger",       "booleano", None),
+    # Senza questa riga la chiave si cambiava solo dal file: il 2026-10-29 era
+    # rimasta a true dalle run in self-trigger sui PMT, e una run pensata con
+    # la maggioranza del V812 (SiPM -> TRG-OUT -> V812 -> TRG-IN) acquisiva
+    # invece su ogni self-trigger dei SiPM, senza che la pagina lo mostrasse.
+    ("digitizer", "SelfTriggerAcquire", "self-trigger starts the acquisition (false = it only drives TRG-OUT, e.g. into the V812 majority)", "booleano", None),
     ("digitizer", "SelfTriggerMode", "self-trigger mode",  "scelta", ["paired", "global"]),
     ("digitizer", "SelfTriggerChannels", "self-trigger channels", "lista", (0, 31)),
     ("digitizer", "SelfTriggerThresholdOffset", "threshold offset", "lista", (0, 4095)),
@@ -388,12 +393,17 @@ def coerenza(d):
     # il trigger, quindi da quel momento ogni rate misurato e' il rate dell'OR
     # e non si puo' piu' attribuire. E' la stessa ragione per cui lo scan del
     # V812 si rifiuta di partire col self-trigger acceso.
-    if self_on and est_on:
+    # Con SelfTriggerAcquire = false il self-trigger non fa acquisire: va solo
+    # su TRG-OUT (verso il V812) e l'OR non c'e'. E' la configurazione della
+    # maggioranza col TRG-OUT dei SiPM, e avvisare li' sarebbe dire il falso.
+    if self_on and est_on and g.get("SelfTriggerAcquire", True) is not False:
         chi = "TRG-IN, where the CFD arrives," if c.get("Enabled") else "TRG-IN"
         avvisi.append("Self-trigger and %s are both on: the two sources go in OR. "
                       "That is legitimate, but the event keeps no record of which one "
                       "fired, so any measured rate is the rate of the OR. "
-                      "To measure one alone, switch the other off." % chi)
+                      "To measure one alone, switch the other off. If the self-trigger "
+                      "should only feed the V812 through TRG-OUT, set "
+                      "SelfTriggerAcquire = false." % chi)
 
     # Con il self-trigger spento NON si avvisa di niente che lo riguardi --
     # ne' TriggerOut = "self", ne' i canali, ne' gli offset rimasti scritti nel

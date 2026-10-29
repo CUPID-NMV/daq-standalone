@@ -171,6 +171,7 @@ scintillazione delle fibre.
 |---|---|---|
 | `geometria_muoni.py` | MC_DIR OUT | MC geometrico col generatore dei muoni del MC (stesso piano, theta e phi campionati come GPS; validato sulla traccia in acqua e sul rate di Geant4): muoni attesi nella run da 24 ore e come li vedono i pannelli, col WC al centro o in un angolo dei pannelli; luce del WC contro lunghezza della traccia; K coi muoni di Frascati scelti coi tre pannelli. Scrive `measurements/geometria_muoni.json` |
 | `dt_asimmetria_24h.py` | F_24H F_0013 OUT | dt fra i due PMT (50% del massimo) contro ln(Q20/Q21) per i 36 eventi non muoni della run da 24 ore, sopra il fondo della 0013; gira sul PC, scrive `measurements/dt_asimmetria_24h.npz` |
+| `forme_dt_24h.py` | F_24H OUT | forme d'onda dei due PMT (polarita' vera, mV) per gli eventi a dt +32..+44 ns e tre di riferimento; tempo al 50% dal massimo contro primo superamento del 20% in avanti. Gira sul PC |
 
 
 `MC_DIR` e' la cartella `data/` del progetto MC: lo script legge `../gun_muons_lngs.mac`.

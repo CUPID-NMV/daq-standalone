@@ -872,9 +872,17 @@ LNGS; solo correzione CAEN):
   dei tempi degli impulsi deboli). Due differenze, piccole statistiche: la
   luce pende verso ch21 nel 71% (fondo 49%, P = 0.01), e 6 eventi stanno a
   dt +32..+44 ns contro 0.8 attesi (P = 2e-4 prima del fattore per la
-  finestra scelta guardando), tutti con piu' luce su ch21. Da guardare nelle
-  forme d'onda; la pendenza verso ch21 potrebbe venire dal lato dei pannelli
-  dove stanno i SiPM (non verificato). Gli altri 36 hanno nei pannelli 10-90 p.e. in tempo (3-30% di
+  finestra scelta guardando), tutti con piu' luce su ch21. **Il gruppo e'
+  un artefatto del tempo al 50% cercato risalendo dal massimo**
+  (`forme_dt_24h.py`): ch21 ha un impulso grande e veloce, ch20 pochi PE
+  sparsi su 40-100 ns, e il suo massimo cade su un PE tardivo. Col primo
+  superamento del 20% del massimo dt scende a +1..+14 ns in 5 casi su 6;
+  solo l'evento 6 ha ch20 davvero in ritardo (~40 ns, 1.6 PE). **Su impulsi
+  lenti con pochi PE il tempo al 50% dal massimo non e' un tempo d'arrivo.**
+  In vari eventi, anche di riferimento, ch21 mostra due impulsi veloci a
+  ~20-25 ns l'uno dall'altro: forse impulsi tardivi del PMT, non verificato.
+  La pendenza verso ch21 potrebbe venire dal lato dei pannelli dove stanno
+  i SiPM (non verificato). Gli altri 36 hanno nei pannelli 10-90 p.e. in tempo (3-30% di
   una MIP): non sono dark count (1-3 p.e. a caso), ne' muoni;
 - **non e' noto se PMT, HV e scheda di amplificazione siano gli stessi nelle
   due sedi**: chiesto all'utente il 2026-10-28, senza risposta. Prima di

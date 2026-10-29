@@ -153,6 +153,8 @@ la forma (la prima versione lo faceva).
 |---|---|---|
 | `flusso_haffke.py` | HAFFKE.pdf OUT | legge le curve della Fig. 2 di arXiv:1101.5298 dal PDF vettoriale e le integra: il "flusso" della Tab. 1 sono i gamma entranti per cm^2 di superficie del NaI (J = phi/4). Scrive `measurements/flusso_haffke.json` |
 | `confronto_rinormalizzato.py` | OUT [PRIMA.npz] | fondo LNGS 0013 contro i gamma di Hall A digitalizzati con la normalizzazione corretta, per classe di carica e come rapporto dati/MC; PRIMA.npz disegna anche una digitalizzazione vecchia |
+| `soglie_lngs.py` | F1.h5.gz [F2 ...] | per run: bordo del self-trigger nell'ampiezza registrata (2 percentile degli eventi con un PMT solo), sigma della carica a vuoto, t50, durata dal `.log`; scrive `measurements/soglie_trigger_lngs.json`. Gira sul PC DAQ, dove sono i dati |
+| `sovrapposizione_0011_0013.py` | OUT | fondo LNGS 0011 + 0013 sommato contro MC gamma + muoni, col trigger e il taglio di ogni run pesati con la durata; asse logaritmico fino a 200000 ADC·ns, scala in PE |
 
 Il PDF non sta nel repository: si scarica da arXiv. `flusso_haffke.py` richiede
 `pymupdf` (sul Mac c'e' in `~/venvs/jupyter-global`).

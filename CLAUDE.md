@@ -857,9 +857,13 @@ LNGS; solo correzione CAEN):
 - **il "massimo" dello spettro con entrambi i PMT sopra 3 sigma e' il
   trigger, non fisica**: sta dove cade la soglia in carica (~4000 ADC·ns
   con offset 100, ~8000 con offset 200) e si sposta con lei. La somiglianza
-  col massimo dei muoni di Frascati e' un caso. Sopra ~10000 ADC·ns (~6 PE)
-  le due soglie danno lo stesso rate: quello e' l'eccesso, **~0.3 Hz**
-  (classe C della 0013), contro ~1e-4 Hz di muoni di Hall A;
+  col massimo dei muoni di Frascati e' un caso. Sopra ~15000 ADC·ns (~9 PE)
+  le due soglie danno lo stesso rate (0.138 +- 0.003 e 0.149 +- 0.008 Hz).
+  Fra 10000 e 15000 l'offset 200 perde meta' degli eventi dei dati (0.077
+  contro 0.152 Hz) e solo un quarto di quelli del MC: a parita' di carica gli
+  impulsi dei dati sono piu' bassi, cioe' piu' lenti (interpretazione). La
+  classe C (>= 10000) vale **~0.3 Hz** nella 0013 e 0.215 nella 0011, contro
+  ~1e-4 Hz di muoni di Hall A;
 - **la soglia del self-trigger nei dati** con offset 100 sta a ~310/319
   conteggi d'ampiezza (ch20/ch21), cioe' ~1.7 volte un PE;
 - **MC digitalizzato come i dati** (forma dell'impulso e rumore veri, trigger
@@ -887,6 +891,15 @@ LNGS; solo correzione CAEN):
   contro 0.082 (**x3.7**, non x12). Senza scintillazione il MC sopra 7000
   ADC·ns non ha quasi niente (0.008 e 0.001 Hz): la carica alta del MC e'
   tutta luce del polistirene delle fibre;
+- **0011 + 0013 sommate** (`sovrapposizione_0011_0013.py`, 4.0 h): il bordo
+  del trigger della 0011 (offset 200) sta a 537/558 conteggi d'ampiezza, 1.75
+  volte quello della 0013 e non 2 (`soglie_lngs.py`); il MC prende il
+  trigger e il taglio a 3 sigma di ogni run, pesati con la durata. Entrambi i
+  PMT > 3 sigma: 0.305 Hz contro 0.138 (gamma; i muoni danno 8e-5); sotto
+  7000 ADC·ns dati/MC 0.96, classe C x3.2. Il rapporto sale da ~1 sotto 6 PE
+  a ~4-5 fra 9 e 15 PE, e torna a ~2 sopra ~35 PE. Il MC ha solo ~60 eventi
+  Geant4 indipendenti sopra 10000 ADC·ns: la forma della sua coda non e'
+  determinata;
 - **il fotoelettrone singolo** dai pochi impulsi di buio veri della run a
   trigger software 0036 vale ~1700-2000 ADC·ns, come la scala ricavata dai
   muoni (1726; 1696 con la scintillazione delle fibre, che a un muone

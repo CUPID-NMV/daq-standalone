@@ -1,0 +1,134 @@
+{
+ "file": "/home/daq/daq-standalone/data/LNGS/LNGS__54-0V_0011_750Ms_55PT.h5.gz",
+ "run": "LNGS__54-0V_0011_750Ms_55PT",
+ "dt_ns": 1.3333333333333333,
+ "padme": "piedistallo",
+ "unita": "ADC*ns (1 pC = 204.8)",
+ "canali": {
+  "16": {
+   "segno": 1,
+   "gruppo": 2,
+   "cancello_ns": [
+    240.0,
+    500.0
+   ],
+   "ped": [
+    0,
+    113
+   ],
+   "vuoto": [
+    0,
+    56
+   ],
+   "celle_viste": 1024,
+   "campioni_per_cella_min": 486,
+   "dispersione_fra_celle": 2.601811577497926,
+   "rms_ped_caen": 3.22847580909729,
+   "rms_ped_padme": 2.13367952134067,
+   "sigma_vuoto_caen": 217.58258838649846,
+   "sigma_vuoto_padme": 207.5025159861839,
+   "saturati": 0,
+   "vuoto_ns": 74.66666666666666
+  },
+  "17": {
+   "segno": 1,
+   "gruppo": 2,
+   "cancello_ns": [
+    240.0,
+    500.0
+   ],
+   "ped": [
+    0,
+    113
+   ],
+   "vuoto": [
+    0,
+    56
+   ],
+   "celle_viste": 1024,
+   "campioni_per_cella_min": 486,
+   "dispersione_fra_celle": 2.7873769416502947,
+   "rms_ped_caen": 3.392648696899414,
+   "rms_ped_padme": 2.301667668094241,
+   "sigma_vuoto_caen": 237.52175634798613,
+   "sigma_vuoto_padme": 226.908451769184,
+   "saturati": 0,
+   "vuoto_ns": 74.66666666666666
+  },
+  "18": {
+   "segno": 1,
+   "gruppo": 2,
+   "cancello_ns": [
+    240.0,
+    500.0
+   ],
+   "ped": [
+    0,
+    113
+   ],
+   "vuoto": [
+    0,
+    56
+   ],
+   "celle_viste": 1024,
+   "campioni_per_cella_min": 486,
+   "dispersione_fra_celle": 2.4639596940620603,
+   "rms_ped_caen": 3.3101606369018555,
+   "rms_ped_padme": 2.3665576670513153,
+   "sigma_vuoto_caen": 230.69439897135686,
+   "sigma_vuoto_padme": 219.4660654965708,
+   "saturati": 0,
+   "vuoto_ns": 74.66666666666666
+  },
+  "20": {
+   "segno": -1,
+   "gruppo": 2,
+   "cancello_ns": [
+    240.0,
+    500.0
+   ],
+   "ped": [
+    0,
+    113
+   ],
+   "vuoto": [
+    0,
+    56
+   ],
+   "celle_viste": 1024,
+   "campioni_per_cella_min": 486,
+   "dispersione_fra_celle": 1.234348731425396,
+   "rms_ped_caen": 2.2041971683502197,
+   "rms_ped_padme": 1.9410208820037607,
+   "sigma_vuoto_caen": 63.42361763698415,
+   "sigma_vuoto_padme": 56.931213719678645,
+   "saturati": 39,
+   "vuoto_ns": 74.66666666666666
+  },
+  "21": {
+   "segno": -1,
+   "gruppo": 2,
+   "cancello_ns": [
+    240.0,
+    500.0
+   ],
+   "ped": [
+    0,
+    113
+   ],
+   "vuoto": [
+    0,
+    56
+   ],
+   "celle_viste": 1024,
+   "campioni_per_cella_min": 486,
+   "dispersione_fra_celle": 1.1026431795599398,
+   "rms_ped_caen": 2.1132476329803467,
+   "rms_ped_padme": 1.9101929293071918,
+   "sigma_vuoto_caen": 68.16529983952921,
+   "sigma_vuoto_padme": 60.84136400206268,
+   "saturati": 66,
+   "vuoto_ns": 74.66666666666666
+  }
+ }
+}

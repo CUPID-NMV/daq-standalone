@@ -1,0 +1,59 @@
+{
+ "file": "/home/daq/daq-standalone/data/test_54-0V_0005_750Ms_60PT.h5.gz",
+ "run": "test_54-0V_0005_750Ms_60PT",
+ "dt_ns": 1.3333333333333333,
+ "padme": "nessuna",
+ "unita": "ADC*ns (1 pC = 204.8)",
+ "canali": {
+  "24": {
+   "segno": -1,
+   "gruppo": 3,
+   "cancello_ns": [
+    320.66666666666663,
+    400.0
+   ],
+   "ped": [
+    8,
+    226
+   ],
+   "vuoto": [
+    8,
+    67
+   ],
+   "celle_viste": 0,
+   "campioni_per_cella_min": 0,
+   "dispersione_fra_celle": 0.0,
+   "rms_ped_caen": 4.562813758850098,
+   "rms_ped_padme": 4.562813758850098,
+   "sigma_vuoto_caen": 80.11385831914667,
+   "sigma_vuoto_padme": 80.11385831914667,
+   "saturati": 566,
+   "vuoto_ns": 78.66666666666666
+  },
+  "26": {
+   "segno": -1,
+   "gruppo": 3,
+   "cancello_ns": [
+    320.66666666666663,
+    397.3333333333333
+   ],
+   "ped": [
+    8,
+    226
+   ],
+   "vuoto": [
+    8,
+    65
+   ],
+   "celle_viste": 0,
+   "campioni_per_cella_min": 0,
+   "dispersione_fra_celle": 0.0,
+   "rms_ped_caen": 5.750187873840332,
+   "rms_ped_padme": 5.750187873840332,
+   "sigma_vuoto_caen": 65.716373063086,
+   "sigma_vuoto_padme": 65.716373063086,
+   "saturati": 467,
+   "vuoto_ns": 76.0
+  }
+ }
+}

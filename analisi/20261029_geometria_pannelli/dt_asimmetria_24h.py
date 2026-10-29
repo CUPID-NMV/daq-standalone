@@ -124,12 +124,16 @@ a.scatter(lr24[uno], dt24[uno], s=55, facecolor="none", edgecolor="#555", lw=1.2
 a.scatter(lr24[17], dt24[17], s=260, marker="*", color="#d62728", edgecolor="k", lw=0.6, zorder=4,
           label="event 17, muon candidate")
 # eventi oltre la scala: al bordo con una freccia e il valore
-for k, e in enumerate(np.where(altri & (np.abs(dt24) > LIM))[0]):
+note = []
+for e in np.where(altri & (np.abs(dt24) > LIM))[0]:
     yb = np.sign(dt24[e]) * (LIM - 2)
     a.scatter(lr24[e], yb, s=70, marker="^" if dt24[e] > 0 else "v", color="#555", zorder=4)
-    # etichette sfalsate in altezza, se no si sovrappongono
-    a.annotate("event %d: Δt = %+.0f ns%s" % (e, dt24[e], "" if both24[e] else ", one PMT below 3σ"),
-               (lr24[e], yb), textcoords="offset points", xytext=(8, -5 - 13 * k), fontsize=8.5, color="#333")
+    a.annotate(str(e), (lr24[e], yb), textcoords="offset points", xytext=(7, -4), fontsize=8.5, color="#333")
+    note.append("event %d: Δt = %+.0f ns%s" % (e, dt24[e], "" if both24[e] else " (one PMT below 3σ)"))
+if note:
+    # le note in un riquadro solo: accanto ai triangoli si sovrapponevano
+    a.text(0.985, 0.975, "off scale (▲):\n" + "\n".join(note), transform=a.transAxes, ha="right", va="top",
+           fontsize=8.5, color="#333", bbox=dict(facecolor="white", edgecolor="#bbb", alpha=0.92))
 a.axhline(0, color="k", lw=0.6)
 a.axvline(0, color="k", lw=0.6)
 a.set_xlim(-4, 4)

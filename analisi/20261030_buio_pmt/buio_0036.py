@@ -13,6 +13,11 @@ sopra SOGLIA conteggi, almeno 30 ns dal precedente. Carica: somma da 10 ns
 prima a 40 ns dopo il picco, col piedistallo preso da 40 a 15 ns prima.
 Il tempo vivo e' il numero di finestre per il tratto utile.
 
+Due popolazioni, separate dalla LARGHEZZA (carica / ampiezza):
+  - stretti (< 5 ns, 1-2 campioni), ~55 conteggi: i picchi spuri del V1742,
+    1-3 ns, ~12.7 mV, simultanei su tutti i canali (CLAUDE.md); si contano
+    anche quelli che cadono allo stesso campione (±2) sull'altro PMT;
+  - larghi (>= 5 ns), la forma degli impulsi dei PMT: questi sono il buio.
 Confronto: la scala K dei muoni (measurements/mc_digit_K.json) con la forma
 dell'impulso della 0013 prevede l'ampiezza di un PE.
 """
@@ -30,7 +35,8 @@ import matplotlib.pyplot as plt
 import padme
 
 F, OUT = sys.argv[1], sys.argv[2]
-SOGLIA = 12.0
+SOGLIA = float(sys.argv[3]) if len(sys.argv) > 3 else 30.0
+LARGO_NS = 5.0
 dt = 4 / 3
 h, c, d, s = padme.leggi(F, [20, 21], None)
 n_ev, _, ns = d.shape
@@ -62,19 +68,31 @@ for j, ch in enumerate((20, 21)):
         q.append((y[e, k - i_a:k + i_b] - base).sum() * dt)
         esempi.append((e, k))
     amp, q = np.array(amp), np.array(q)
-    ris[ch] = dict(amp=amp, q=q, rms=rms, esempi=esempi, y=y)
-    print("ch%d: rumore %.2f conteggi rms; %d impulsi > %.0f conteggi in %.4f s -> %.0f Hz; "
-          "ampiezza mediana %.0f, carica mediana %.0f ADC*ns; attesa per 1 PE dai muoni: ampiezza %.0f, carica %.0f"
-          % (ch, rms, len(amp), SOGLIA, T_VIVO, len(amp) / T_VIVO, np.median(amp) if len(amp) else 0,
-             np.median(q) if len(q) else 0, A1_ATTESA[ch], K))
+    ris[ch] = dict(amp=amp, q=q, rms=rms, esempi=esempi, y=y, largo=(q / np.maximum(amp, 1)) >= LARGO_NS)
+
+# picchi spuri: stesso evento e stesso campione (±2) sui due PMT
+pos = {ch: {(e, k) for e, k in ris[ch]["esempi"]} for ch in (20, 21)}
+for ch, altro in ((20, 21), (21, 20)):
+    r = ris[ch]
+    r["coinc"] = np.array([any((e, k + dk) in pos[altro] for dk in range(-2, 3)) for e, k in r["esempi"]], bool)
+    L = r["largo"]
+    print("ch%d: rumore %.2f conteggi rms; %d impulsi > %.0f conteggi in %.4f s; STRETTI %d (%.0f Hz, %d anche "
+          "sull'altro PMT), LARGHI %d (%.1f Hz): carica mediana %.0f ADC*ns, ampiezza mediana %.0f; "
+          "attesa per 1 PE dai muoni: carica %.0f, ampiezza %.0f"
+          % (ch, r["rms"], len(L), SOGLIA, T_VIVO, (~L).sum(), (~L).sum() / T_VIVO, (r["coinc"] & ~L).sum(),
+             L.sum(), L.sum() / T_VIVO, np.median(r["q"][L]) if L.any() else 0,
+             np.median(r["amp"][L]) if L.any() else 0, K, A1_ATTESA[ch]))
 
 fig = plt.figure(figsize=(19, 13))
 gs = fig.add_gridspec(3, 4)
 for j, ch in enumerate((20, 21)):
     r = ris[ch]
     a = fig.add_subplot(gs[0, 2 * j])
-    a.hist(r["amp"], np.linspace(0, 400, 101), histtype="step", color="k", lw=1.4,
-           label="dark pulses: %d in %.3f s = %.0f Hz (> %.0f counts)" % (len(r["amp"]), T_VIVO, len(r["amp"]) / T_VIVO, SOGLIA))
+    L = r["largo"]
+    a.hist(r["amp"][~L], np.linspace(0, 400, 101), histtype="step", color="#888", lw=1.4,
+           label="narrow (< %.0f ns): V1742 spurious spikes, %.0f Hz" % (LARGO_NS, (~L).sum() / T_VIVO))
+    a.hist(r["amp"][L], np.linspace(0, 400, 101), histtype="stepfilled", color="k", alpha=0.6,
+           label="wide: PMT dark pulses, %d in %.3f s = %.0f Hz" % (L.sum(), T_VIVO, L.sum() / T_VIVO))
     a.axvline(A1_ATTESA[ch], color="#e8710a", ls="--", lw=1.4,
               label="1 PE expected from the muon scale: %.0f counts" % A1_ATTESA[ch])
     a.axvline(lib["sogliaA_ch%d" % ch], color="#2a6fdb", ls=":", lw=1.4,
@@ -86,7 +104,9 @@ for j, ch in enumerate((20, 21)):
     a.legend(fontsize=7.8, frameon=False)
     a.grid(alpha=0.25, which="both")
     a = fig.add_subplot(gs[0, 2 * j + 1])
-    a.hist(r["q"], np.linspace(-500, 6000, 131), histtype="step", color="k", lw=1.4, label="dark pulses")
+    a.hist(r["q"][~L], np.linspace(-500, 6000, 131), histtype="step", color="#888", lw=1.4, label="narrow: spikes")
+    a.hist(r["q"][L], np.linspace(-500, 6000, 131), histtype="stepfilled", color="k", alpha=0.6,
+           label="wide: PMT dark pulses (median %.0f ADC·ns)" % (np.median(r["q"][L]) if L.any() else 0))
     a.axvline(K, color="#e8710a", ls="--", lw=1.4, label="1 PE from the muon scale: K = %.0f ADC·ns" % K)
     a.set_yscale("log")
     a.set_xlabel("ch%d pulse charge [ADC·ns]  (−10/+40 ns around the peak)" % ch)
@@ -94,12 +114,15 @@ for j, ch in enumerate((20, 21)):
     a.set_title("ch%d — charge of the dark pulses" % ch, fontsize=10, loc="left")
     a.legend(fontsize=7.8, frameon=False)
     a.grid(alpha=0.25, which="both")
-    for k_, (e, k) in enumerate(r["esempi"][:4]):
+    ordine = list(np.where(r["largo"])[0]) + list(np.where(~r["largo"])[0])
+    for k_, i_ in enumerate(ordine[:4]):
+        e, k = r["esempi"][i_]
         a = fig.add_subplot(gs[1 + j, k_])
         a.plot(t, -r["y"][e], color="#e8710a" if ch == 20 else "#c23b5a", lw=0.7)
         a.axvspan(550, 800, color="#eee", zorder=0)
         a.set_xlim(max(0, t[k] - 150), min(t[-1], t[k] + 250))
-        a.set_title("ch%d, window %d: pulse at %.0f ns, A = −%.0f, Q = %.0f" % (ch, e, t[k], r["amp"][k_], r["q"][k_]),
+        a.set_title("ch%d, window %d (%s): pulse at %.0f ns, A = −%.0f, Q = %.0f"
+                    % (ch, e, "wide" if r["largo"][i_] else "narrow", t[k], r["amp"][i_], r["q"][i_]),
                     fontsize=8.5, loc="left")
         a.set_xlabel("time [ns]")
         a.set_ylabel("ADC − baseline [counts]")
@@ -109,4 +132,5 @@ fig.suptitle("PMT dark pulses in the software-trigger run 0036 (random windows, 
 fig.tight_layout()
 fig.savefig(OUT, dpi=90)
 np.savez_compressed(_os.path.join(MIS, "buio_0036.npz"), amp20=ris[20]["amp"], q20=ris[20]["q"],
-                    amp21=ris[21]["amp"], q21=ris[21]["q"], t_vivo_s=T_VIVO, soglia=SOGLIA)
+                    largo20=ris[20]["largo"], amp21=ris[21]["amp"], q21=ris[21]["q"], largo21=ris[21]["largo"],
+                    t_vivo_s=T_VIVO, soglia=SOGLIA)

@@ -3,7 +3,9 @@ normalizzato al tempo di acquisizione della 0011 e diviso per il numero di
 eventi LNGS, cosi' sta nella stessa unita' della curva LNGS (frazione degli
 eventi LNGS per bin) e la sua area vale N_Compton_atteso / N_LNGS.
 
-    python3 analisi/20261029_compton_mc/sovrapposizione_area_tempo.py MC_DIR OUT.png
+    python3 analisi/20261029_compton_mc/sovrapposizione_area_tempo.py MC_DIR OUT.png [RUN]
+
+RUN = 0011 (di serie, self-trigger offset 200) oppure 0013 (offset 100).
 
 - LNF: Frascati 0005, tre SiPM sopra soglia, cancello della 0011 allineato
   sull'impulso (318-578 ns, piedistallo 78-228);
@@ -35,10 +37,13 @@ R_GAMMA_HZ = 0.35 / 4.0 * (2 * 130 * 130 + 4 * 130 * 30)
 QE_WL = [200, 250, 300, 350, 380, 400, 420, 450, 500, 550, 600, 650, 700]
 QE = [0.18, 0.25, 0.30, 0.34, 0.35, 0.34, 0.32, 0.28, 0.18, 0.08, 0.03, 0.005, 0.0]
 SPE_RES, REPLICHE, PE_MU_MC = 0.30, 400, 4.86
-LIVE_0011 = 11992.98
+RUN = sys.argv[3] if len(sys.argv) > 3 else "0011"
+# "Acquisition time" dei log delle run, e offset del self-trigger dei PMT
+LIVE_0011 = {"0011": 11992.98, "0013": 2367.313986}[RUN]
+OFFSET = {"0011": 200, "0013": 100}[RUN]
 MUONI = [(17, 20, 5827.0), (17, 21, 3633.0), (24, 21, 4602.0)]
 
-lng = np.load(_os.path.join(MIS, "carica_0011_testbeam.npz"))
+lng = np.load(_os.path.join(MIS, "carica_%s_testbeam.npz" % RUN))
 q20, q21 = lng["q_caen_ch20"], lng["q_caen_ch21"]
 fra = np.load(_os.path.join(MIS, "carica_frascati_0005_gateLNGS_ped78-228.npz"))
 sel = np.load(_os.path.join(MIS, "frascati_0005_sel_3sipm_500k.npy"))
@@ -89,12 +94,12 @@ for a, log in ((ax[0], False), (ax[1], True)):
     a.hist(f26, b, weights=W(f26), histtype="step", color="#1aa39a", lw=1.4,
            label="LNF (Frascati 0005) ch26, idem")
     a.hist(q20[both], b, weights=W(q20[both]), histtype="step", color="#e8710a", lw=1.6,
-           label="LNGS 0011 ch20, both PMT > 3σ_ped (%d ev.)" % both.sum())
+           label="LNGS %s ch20 (self-trigger offset %d), both PMT > 3σ_ped (%d ev. in %.0f s)" % (RUN, OFFSET, both.sum(), LIVE_0011))
     a.hist(q21[both], b, weights=W(q21[both]), histtype="step", color="#c23b5a", lw=1.6,
-           label="LNGS 0011 ch21, idem")
+           label="LNGS %s ch21, idem" % RUN)
     a.hist(mc, b, weights=np.full(len(mc), W_MC), color="#888", alpha=0.35, lw=0,
-           label="MC Hall A γ → Compton e- → Cherenkov, both > 3σ, TIME-normalised to the LNGS run "
-                 "(area = %.2f × LNGS)" % (len(mc) * W_MC))
+           label="MC Hall A γ → Compton e- → Cherenkov, both > 3σ, TIME-normalised to the LNGS %s run "
+                 "(area = %.2f × LNGS)" % (RUN, len(mc) * W_MC))
     for k, (e, ch, v) in enumerate(MUONI):
         a.axvline(v, color="#7b2d8b", lw=2.2, ls=("-", "--", ":")[k],
                   label="LNGS muon candidate %s: event %d, ch%d = %.0f ADC·ns" % ("abc"[k], e, ch, v))
@@ -112,8 +117,8 @@ for a, log in ((ax[0], False), (ax[1], True)):
     else:
         a.set_title("linear scale", fontsize=10, loc="left")
         a.legend(fontsize=7.6, frameon=False, loc="upper right")
-        a.text(0.98, 0.42, "absolute rates, both PMT > 3σ_ped:\nLNGS 0011 data  %.3f Hz\nMC Hall A γ (Compton)  %.3f Hz"
-               % (both.sum() / LIVE_0011, rate_g), transform=a.transAxes, ha="right", va="top", fontsize=9,
+        a.text(0.98, 0.42, "absolute rates, both PMT > 3σ_ped:\nLNGS %s data  %.3f Hz\nMC Hall A γ (Compton)  %.3f Hz"
+               % (RUN, both.sum() / LIVE_0011, rate_g), transform=a.transAxes, ha="right", va="top", fontsize=9,
                bbox=dict(boxstyle="round", fc="white", ec="#bbb"))
 fig.suptitle("WC prototype PMT charge: LNF muons, LNGS data, LNGS muon candidates and the simulated "
              "Hall A Compton background (data area-normalised, Compton normalised to the LNGS acquisition time; scale %.0f ADC·ns/PE)" % K,

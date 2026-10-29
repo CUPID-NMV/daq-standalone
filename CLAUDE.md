@@ -900,6 +900,16 @@ LNGS; solo correzione CAEN):
   a ~4-5 fra 9 e 15 PE, e torna a ~2 sopra ~35 PE. Il MC ha solo ~60 eventi
   Geant4 indipendenti sopra 10000 ADC·ns: la forma della sua coda non e'
   determinata;
+- **con resa 3500 fotoni/MeV, il doppio del polistirene puro, i gamma di
+  Hall A riproducono il fondo LNGS** (`confronto_rese.py`, 0011 + 0013,
+  10 M gamma per resa, 2026-10-29). Entrambi i PMT > 3 sigma: 0.339 Hz
+  contro 0.305 (a 1750: 0.138). Dati/MC per fascia di carica: 0.78 (< 7000
+  ADC·ns), 0.75 (7000-10000), 0.80 (10000-15000), 1.10 (>= 15000). L'asimmetria
+  della classe C diventa quella dei dati: |ln(Q20/Q21)| < 1 nel 54% contro il
+  48% (a 1750 il 22%). **L'eccesso si spiega con la resa delle fibre, senza
+  sorgenti in piu'**; da confermare misurando la resa della BCF-9995XL al
+  banco (Sr-90). Resa e flusso sono in parte degeneri: il flusso scala tutto,
+  la resa cambia la forma. K non e' ritarato a 3500 (effetto ~2%);
 - **il fotoelettrone singolo** dai pochi impulsi di buio veri della run a
   trigger software 0036 vale ~1700-2000 ADC·ns, come la scala ricavata dai
   muoni (1726; 1696 con la scintillazione delle fibre, che a un muone

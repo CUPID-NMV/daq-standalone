@@ -1,7 +1,10 @@
 """Fondo LNGS misurato, 0011 + 0013 sommate, contro il MC digitalizzato:
 gamma di Hall A (Compton + scintillazione delle fibre) e muoni di Hall A.
 
-    python3 analisi/20261029_normalizzazione_gamma/sovrapposizione_0011_0013.py OUT.png
+    python3 analisi/20261029_normalizzazione_gamma/sovrapposizione_0011_0013.py OUT.png [GAMMA.npz:RESA]
+
+GAMMA.npz: i gamma digitalizzati da usare (di serie mc_digit_gamma_righe_s1750.npz:1750);
+RESA e' la resa di scintillazione delle fibre di quella produzione, per la legenda.
 
 Le due run hanno soglie diverse (offset 200 e 100): sotto ~10000 ADC*ns la
 somma mescola due trigger. Il MC si somma allo stesso modo: per ogni run il
@@ -25,6 +28,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 OUT = sys.argv[1]
+GAMMA_F, RESA = (sys.argv[2].split(":") + ["?"])[:2] if len(sys.argv) > 2 else ("mc_digit_gamma_righe_s1750.npz", "1750")
 MIS = _os.path.join(ROOT, "measurements")
 SOGLIE = json.load(open(_os.path.join(MIS, "soglie_trigger_lngs.json")))
 RUN = {"0011": "LNGS__54-0V_0011_750Ms_55PT", "0013": "LNGS__54-0V_0013_750Ms_55PT"}
@@ -64,8 +68,8 @@ dq, dw, dr = np.concatenate(dq), np.concatenate(dw), np.concatenate(dr)
 
 # MC: ogni evento entra una volta per run, col trigger e il taglio di quella run, pesato T_run / TT
 mc = {}
-for chiave, f in (("gamma", "mc_digit_gamma_righe_s1750.npz"), ("mu", "mc_digit_mu_lngs_s1750.npz")):
-    z = np.load(_os.path.join(MIS, f))
+for chiave, f in (("gamma", GAMMA_F), ("mu", "mc_digit_mu_lngs_s1750.npz")):
+    z = np.load(f if _os.path.exists(f) else _os.path.join(MIS, f))
     w0, rep = float(z["peso_hz"]), int(z["repliche"])
     qq, ww, rr = [], [], []
     for r in RUN:
@@ -95,19 +99,25 @@ hd = np.histogram(dq, b)[0]
 ok = hd > 0
 hg = np.histogram(mc["gamma"]["q"], b, weights=mc["gamma"]["w"])[0]
 hm = np.histogram(mc["mu"]["q"], b, weights=mc["mu"]["w"])[0]
-# errore statistico del MC: le repliche dello stesso evento Geant4 contano come correlate
-eg = np.sqrt(np.histogram(mc["gamma"]["q"], b, weights=mc["gamma"]["w"] ** 2)[0] * mc["gamma"]["rep"])
-em = np.sqrt(np.histogram(mc["mu"]["q"], b, weights=mc["mu"]["w"] ** 2)[0] * mc["mu"]["rep"])
-et = np.sqrt(eg ** 2 + em ** 2)
+# errore statistico del MC dagli eventi Geant4 indipendenti: i gamma scelti col trigger
+# della 0013 (contiene quelli della 0011, ogni evento vi entra una volta) diviso le
+# repliche, che contano come correlate. I muoni hanno peso 1e-4 e non contano.
+def n_indip(bins):
+    k = mc["gamma"]["r"] == "0013"
+    return np.histogram(mc["gamma"]["q"][k], bins)[0] / mc["gamma"]["rep"]
+
+
+ni = n_indip(b)
+et = (hg + hm) / np.sqrt(np.clip(ni, 1e-9, None)) * (ni > 0)
 a.stairs(hg + hm + et, b, baseline=np.clip(hg + hm - et, 1e-12, None), fill=True, color="#7b2d8b", alpha=0.18,
          lw=0, label="MC statistical uncertainty (±1σ)")
 a.stairs(hg + hm, b, color="#7b2d8b", lw=2.4,
          label="MC total, Hall A γ + μ: %.3f Hz" % (cg["both > 3σ"] + cm["both > 3σ"]))
 a.stairs(hg, b, color="#e8710a", lw=1.2, ls="--",
-         label="  Hall A γ, Compton + fibre scintillation (%.0f Hz generated, %d M): %.3f Hz"
-               % (mc["gamma"]["rate"], mc["gamma"]["ngen"] // 10**6, cg["both > 3σ"]))
+         label="  Hall A γ, Compton + fibre scintillation %s γ/MeV (%.0f Hz generated, %d M): %.3f Hz"
+               % (RESA, mc["gamma"]["rate"], mc["gamma"]["ngen"] // 10**6, cg["both > 3σ"]))
 a.stairs(hm, b, color="#2a6fdb", lw=1.2, ls="--",
-         label="  Hall A μ, fibre scintillation (%.4f Hz on 6.5 × 6.5 m, %d k): %.5f Hz"
+         label="  Hall A μ, fibre scintillation 1750 γ/MeV (%.4f Hz on 6.5 × 6.5 m, %d k): %.5f Hz"
                % (mc["mu"]["rate"], mc["mu"]["ngen"] // 1000, cm["both > 3σ"]))
 a.errorbar(bc[ok], hd[ok] / TT, yerr=np.sqrt(hd[ok]) / TT, xerr=[(bc - b[:-1])[ok], (b[1:] - bc)[ok]],
            fmt="o", ms=4, color="k", lw=0.8, zorder=5,
@@ -118,7 +128,7 @@ for v in (7000, 10000):
 a.text(10400, 1.3e-7, "class C →", fontsize=9, color="#555")
 a.set_xscale("log")
 a.set_yscale("log")
-a.set_ylim(1e-7, 0.3)
+a.set_ylim(1e-7, 3)   # spazio per la legenda sopra i dati
 a.set_ylabel("rate per bin [Hz]  (10 bins per decade)")
 a.set_title("both PMTs > 3σ; MC with the trigger and the 3σ cut of each run (edges %.0f/%.0f and %.0f/%.0f counts), "
             "time-weighted;  K = %.0f ADC·ns/PE"
@@ -143,11 +153,12 @@ for chi, col, al, mk, lab in ((None, "k", 1.0, "o", "0011 + 0013"), ("0011", "#1
     fg = TT / tt
     sg = np.histogram(mc["gamma"]["q"][mg], br, weights=mc["gamma"]["w"][mg] * fg)[0]
     sm = np.histogram(mc["mu"]["q"][mmu], br, weights=mc["mu"]["w"][mmu] * fg)[0]
-    ng = np.histogram(mc["gamma"]["q"][mg], br)[0]
+    # eventi indipendenti: per la somma quelli della 0013 (un evento conta una volta)
+    ng = n_indip(br) if chi is None else np.histogram(mc["gamma"]["q"][mg], br)[0] / mc["gamma"]["rep"]
     s_ = sg + sm
     ok = (nd > 0) & (ng > 0)
     rr = (nd[ok] / tt) / s_[ok]
-    err = rr * np.sqrt(1 / nd[ok] + mc["gamma"]["rep"] / ng[ok])
+    err = rr * np.sqrt(1 / nd[ok] + 1 / ng[ok])
     sp = 1.0 if chi is None else (0.95 if chi == "0011" else 1.05)
     a.errorbar(cr[ok] * sp, rr, yerr=err, xerr=None if chi else [(cr - br[:-1])[ok], (br[1:] - cr)[ok]], fmt=mk,
                color=col, ms=5 if chi is None else 4, lw=1 if chi is None else 0.8, alpha=al, label=lab)
@@ -164,7 +175,7 @@ a.set_title("data / MC (MC statistical error counts replicas as correlated)", fo
 a.legend(fontsize=8.5, frameon=False, loc="upper left", ncol=3)
 a.grid(alpha=0.25, which="both")
 fig.suptitle("LNGS background (runs 0011 + 0013) vs Monte Carlo: Hall A γ (J·A normalisation, φ = 1.12 cm$^{-2}$s$^{-1}$) "
-             "+ Hall A μ, fibre scintillation 1750 γ/MeV", fontsize=11)
+             "+ Hall A μ, fibre scintillation %s γ/MeV" % RESA, fontsize=11)
 fig.tight_layout()
 fig.savefig(OUT, dpi=100)
 print("scritto", OUT)

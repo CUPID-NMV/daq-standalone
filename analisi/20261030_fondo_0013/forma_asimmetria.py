@@ -107,7 +107,7 @@ for j, ch in enumerate((20, 21)):
         a.plot(FIN, -f, color=col, lw=1.2, ls="--" if col == "#888" else "-",
                label="%s: FWHM %.1f ns, area after 50 ns %.0f%%" % (nome, fw, 100 * coda))
     a.set_xlim(-30, 300)
-    a.set_xlabel("time from the 50%% crossing of each pulse [ns]")
+    a.set_xlabel("time from the 50% crossing of each pulse [ns]")
     a.set_ylabel("ch%d: normalised to the peak" % ch)
     a.set_title("ch%d — mean SHAPE (each pulse aligned on its 50%% crossing and normalised)" % ch,
                 fontsize=10, loc="left")

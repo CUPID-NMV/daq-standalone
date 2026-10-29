@@ -1,0 +1,59 @@
+{
+ "file": "/home/daq/daq-standalone/data/LNGS/LNGS__54-0V_0000_750Ms_55PT.h5.gz",
+ "run": "LNGS__54-0V_0000_750Ms_55PT",
+ "dt_ns": 1.3333333333333333,
+ "padme": "nessuna",
+ "unita": "ADC*ns (1 pC = 204.8)",
+ "canali": {
+  "20": {
+   "segno": -1,
+   "gruppo": 2,
+   "cancello_ns": [
+    240.0,
+    500.0
+   ],
+   "ped": [
+    0,
+    113
+   ],
+   "vuoto": [
+    0,
+    56
+   ],
+   "celle_viste": 0,
+   "campioni_per_cella_min": 0,
+   "dispersione_fra_celle": 0.0,
+   "rms_ped_caen": 1.894376277923584,
+   "rms_ped_padme": 1.894376277923584,
+   "sigma_vuoto_caen": 51.14867633853854,
+   "sigma_vuoto_padme": 51.14867633853854,
+   "saturati": 0,
+   "vuoto_ns": 74.66666666666666
+  },
+  "21": {
+   "segno": -1,
+   "gruppo": 2,
+   "cancello_ns": [
+    240.0,
+    500.0
+   ],
+   "ped": [
+    0,
+    113
+   ],
+   "vuoto": [
+    0,
+    56
+   ],
+   "celle_viste": 0,
+   "campioni_per_cella_min": 0,
+   "dispersione_fra_celle": 0.0,
+   "rms_ped_caen": 2.0457210540771484,
+   "rms_ped_padme": 2.0457210540771484,
+   "sigma_vuoto_caen": 74.20331757784135,
+   "sigma_vuoto_padme": 74.20331757784135,
+   "saturati": 0,
+   "vuoto_ns": 74.66666666666666
+  }
+ }
+}

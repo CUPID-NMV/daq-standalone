@@ -842,7 +842,11 @@ LNGS; solo correzione CAEN):
 - **muoni al LNGS**: run `LNGS__54-0V_0000_750Ms_55PT` (23.4 h, V812 4 su 5,
   38 eventi). Muone = tutti e tre i SiPM saturi: **eventi 17 e 24**, PMT a
   3633-5827 ADC·ns, cioe' sul massimo dei muoni di Frascati e non su quello
-  della 0011. Gli altri 36 hanno nei pannelli 10-90 p.e. in tempo (3-30% di
+  della 0011. Dei 38, 35 hanno entrambi i PMT sopra 3 sigma (il 24 no: ch20
+  vuoto) e il WC fra 3600 e 15000 ADC·ns (2-9 PE). **Nessuno sopra 15000**,
+  dove nella 0013 sta il 23% degli eventi: se fossero come il fondo se ne
+  aspetterebbero 8 (P(0) = 3e-4). La coincidenza coi pannelli non prende la
+  coda ad alta carica (`sovrapposizione_0011_0013.py --v812`). Gli altri 36 hanno nei pannelli 10-90 p.e. in tempo (3-30% di
   una MIP): non sono dark count (1-3 p.e. a caso), ne' muoni;
 - **non e' noto se PMT, HV e scheda di amplificazione siano gli stessi nelle
   due sedi**: chiesto all'utente il 2026-10-28, senza risposta. Prima di

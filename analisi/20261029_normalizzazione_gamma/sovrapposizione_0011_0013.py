@@ -2,9 +2,15 @@
 gamma di Hall A (Compton + scintillazione delle fibre) e muoni di Hall A.
 
     python3 analisi/20261029_normalizzazione_gamma/sovrapposizione_0011_0013.py OUT.png [GAMMA.npz:RESA]
+            [--v812 CARICHE.npz --evidenzia N ...]
 
 GAMMA.npz: i gamma digitalizzati da usare (di serie mc_digit_gamma_righe_s1750.npz:1750);
 RESA e' la resa di scintillazione delle fibre di quella produzione, per la legenda.
+--v812: le cariche (tools/carica_padme.py) di una run presa col trigger del
+V812, per esempio la run da 24 ore coi pannelli (carica_0000_54V_24h.npz): i
+suoi eventi con entrambi i PMT sopra 3 sigma vanno in un pannello a parte,
+in conteggi, perche' il trigger e' un altro e non se ne fa un rate da
+sommare. --evidenzia: indici di eventi di quella run da segnare.
 
 Le due run hanno soglie diverse (offset 200 e 100): sotto ~10000 ADC*ns la
 somma mescola due trigger. Il MC si somma allo stesso modo: per ogni run il
@@ -20,15 +26,21 @@ illuminato (cancello 240-500 ns, piedistallo 0-150 ns, correzione CAEN).
 import os as _os, sys as _sys
 ROOT = _os.path.abspath(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
 
+import argparse
 import json
-import sys
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-OUT = sys.argv[1]
-GAMMA_F, RESA = (sys.argv[2].split(":") + ["?"])[:2] if len(sys.argv) > 2 else ("mc_digit_gamma_righe_s1750.npz", "1750")
+ap = argparse.ArgumentParser()
+ap.add_argument("out")
+ap.add_argument("gamma", nargs="?", default="mc_digit_gamma_righe_s1750.npz:1750")
+ap.add_argument("--v812", default=None)
+ap.add_argument("--evidenzia", type=int, nargs="*", default=[])
+arg = ap.parse_args()
+OUT = arg.out
+GAMMA_F, RESA = (arg.gamma.split(":") + ["?"])[:2]
 MIS = _os.path.join(ROOT, "measurements")
 SOGLIE = json.load(open(_os.path.join(MIS, "soglie_trigger_lngs.json")))
 RUN = {"0011": "LNGS__54-0V_0011_750Ms_55PT", "0013": "LNGS__54-0V_0013_750Ms_55PT"}
@@ -89,7 +101,10 @@ for nome, _, _ in CLASSI:
           % (nome, cd[nome], cg[nome], cm[nome], cg[nome] + cm[nome], cd[nome] / (cg[nome] + cm[nome])))
 
 K = mc["gamma"]["k"]
-fig, ax = plt.subplots(2, 1, figsize=(13, 10.5), height_ratios=[2.2, 1], sharex=True)
+if arg.v812:
+    fig, ax = plt.subplots(3, 1, figsize=(13, 13.5), height_ratios=[2.2, 0.85, 1], sharex=True)
+else:
+    fig, ax = plt.subplots(2, 1, figsize=(13, 10.5), height_ratios=[2.2, 1], sharex=True)
 a = ax[0]
 # asse logaritmico: la coda arriva a ~170000 ADC*ns (l'11% degli eventi della 0011 sta sopra
 # 40000) e la scala lineare la tagliava. Dieci bin per decade.
@@ -139,7 +154,33 @@ a.grid(alpha=0.25, which="both")
 sec = a.secondary_xaxis("top", functions=(lambda x: x / K, lambda x: x * K))
 sec.set_xlabel("photoelectrons in the brighter PMT (charge / K)", fontsize=9)
 
-a = ax[1]
+if arg.v812:
+    # eventi di una run col trigger del V812: stessa selezione dei dati (entrambi i PMT
+    # sopra 3 sigma, sigma della 0013), in conteggi. Nessun MC: i pannelli non sono simulati.
+    a = ax[1]
+    z = np.load(arg.v812 if _os.path.exists(arg.v812) else _os.path.join(MIS, arg.v812))
+    qv = np.stack([z["q_caen_ch20"], z["q_caen_ch21"]], 1)
+    S13 = np.array(SOGLIE[RUN["0013"]]["sigma_q"])
+    sv = (qv[:, 0] > 3 * S13[0]) & (qv[:, 1] > 3 * S13[1])
+    nome_v = _os.path.basename(arg.v812).replace(".npz", "")
+    a.stairs(np.histogram(qv[sv].max(1), b)[0], b, fill=True, color="#8a8a8a", alpha=0.55, lw=0,
+             label="%d of its %d events have both PMTs > 3σ (same cut as above)" % (sv.sum(), len(qv)))
+    for e in arg.evidenzia:
+        v = qv[e].max()
+        a.axvline(v, color="#d62728", lw=2.2,
+                  label="event %d: muon candidate (all three panels saturated), %.0f ADC·ns = %.1f PE%s"
+                        % (e, v, v / K, "" if sv[e] else ", one PMT only: not in the selection"))
+    for v in (7000, 10000):
+        a.axvline(v, color="#888", ls=":", lw=1)
+    a.set_ylabel("events per bin")
+    a.set_ylim(0, max(4, np.histogram(qv[sv].max(1), b)[0].max() * 1.6))
+    a.set_title("the WC with the V812 trigger: run %s, majority 4 of 5 with the three scintillator panels "
+                "(counts: a different trigger, not a rate)" % nome_v.replace("carica_", ""), fontsize=9.5, loc="left")
+    a.legend(fontsize=9, frameon=False, loc="upper right")
+    a.grid(alpha=0.25, which="both")
+    print("%s: %d eventi su %d con entrambi i PMT > 3 sigma" % (nome_v, sv.sum(), len(qv)))
+
+a = ax[-1]
 br = np.logspace(np.log10(2000), np.log10(200000), 11)
 cr = np.sqrt(br[1:] * br[:-1])
 for chi, col, al, mk, lab in ((None, "k", 1.0, "o", "0011 + 0013"), ("0011", "#1aa39a", 0.6, "s", "0011 alone"),

@@ -94,12 +94,19 @@ def onda(tempi, g, ch):
     return w
 
 
-Q, A, TL, NPE = [], [], [], []
+Q, A, TL, NPE, EF = [], [], [], [], []
 n_gen = 0
 for fn in files:
     f = uproot.open(fn)
     n_gen += int(f["Eventi"].num_entries)
     tl_all = f["Eventi"].arrays(["TrackL_water_mm"], library="np")["TrackL_water_mm"]
+    # energia nel nucleo delle fibre (L, tratto dritto, R): c'e' solo nei file
+    # prodotti dopo il 2026-10-29, con la scintillazione delle fibre
+    try:
+        ef_all = np.stack([f["Eventi"].arrays([k], library="np")[k] for k in
+                           ("Edep_fiber_L_MeV", "Edep_fiber_C_MeV", "Edep_fiber_R_MeV")], 1)
+    except Exception:
+        ef_all = np.full((len(tl_all), 3), np.nan)
     ph = f["Fotoni"].arrays(["EventID", "PMT_ID", "E_Hit_eV", "Arrival_Time_ns"], library="np")
     ev = ph["EventID"].astype(np.int64)
     pid = ph["PMT_ID"].astype(int)
@@ -131,12 +138,14 @@ for fn in files:
             A.append(a_ev)
             NPE.append(n_ev)
             TL.append(tl_all[e])
+            EF.append(ef_all[e])
     print("%s: %d eventi generati finora, %d digitalizzati" % (_os.path.basename(fn), n_gen, len(Q)))
 
 Q, A = np.array(Q), np.array(A)
 trig = (A[:, 0] >= SOGLIA[0]) | (A[:, 1] >= SOGLIA[1])
 w = a.rate / n_gen / a.repliche
-np.savez_compressed(a.out, q=Q, amp=A, npe=np.array(NPE), trig=trig, trackl=np.array(TL), peso_hz=w,
+np.savez_compressed(a.out, q=Q, amp=A, npe=np.array(NPE), trig=trig, trackl=np.array(TL),
+                    edep_fibre=np.array(EF), peso_hz=w,
                     n_gen=n_gen, rate_hz=a.rate, k=a.k, repliche=a.repliche, soglia=SOGLIA, t_trig=T_TRIG,
                     file_mc=np.array([_os.path.basename(x) for x in files]))
 print("scritto %s: %d eventi generati, %d con PE, %d col trigger; K = %.0f ADC*ns/PE; "

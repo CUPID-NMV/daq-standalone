@@ -143,3 +143,4 @@ Richiede `measurements/libreria_digit_0013.npz` (da `20261030_fondo_0013/libreri
 
 Niente tagli in carica sull'impulso che si misura: a parita' d'ampiezza sceglierebbero
 la forma (la prima versione lo faceva).
+| `mc_scint_vs_dati.py` | MC_SCINT.npz OUT [ETICHETTA] | fondo LNGS 0013 contro il MC digitalizzato senza e con la scintillazione del nucleo delle fibre (in rate, per classe) |

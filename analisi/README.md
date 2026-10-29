@@ -111,6 +111,7 @@ confini dei passi in `/tmp/scan_c*.json`; le versioni conservate sono
 | `gate_frascati.py` | F(Frascati) F(0011) OUT | muoni di Frascati col cancello della 0011 allineato sull'impulso (+78 ns) |
 | `fondo_mc_somma.py` | MC_DIR OUT | fondo MC = Compton + muoni di Hall A, normalizzato al tempo, sopra lo spettro LNGS, con il rapporto dati/MC |
 | `normalizzazione_tempo.py` | MC_DIR OUT | dati 0011, Compton e muoni di Hall A simulati normalizzati allo stesso tempo di acquisizione |
+| `sovrapposizione_tempo.py` | MC_DIR OUT | come `sovrapposizione.py`, con il Compton normalizzato al tempo della 0011 e LNF riscalato sulla coda LNGS |
 | `sovrapposizione.py` | MC_DIR OUT | LNF, LNGS, candidati muoni e Compton simulato, normalizzati in area |
 | `compton_vs_dati.py` | MC_DIR OUT | spettro Compton dei gamma di Hall A visto dal WC prototipo (Geant4 di `Testbeam2026_WC_unified`, geometria `single`) e muoni LNGS simulati, in rate assoluto, sopra la carica dei PMT della 0011 |
 

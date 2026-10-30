@@ -1,0 +1,147 @@
+{
+  "file": "LNGS_scan_54-0V_0000_750Ms_55PT.h5",
+  "quando": "2026-10-30 16:06:39",
+  "canali": [
+    21
+  ],
+  "baseline": {
+    "16": 1007.41,
+    "17": 990.329,
+    "18": 1028.18,
+    "20": 1022.19,
+    "21": 1008.34
+  },
+  "sigma_assunto": 0.72,
+  "secondi_per_punto": 60.0,
+  "larghezza_fwhm_ns": 10.7,
+  "punti": [
+    {
+      "offset": 400.0,
+      "distanza": 399.65999999999997,
+      "rate": 0.09999980370242187,
+      "atteso": 0.0,
+      "conteggi": 6,
+      "eventi_da": 11072,
+      "eventi_a": 11078
+    },
+    {
+      "offset": 300.0,
+      "distanza": 299.65999999999997,
+      "rate": 0.09999982953100654,
+      "atteso": 0.0,
+      "conteggi": 6,
+      "eventi_da": 11078,
+      "eventi_a": 11084
+    },
+    {
+      "offset": 200.0,
+      "distanza": 199.65999999999997,
+      "rate": 0.21666624910382107,
+      "atteso": 0.0,
+      "conteggi": 13,
+      "eventi_da": 11084,
+      "eventi_a": 11097
+    },
+    {
+      "offset": 150.0,
+      "distanza": 149.65999999999997,
+      "rate": 0.5166656606746763,
+      "atteso": 0.0,
+      "conteggi": 31,
+      "eventi_da": 11097,
+      "eventi_a": 11128
+    },
+    {
+      "offset": 100.0,
+      "distanza": 99.65999999999997,
+      "rate": 1.3833307168268314,
+      "atteso": 0.0,
+      "conteggi": 83,
+      "eventi_da": 11134,
+      "eventi_a": 11217
+    },
+    {
+      "offset": 80.0,
+      "distanza": 79.65999999999997,
+      "rate": 3.383328520331342,
+      "atteso": 0.0,
+      "conteggi": 203,
+      "eventi_da": 11219,
+      "eventi_a": 11422
+    },
+    {
+      "offset": 60.0,
+      "distanza": 59.65999999999997,
+      "rate": 7.716651886994801,
+      "atteso": 0.0,
+      "conteggi": 463,
+      "eventi_da": 11436,
+      "eventi_a": 11899
+    },
+    {
+      "offset": 50.0,
+      "distanza": 49.65999999999997,
+      "rate": 10.833312584333953,
+      "atteso": 0.0,
+      "conteggi": 650,
+      "eventi_da": 11911,
+      "eventi_a": 12561
+    },
+    {
+      "offset": 40.0,
+      "distanza": 39.65999999999997,
+      "rate": 15.383308148690235,
+      "atteso": 0.0,
+      "conteggi": 923,
+      "eventi_da": 12579,
+      "eventi_a": 13502
+    },
+    {
+      "offset": 30.0,
+      "distanza": 29.659999999999968,
+      "rate": 18.64996346460983,
+      "atteso": 0.0,
+      "conteggi": 1119,
+      "eventi_da": 13543,
+      "eventi_a": 14662
+    },
+    {
+      "offset": 20.0,
+      "distanza": 19.659999999999968,
+      "rate": 22.466630242724662,
+      "atteso": 5.4658518325967664e-157,
+      "conteggi": 1348,
+      "eventi_da": 14694,
+      "eventi_a": 16042
+    },
+    {
+      "offset": 15.0,
+      "distanza": 14.659999999999968,
+      "rate": 24.133305619059705,
+      "atteso": 5.551426788961561e-85,
+      "conteggi": 1448,
+      "eventi_da": 16078,
+      "eventi_a": 17526
+    },
+    {
+      "offset": 10.0,
+      "distanza": 9.659999999999968,
+      "rate": 24.44997075620811,
+      "atteso": 7.2442815765234325e-34,
+      "conteggi": 1467,
+      "eventi_da": 17553,
+      "eventi_a": 19020
+    }
+  ],
+  "canale_scansionato": 21,
+  "parcheggio": 4095,
+  "offset_iniziali": {
+    "16": 600,
+    "17": 600,
+    "18": 600,
+    "20": 50,
+    "21": 50
+  },
+  "segnale_acceso": true,
+  "interrotto": null
+}

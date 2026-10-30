@@ -560,6 +560,41 @@ gruppo 0 (ch0-7) ha problemi e non si usa. Stesso trigger per tutti.
   carica vicina a zero o del segno sbagliato: e' quello che succedeva col
   cancello comune 190-1000 ns.
 
+## Self-trigger sui cinque readout del LNGS (dal 2026-10-30)
+
+I PMT del WC (ch20, ch21) passano da un **inverter**: tutti e cinque i canali
+(SiPM ch16-18 e PMT) hanno impulsi positivi, DCOffset 0xB000, fronte di
+salita, una sola scheda a 750 MS/s. E' la configurazione del trigger futuro:
+self-trigger su tutti e cinque.
+
+**Scan in soglia un canale alla volta** (2026-10-30, `scan_v1742_canali.sh`,
+60 s per punto, gli altri canali a offset 4095; run
+`data/LNGS/scan/LNGS_scan_54-0V_0000_750Ms_55PT`, 369965 eventi; JSON in
+`measurements/noise_scan_20261030_*_chNN.json`):
+
+| offset | 10-20 | 50 | 100 | 200 | 400 | 600 | 800 | >= 1000 |
+|---|---|---|---|---|---|---|---|---|
+| PMT ch20 / ch21 [Hz] | 25-29 / 22-24 | 11.8 / 10.8 | 1.7 / 1.4 | 0.13 / 0.22 | 0.02 / 0.1 | | | |
+| SiPM ch16 [Hz] | | 484 | 280 | 134 | 21.7 | 3.6 | 0.03 | 0 |
+| SiPM ch17 / ch18 [Hz] | | 571 / 598 | 351 / 365 | 186 / 186 | 59 / 57 | 16.5 / 14.2 | 4.2 / 2.7 | <= 0.2 |
+
+- **La DAQ non satura mai** (massimo 598 Hz), al contrario dello scan del
+  2026-10-26 coi tre SiPM in OR.
+- **ch16 cala prima** degli altri due sopra offset ~300: i suoi impulsi grandi
+  sono piu' piccoli.
+- FWHM degli impulsi sugli ultimi eventi di ogni canale: SiPM 192-196 ns,
+  PMT **10.7 ns** (quasi solo singoli fotoelettroni, a offset 10). Prima
+  dell'inverter gli impulsi di un PMT erano 8.0-8.3 ns: se l'inverter li
+  allarghi e' da verificare.
+- **A 750 MS/s l'offset non e' calibrato in mV.** Le forme d'onda di ogni
+  passo sono nella run (`eventi_da`/`eventi_a` nei JSON), per
+  `calibra_selftrigger.py`.
+- **A offset 100 un PMT da solo scatta a 1.4-1.7 Hz**, come gli eventi con un
+  solo PMT della 0013 (1.6-2.0 Hz) e 5-6 volte il MC. Il confronto e' a pari
+  offset, con impulsi invertiti nello scan e diretti nella 0013. Da qui
+  l'ipotesi, non verificata, che il massimo a 2-3 PE degli eventi con un solo
+  PMT sia la coda degli impulsi del PMT stesso, assenti nel MC.
+
 ## Due V1742 (dal 2026-10-20)
 
 Nello stesso crate, dietro lo stesso bridge V4718:

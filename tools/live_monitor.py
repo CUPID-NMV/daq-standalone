@@ -240,6 +240,7 @@ class Monitor:
         self.overview_interval = 5.0  # si aggiorna al massimo ogni 5 s
         self.error = None
         self.path = None
+        self.run = None               # (file, StartTime): vedi refresh()
 
         self.n_events = 0
         self.rate = 0.0
@@ -506,22 +507,38 @@ class Monitor:
         self.nota = ("not recorded in this run: " +
                      ", ".join("ch%d" % c for c in mancanti)) if mancanti else None
 
-        # Cambio di file: si riparte da zero con tutto cio' che e' storia.
+        # Cambio di run: si riparte da zero con tutto cio' che e' storia.
         #
         # Succede quando la run finisce: il file diventa .h5.gz, qui si cercano
         # solo i .h5, e si ripiega sul piu' recente rimasto -- che puo' essere
         # di giorni prima. Senza azzerare, il rate veniva calcolato fra il
         # conteggio della run finita e quello del file vecchio e usciva
         # NEGATIVO: -30.37 Hz, visto davvero.
-        if path != self.path:
+        #
+        # La run la riconosce l'istante di partenza scritto dalla DAQ
+        # nell'header, non il solo nome: le run di prova si chiamano tutte
+        # TEST_0000_..., e una run nuova con lo stesso nome si teneva i
+        # DCOffset letti dal log della precedente -- e con loro il verso
+        # degli impulsi --, gli spettri cumulati e i cancelli automatici. Il
+        # 2026-10-30 i PMT, invertiti e portati a 0xB000, restavano negativi
+        # nello spettro di carica: il monitor teneva lo 0x7000 di una run di
+        # prova della sera prima (la run della notte, con zero eventi, non
+        # l'aveva mai fatto cambiare file).
+        t0 = hdr.get("StartTime")
+        run = (path, float(t0) if t0 is not None else None)
+        if run != self.run:
             self._prev = None
             self._hist.clear()
             self._eff = None
             self._eff_hist.clear()
             self._dco_path = None
+            self._auto = None
             self.rate = 0.0
             self.origin = 0
             self.cumulati = {}
+            self.frozen = {}
+            self.frozen_offsets = {}
+            self.gen = None
             self._ana = None
             self.status = None
             # Anche l'istante di ultima crescita: e' riferito al file di
@@ -530,6 +547,7 @@ class Monitor:
             self._cresciuto = now
             self._ultimo_conteggio = -1
 
+        self.run = run
         self.path = path
         try:
             self.file_mtime = os.path.getmtime(path)

@@ -696,6 +696,11 @@ solo SENZA `--board`, sulla scheda dei SiPM: 30 s a trigger software 200 Hz.
   .h5 e .mid.gz si cancellano senza comprimerli. Resta il `.log`. La pagina
   avvisa in rosso; riepilogo ed e-log saltano le `TEST_`. Provata e
   installata il 2026-10-23.
+  **Tutte le run di prova hanno lo STESSO nome** (`TEST_0000_...`): chi
+  segue i file deve riconoscere la run dallo `StartTime` dell'header, non
+  dal nome. Il monitor non lo faceva fino al 2026-10-30 e si teneva i
+  DCOffset del log della run di prova precedente: i PMT appena invertiti
+  restavano negativi nello spettro di carica.
 
 ## Formato MIDAS (dal 2026-10-21; installato il 2026-10-23)
 

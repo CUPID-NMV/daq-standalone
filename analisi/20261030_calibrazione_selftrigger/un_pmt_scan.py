@@ -10,9 +10,12 @@ di 150 ns, carica = somma fra 240 e 500 ns (impulsi a ~260 ns, come nella
 0011 e nella 0013). Gli impulsi dei PMT sono positivi: dal 2026-10-30 passano
 da un inverter.
 
-La sigma della carica a vuoto si prende dal passo piu' basso dello scan di un
-SiPM (SCAN_SIPM.json): li' i due PMT sono parcheggiati e le loro tracce quasi
-sempre vuote.
+La sigma della carica a vuoto di un PMT si prende da lui stesso quando e'
+parcheggiato, negli eventi dello scan dell'altro PMT: stesse condizioni degli
+eventi che si classificano, e niente SiPM accesi. Come controllo si stampa
+anche quella del passo piu' basso dello scan di un SiPM (SCAN_SIPM.json), dove
+i due PMT sono parcheggiati: sono risultate uguali entro il 5% (2026-10-30),
+e piu' larghe del 25-50% che nella 0011 e nella 0013.
 
 Scrive OUT.npz (cariche e ampiezze evento per evento, col canale e l'offset del
 passo; durata di ogni passo) e OUT.json (rate per passo: totale, con un PMT
@@ -63,9 +66,14 @@ def cariche(blocco):
 
 
 qs, _ = cariche(w[ps["eventi_da"]:ps["eventi_a"]])
-S = np.array([sig(qs[:, 0]), sig(qs[:, 1])])
-print("sigma della carica a vuoto (passo a offset %g del SiPM, %d eventi): ch20 %.0f, ch21 %.0f ADC*ns"
-      % (ps["offset"], len(qs), S[0], S[1]))
+S_sipm = np.array([sig(qs[:, 0]), sig(qs[:, 1])])
+parcheggiato = {0: [], 1: []}
+for ch, p in passi:
+    q, _ = cariche(w[p["eventi_da"]:p["eventi_a"]])
+    parcheggiato[1 - PMT.index(ch)].append(q[:, 1 - PMT.index(ch)])
+S = np.array([sig(np.concatenate(parcheggiato[0])), sig(np.concatenate(parcheggiato[1]))])
+print("sigma della carica a vuoto, dal PMT parcheggiato: ch20 %.0f, ch21 %.0f ADC*ns "
+      "(dal passo a offset %g del SiPM: %.0f, %.0f)" % (S[0], S[1], ps["offset"], S_sipm[0], S_sipm[1]))
 
 Q, A, C, O = [], [], [], []
 tabella, durate = [], {}
@@ -91,6 +99,7 @@ for ch, p in sorted(passi, key=lambda x: (x[0], -x[1]["offset"])):
 np.savez_compressed(OUT + ".npz", q=np.concatenate(Q), amp=np.concatenate(A),
                     canale=np.concatenate(C), offset=np.concatenate(O), sigma_q=S,
                     passo=np.array(list(durate.keys())), durata=np.array(list(durate.values())))
-json.dump({"run": os.path.basename(RUN), "sigma_q": S.tolist(), "cancello_ns": [240, 500],
+json.dump({"run": os.path.basename(RUN), "sigma_q": S.tolist(), "sigma_q_passo_sipm": S_sipm.tolist(),
+           "cancello_ns": [240, 500],
            "piedistallo_ns": [0, 150], "passi": tabella}, open(OUT + ".json", "w"), indent=2)
 print("scritto", OUT + ".npz", OUT + ".json")

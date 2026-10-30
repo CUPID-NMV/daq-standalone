@@ -866,6 +866,11 @@ LNGS; solo correzione CAEN):
   muoni MC (KS p = 1e-6): non sono muoni. **Mancano ~8 muoni su 9** (P ~
   1e-3): la causa va cercata nella catena pannelli -> V812 -> trigger, non
   nella geometria (non verificato);
+- **I pannelli veri nel MC** (quelli della collega di Yale, con fibre,
+  wrapping e housing) si integrano nel progetto MC, in una chat aperta li':
+  stato, file mancanti, trappole e misure da prendere in
+  `~/Testbeam2026_WC_unified/CLAUDE.md`, sezione "Lavoro in corso: i pannelli
+  di Yale". Qui non si tocca.
 - **K e la selezione coi pannelli**: i muoni di Frascati (superficie, cos^2,
   tre pannelli) hanno nell'acqua una traccia mediana di 111 mm contro i 102
   dei muoni MC usati per tarare K. A parita' di selezione K = 1580 invece di

@@ -241,33 +241,56 @@ if arg.piedistallo:
         # rumore del MC, fatto con tracce vere di piedistallo: le cariche del PMT buio
         # negli eventi del MC col trigger della run.
         OFFSET = {"0011": 200, "0013": 100}
-        mod = {20: np.zeros(len(b) - 1), 21: np.zeros(len(b) - 1)}
-        rumore = {}
-        for f in (GAMMA_F, MU_F):
-            z = np.load(f if _os.path.exists(f) else _os.path.join(MIS, f))
-            w0 = float(z["peso_hz"])
+
+        def modello_pmt(bb):
+            """Per PMT, sui bin bb, in Hz per bin: (modello, varianza del modello, MC da solo).
+
+            Varianza: per il MC le repliche contano come correlate (eventi indipendenti =
+            voci dei gamma col trigger della 0013 diviso le repliche, come n_indip); per lo
+            scan Poisson sugli eventi, e per il PMT buio l'incertezza sul loro numero."""
+            mod = {20: np.zeros(len(bb) - 1), 21: np.zeros(len(bb) - 1)}
+            mc_pmt = {20: np.zeros(len(bb) - 1), 21: np.zeros(len(bb) - 1)}
+            ind = {20: np.zeros(len(bb) - 1), 21: np.zeros(len(bb) - 1)}
+            var = {20: np.zeros(len(bb) - 1), 21: np.zeros(len(bb) - 1)}
+            rumore = {}
+            for f in (GAMMA_F, MU_F):
+                z = np.load(f if _os.path.exists(f) else _os.path.join(MIS, f))
+                w0, rep = float(z["peso_hz"]), int(z["repliche"])
+                for r in RUN:
+                    A_ = np.array(SOGLIE[RUN[r]]["soglia"])
+                    S_ = np.array(SOGLIE[RUN[r]]["sigma_q"])
+                    trig = (z["amp"][:, 0] >= A_[0]) | (z["amp"][:, 1] >= A_[1])
+                    sop = z["q"] > 3 * S_[None, :]
+                    tieni = trig & ~(sop[:, 0] ^ sop[:, 1])
+                    for j, ch in ((0, 20), (1, 21)):
+                        h_ = np.histogram(z["q"][tieni, j], bb)[0]
+                        mod[ch] += h_ * w0 * T[r] / TT
+                        mc_pmt[ch] += np.histogram(z["q"][trig, j], bb)[0] * w0 * T[r] / TT
+                        if f == GAMMA_F:
+                            if r == "0013":
+                                ind[ch] += h_ / rep
+                            hr = np.histogram(z["q"][trig & ~sop[:, j], j], bb)[0].astype(float)
+                            rumore[(r, ch)] = hr / max(hr.sum(), 1.0)
+            for ch in (20, 21):
+                var[ch] += np.where(ind[ch] > 0, mod[ch] ** 2 / np.clip(ind[ch], 1e-9, None), 0.0)
+            uno = {}
             for r in RUN:
-                A_ = np.array(SOGLIE[RUN[r]]["soglia"])
-                S_ = np.array(SOGLIE[RUN[r]]["sigma_q"])
-                trig = (z["amp"][:, 0] >= A_[0]) | (z["amp"][:, 1] >= A_[1])
-                sop = z["q"] > 3 * S_[None, :]
-                tieni = trig & ~(sop[:, 0] ^ sop[:, 1])
                 for j, ch in ((0, 20), (1, 21)):
-                    mod[ch] += np.histogram(z["q"][tieni, j], b)[0] * w0 * T[r] / TT
-                    if f == GAMMA_F:
-                        h_ = np.histogram(z["q"][trig & ~sop[:, j], j], b)[0].astype(float)
-                        rumore[(r, ch)] = h_ / max(h_.sum(), 1.0)
-        uno_scan = {}
-        for r in RUN:
-            for j, ch in ((0, 20), (1, 21)):
-                k = (zs["canale"] == ch) & (zs["offset"] == OFFSET[r])
-                qk = zs["q"][k]
-                solo = (qk[:, j] > 3 * zs["sigma_q"][j]) & (qk[:, 1 - j] <= 3 * zs["sigma_q"][1 - j])
-                peso = T[r] / TT / durate_s["ch%d_off%g" % (ch, OFFSET[r])]
-                uno_scan[(r, ch)] = solo.sum() / durate_s["ch%d_off%g" % (ch, OFFSET[r])]
-                mod[ch] += np.histogram(qk[solo, j], b)[0] * peso
-                altro = 21 if ch == 20 else 20
-                mod[altro] += rumore[(r, altro)] * solo.sum() * peso
+                    k = (zs["canale"] == ch) & (zs["offset"] == OFFSET[r])
+                    qk = zs["q"][k]
+                    solo = (qk[:, j] > 3 * zs["sigma_q"][j]) & (qk[:, 1 - j] <= 3 * zs["sigma_q"][1 - j])
+                    durata = durate_s["ch%d_off%g" % (ch, OFFSET[r])]
+                    peso = T[r] / TT / durata
+                    uno[(r, ch)] = solo.sum() / durata
+                    hs = np.histogram(qk[solo, j], bb)[0]
+                    mod[ch] += hs * peso
+                    var[ch] += hs * peso ** 2
+                    altro = 21 if ch == 20 else 20
+                    mod[altro] += rumore[(r, altro)] * solo.sum() * peso
+                    var[altro] += (rumore[(r, altro)] * peso) ** 2 * solo.sum()
+            return mod, var, mc_pmt, uno
+
+        mod, _, _, uno_scan = modello_pmt(b)
         for ch, col, ls in ((20, "#3c3c3c", "-"), (21, "#8c8c8c", "--")):
             a.stairs(mod[ch] / dens, b, color=col, lw=1.7, ls=ls, zorder=3,
                      label="MODEL ch%d: MC + PMT own pulses (events with one PMT alone, from the self-trigger "
@@ -363,6 +386,25 @@ for chi, col, al, mk, lab in ((None, "k", 1.0, "o", "0011 + 0013"), ("0011", "#1
     sp = 1.0 if chi is None else (0.95 if chi == "0011" else 1.05)
     a.errorbar(cr[ok] * sp, rr, yerr=err, xerr=None if chi else [(cr - br[:-1])[ok], (br[1:] - cr)[ok]], fmt=mk,
                color=col, ms=5 if chi is None else 4, lw=1 if chi is None else 0.8, alpha=al, label=lab)
+if arg.piedistallo and arg.un_pmt_scan:
+    # La carica di ciascun PMT in tutti gli eventi, dal piedistallo agli eventi con un PMT
+    # solo (fino a ~6 PE): dati contro il modello (MC + impulsi propri dei PMT) e contro il
+    # MC da solo. Oltre i 10000 ADC*ns il riferimento resta lo spettro selezionato.
+    bp = np.concatenate([np.arange(-2000, 2000, 400.0), np.logspace(np.log10(2000), 4, 5)])
+    cp = np.where(bp[:-1] > 0, np.sqrt(np.clip(bp[1:] * bp[:-1], 1e-12, None)), 0.5 * (bp[1:] + bp[:-1]))
+    mp, vp, mcp, _ = modello_pmt(bp)
+    ndp = sum(np.histogram(np.concatenate(tutte[ch]), bp)[0] for ch in (20, 21))
+    modp, varp, mcpp = mp[20] + mp[21], vp[20] + vp[21], mcp[20] + mcp[21]
+    for den, vden, col, mfc, lab, sp in (
+            (mcpp, None, "#b5b5b5", "white", "each PMT (ch20 + ch21), all triggered events: data / MC alone", 0.96),
+            (modp, varp, "#4a4a4a", "#4a4a4a",
+             "each PMT, all triggered events: data / (MC + PMT own pulses from the scan)", 1.0)):
+        okp = (ndp > 0) & (den > 0)
+        rp = (ndp[okp] / TT) / den[okp]
+        ep = rp * np.sqrt(1 / ndp[okp] + (0 if vden is None else vden[okp] / den[okp] ** 2))
+        xs = np.where(cp[okp] > 0, cp[okp] * sp, cp[okp] + (sp - 1) * 2000)
+        a.errorbar(xs, rp, yerr=ep, xerr=None if vden is None else [(cp - bp[:-1])[okp], (bp[1:] - cp)[okp]],
+                   fmt="s", ms=4.5, color=col, mfc=mfc, lw=0.9, label=lab)
 a.axhline(1, color="k", lw=0.8)
 for v in (7000, 10000):
     a.axvline(v, color="#888", ls=":", lw=1)
@@ -376,9 +418,11 @@ a.set_yscale("log")
 a.set_ylim(0.3, 30)
 a.set_xlabel("charge of the brighter PMT [ADC·ns]  (gate 240-500 ns, pedestal 0-150 ns%s)"
              % ("; 1 PE = %.0f ADC·ns" % K if arg.piedistallo else ""))
-a.set_ylabel("DATA / MC total")
-a.set_title("data / MC (MC statistical error counts replicas as correlated)", fontsize=9.5, loc="left")
-a.legend(fontsize=8.5, frameon=False, loc="upper left", ncol=3)
+a.set_ylabel("DATA / MC total" if not arg.un_pmt_scan else "DATA / model")
+a.set_title("data / MC (MC statistical error counts replicas as correlated)" if not arg.un_pmt_scan else
+            "round markers: selected spectrum (both PMTs > 3σ), data / MC;  squares: charge of each PMT in all "
+            "triggered events, pedestal and one-PMT region", fontsize=9.5, loc="left")
+a.legend(fontsize=8.5, frameon=False, loc="upper left", ncol=3 if not arg.un_pmt_scan else 2)
 a.grid(alpha=0.25, which="both")
 fig.suptitle("LNGS background (runs 0011 + 0013) vs Monte Carlo: Hall A γ (J·A normalisation, φ = 1.12 cm$^{-2}$s$^{-1}$) "
              "+ Hall A μ; scintillation of the fibre cores %s photons/MeV" % RESA, fontsize=11)

@@ -963,6 +963,15 @@ LNGS; solo correzione CAEN):
   sigma): il rumore elettronico oltre 3 sigma, stimato dalla coda negativa
   del piedistallo, porta 2.2e-3 Hz (0.7%); il buio dei PMT (133 / 470 Hz
   dagli impulsi larghi della 0036, pochi impulsi) 6e-5 Hz (0.02%);
+  la carica di un PMT nei dati e' **continua** dal piedistallo in su (picco
+  a zero, sigma 0.15 PE; dopo il taglio a 3 sigma un fondo di piccoli segnali
+  veri a ~1e-3 Hz per 100 ADC·ns fino a ~2 PE; un massimo a 2-3 PE dovuto
+  alla soglia del self-trigger, eventi di un PMT solo che il MC non ha;
+  dal ~6 PE in su coincide con lo spettro selezionato). **Non c'e' un vuoto
+  fra piedistallo e fondo gamma**: lo spettro selezionato parte da ~2 PE per
+  il trigger. Disegnare il piedistallo come dati su tutto l'intervallo, mai
+  come curve fermate a una soglia: sembrano un modello e creano un vuoto
+  che non esiste;
 - **il fotoelettrone singolo** dai pochi impulsi di buio veri della run a
   trigger software 0036 vale ~1700-2000 ADC·ns, come la scala ricavata dai
   muoni (1726; 1696 con la scintillazione delle fibre, che a un muone

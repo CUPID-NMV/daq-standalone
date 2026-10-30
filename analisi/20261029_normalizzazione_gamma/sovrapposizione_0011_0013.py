@@ -121,12 +121,19 @@ else:
 a = ax[0]
 # asse logaritmico: la coda arriva a ~170000 ADC*ns (l'11% degli eventi della 0011 sta sopra
 # 40000) e la scala lineare la tagliava. Dieci bin per decade.
-b = np.logspace(np.log10(2000), np.log10(200000), 21)
-bc = np.sqrt(b[1:] * b[:-1])
+if arg.piedistallo:
+    # un solo asse per piedistallo e spettro: bin di 100 ADC*ns fino a 2000, poi 10 per decade,
+    # e tutto in Hz per 100 ADC*ns, cosi' le due zone si raccordano senza salti
+    b = np.concatenate([np.arange(-2000, 2000, 100.0), np.logspace(np.log10(2000), np.log10(200000), 21)])
+    dens = np.diff(b) / 100.0
+else:
+    b = np.logspace(np.log10(2000), np.log10(200000), 21)
+    dens = np.ones(len(b) - 1)
+bc = np.where(b[:-1] > 0, np.sqrt(np.clip(b[1:] * b[:-1], 1e-12, None)), 0.5 * (b[1:] + b[:-1]))
 hd = np.histogram(dq, b)[0]
 ok = hd > 0
-hg = np.histogram(mc["gamma"]["q"], b, weights=mc["gamma"]["w"])[0]
-hm = np.histogram(mc["mu"]["q"], b, weights=mc["mu"]["w"])[0]
+hg = np.histogram(mc["gamma"]["q"], b, weights=mc["gamma"]["w"])[0] / dens
+hm = np.histogram(mc["mu"]["q"], b, weights=mc["mu"]["w"])[0] / dens
 # errore statistico del MC dagli eventi Geant4 indipendenti: i gamma scelti col trigger
 # della 0013 (contiene quelli della 0011, ogni evento vi entra una volta) diviso le
 # repliche, che contano come correlate. I muoni hanno peso 1e-4 e non contano.
@@ -147,7 +154,7 @@ if arg.componenti:
     sc = mc["gamma"]["ef"] > 0
     for m_, col, nome in ((~sc, "#1aa39a", "Cherenkov light only (Compton electrons in the water)"),
                           (sc, "#e8710a", "with energy in the fibre cores (scintillation + Cherenkov)")):
-        a.stairs(np.histogram(mc["gamma"]["q"][m_], b, weights=mc["gamma"]["w"][m_])[0], b, color=col, lw=1.4, ls="--",
+        a.stairs(np.histogram(mc["gamma"]["q"][m_], b, weights=mc["gamma"]["w"][m_])[0] / dens, b, color=col, lw=1.4, ls="--",
                  label="  Hall A γ, %s: %.3f Hz" % (nome, mc["gamma"]["w"][m_].sum()))
         cl_ = classi(mc["gamma"]["q"][m_], mc["gamma"]["w"][m_])
         print("gamma, %-60s" % nome + "  ".join("%s %.3f" % (k_, v_) for k_, v_ in cl_.items()))
@@ -162,17 +169,16 @@ a.stairs(hm, b, color="#2a6fdb", lw=1.2, ls="--",
          label="  Hall A μ, fibre scintillation %s photons/MeV (%d k μ at %.4f Hz on 6.5 × 6.5 m = %.0f days): %.5f Hz"
                % (RESA_MU, mc["mu"]["ngen"] // 1000, mc["mu"]["rate"], mc["mu"]["ngen"] / mc["mu"]["rate"] / 86400,
                   cm["both > 3σ"]))
-a.errorbar(bc[ok], hd[ok] / TT, yerr=np.sqrt(hd[ok]) / TT, xerr=[(bc - b[:-1])[ok], (b[1:] - bc)[ok]],
+a.errorbar(bc[ok], hd[ok] / TT / dens[ok], yerr=np.sqrt(hd[ok]) / TT / dens[ok], xerr=[(bc - b[:-1])[ok], (b[1:] - bc)[ok]],
            fmt="o", ms=4, color="k", lw=0.8, zorder=5,
            label="DATA LNGS 0011 + 0013 (%.1f h at offset 200 + %.0f min at offset 100): %.3f Hz"
                  % (T["0011"] / 3600, T["0013"] / 60, cd["both > 3σ"]))
 for v in (7000, 10000):
     a.axvline(v, color="#888", ls=":", lw=1)
-a.text(10400, 1.3e-7, "class C →", fontsize=9, color="#555")
+a.text(10400, 2e-8 if arg.piedistallo else 1.3e-7, "class C →", fontsize=9, color="#555")
 if arg.piedistallo:
     # la carica di ciascun PMT in TUTTI gli eventi, senza selezione: il picco a zero sono gli
     # eventi in cui quel PMT non ha luce, cioe' il rumore elettronico nel cancello di 260 ns
-    bp = np.arange(-2000, 2001, 100.0)
     tutte = {20: [], 21: []}
     nrum, nuno, ndc = 0.0, 0.0, 0.0
     buio = np.load(_os.path.join(MIS, "buio_0036.npz"))
@@ -195,16 +201,14 @@ if arg.piedistallo:
             nrum += uno.sum() * f_coda
             nuno += uno.sum()
             ndc += uno.sum() * r_dc[ch] * 260e-9
-    # linea per i centri dei bin, non a gradini: a gradini finirebbe con un salto a 2000 e
-    # sembrerebbe che la distribuzione si fermi li' (oltre ci sono segnali veri)
-    for ch, col in ((20, "#4d4d4d"), (21, "#a0a0a0")):
-        hp = np.histogram(np.concatenate(tutte[ch]), bp)[0] / TT
-        # bin vuoti come buchi: in scala logaritmica la linea crollerebbe al fondo dell'asse
-        a.plot(0.5 * (bp[1:] + bp[:-1]), np.where(hp > 0, hp, np.nan), color=col, lw=1.4,
-               label="PMT ch%d charge in all triggered events (bins of 100 ADC·ns): the peak at 0 is the electronic noise"
-                     % ch)
-    a.annotate("above: real light", (1900, 1.3e-3), textcoords="offset points", xytext=(4, 14), fontsize=8.5,
-               color="#555", arrowprops=dict(arrowstyle="->", color="#777", lw=0.8))
+    # la carica MISURATA di ciascun PMT, su tutto l'intervallo e come dati: il picco a zero
+    # e' il rumore elettronico, poi la distribuzione prosegue continua con la luce vera
+    for ch, col, mk in ((20, "#3c3c3c", "o"), (21, "#8c8c8c", "s")):
+        hp = np.histogram(np.concatenate(tutte[ch]), b)[0]
+        okp = hp > 0
+        a.errorbar(bc[okp], hp[okp] / TT / dens[okp], yerr=np.sqrt(hp[okp]) / TT / dens[okp], fmt=mk, ms=3.2,
+                   color=col, mfc=col if ch == 20 else "white", lw=0.7, zorder=4,
+                   label="DATA, PMT ch%d charge in all triggered events, no selection (peak at 0 = electronic noise)" % ch)
     s_med = [np.mean([SOGLIE[RUN[r]]["sigma_q"][j] for r in RUN]) for j in (0, 1)]
     a.axvline(3 * np.mean(s_med), color="k", ls=":", lw=1.2,
               label="3σ of the pedestal, %.0f ADC·ns = %.2f PE (σ = %.0f-%.0f ADC·ns)"
@@ -225,8 +229,12 @@ if arg.piedistallo:
 else:
     a.set_xscale("log")
 a.set_yscale("log")
-a.set_ylim(1e-7, 30 if arg.piedistallo else 3)   # spazio per la legenda sopra i dati
-a.set_ylabel("rate per bin [Hz]  (10 bins per decade%s)" % ("; pedestal: 100 ADC·ns" if arg.piedistallo else ""))
+if arg.piedistallo:
+    a.set_ylim(1e-8, 30)                              # spazio per la legenda sopra i dati
+    a.set_ylabel("rate per 100 ADC·ns [Hz]")
+else:
+    a.set_ylim(1e-7, 3)
+    a.set_ylabel("rate per bin [Hz]  (10 bins per decade)")
 a.set_title("both PMTs > 3σ; MC with the trigger and the 3σ cut of each run (edges %.0f/%.0f and %.0f/%.0f counts), "
             "time-weighted;  K = %.0f ADC·ns/PE"
             % tuple(SOGLIE[RUN["0011"]]["soglia"] + SOGLIE[RUN["0013"]]["soglia"] + [K]),

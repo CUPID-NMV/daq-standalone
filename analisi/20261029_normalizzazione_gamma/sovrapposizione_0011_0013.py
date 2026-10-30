@@ -3,6 +3,7 @@ gamma di Hall A (Compton + scintillazione delle fibre) e muoni di Hall A.
 
     python3 analisi/20261029_normalizzazione_gamma/sovrapposizione_0011_0013.py OUT.png [GAMMA.npz:RESA]
             [--muoni MUONI.npz:RESA] [--v812 CARICHE.npz --evidenzia N ...] [--componenti] [--piedistallo]
+            [--un-pmt-scan SCAN.npz]
 
 GAMMA.npz: i gamma digitalizzati da usare (di serie mc_digit_gamma_righe_s1750.npz:1750);
 RESA e' la resa di scintillazione delle fibre di quella produzione, per la legenda.
@@ -14,6 +15,12 @@ spettro estratto, con le righe spostate o divise e voci che non sono righe note.
 --piedistallo: asse x lineare attorno a zero e logaritmico oltre 2000 ADC*ns, con la
 carica di ciascun PMT in tutti gli eventi (il picco a zero e' il rumore elettronico) e
 la stima di quanti eventi rumore e buio dei PMT portano nella selezione.
+--un-pmt-scan (con --piedistallo): accanto alla carica misurata di ciascun PMT, il
+modello per la stessa grandezza: il MC in tutti gli eventi col trigger, senza i suoi
+eventi con un PMT solo sopra 3 sigma, piu' quelli misurati nello scan del
+self-trigger del 2026-10-30 allo stesso offset della run (l'uscita di
+20261030_calibrazione_selftrigger/un_pmt_scan.py): sono gli impulsi propri dei PMT,
+che il MC non ha. Il buio dei PMT nel riquadro diventa quello misurato nello scan.
 --v812: le cariche (tools/carica_padme.py) di una run presa col trigger del
 V812, per esempio la run da 24 ore coi pannelli (carica_0000_54V_24h.npz): i
 suoi eventi con entrambi i PMT sopra 3 sigma vanno in un pannello a parte,
@@ -49,6 +56,7 @@ ap.add_argument("--v812", default=None)
 ap.add_argument("--evidenzia", type=int, nargs="*", default=[])
 ap.add_argument("--componenti", action="store_true")
 ap.add_argument("--piedistallo", action="store_true")
+ap.add_argument("--un-pmt-scan", default=None)
 arg = ap.parse_args()
 OUT = arg.out
 GAMMA_F, RESA = (arg.gamma.split(":") + ["?"])[:2]
@@ -181,10 +189,23 @@ if arg.piedistallo:
     # eventi in cui quel PMT non ha luce, cioe' il rumore elettronico nel cancello di 260 ns
     tutte = {20: [], 21: []}
     nrum, nuno, ndc = 0.0, 0.0, 0.0
-    buio = np.load(_os.path.join(MIS, "buio_0036.npz"))
-    # buio vero dei PMT: impulsi larghi (carica/ampiezza >= 5 ns) nelle finestre casuali della
-    # 0036; nel file "largo" e' gia' l'esito di quel criterio (vero/falso), non la larghezza
-    r_dc = {ch: buio["largo%d" % ch].astype(bool).sum() / float(buio["t_vivo_s"]) for ch in (20, 21)}
+    if arg.un_pmt_scan:
+        # buio dei PMT misurato nello scan del 2026-10-30: al passo a offset 10 un PMT solo
+        # scatta su impulsi propri, quasi tutti da un fotoelettrone; si contano quelli con
+        # la carica sopra 3 sigma, cioe' quelli che spostano un PMT buio nella selezione
+        zs = np.load(arg.un_pmt_scan if _os.path.exists(arg.un_pmt_scan) else _os.path.join(MIS, arg.un_pmt_scan))
+        durate_s = dict(zip(zs["passo"].tolist(), zs["durata"].tolist()))
+        r_dc = {}
+        for j, ch in ((0, 20), (1, 21)):
+            k10 = (zs["canale"] == ch) & (zs["offset"] == 10)
+            r_dc[ch] = (zs["q"][k10, j] > 3 * zs["sigma_q"][j]).sum() / durate_s["ch%d_off10" % ch]
+        fonte_dc = "scan 30/10"
+    else:
+        buio = np.load(_os.path.join(MIS, "buio_0036.npz"))
+        # buio vero dei PMT: impulsi larghi (carica/ampiezza >= 5 ns) nelle finestre casuali della
+        # 0036; nel file "largo" e' gia' l'esito di quel criterio (vero/falso), non la larghezza
+        r_dc = {ch: buio["largo%d" % ch].astype(bool).sum() / float(buio["t_vivo_s"]) for ch in (20, 21)}
+        fonte_dc = "run 0036"
     for r in RUN:
         z = np.load(_os.path.join(MIS, "carica_%s_testbeam.npz" % r))
         q = np.stack([z["q_caen_ch20"], z["q_caen_ch21"]], 1)
@@ -209,6 +230,50 @@ if arg.piedistallo:
         a.errorbar(bc[okp], hp[okp] / TT / dens[okp], yerr=np.sqrt(hp[okp]) / TT / dens[okp], fmt=mk, ms=3.2,
                    color=col, mfc=col if ch == 20 else "white", lw=0.7, zorder=4,
                    label="DATA, PMT ch%d charge in all triggered events, no selection (peak at 0 = electronic noise)" % ch)
+    if arg.un_pmt_scan:
+        # Il modello per la stessa grandezza. Dal MC si tolgono gli eventi con un PMT solo
+        # sopra 3 sigma, al loro posto quelli misurati nello scan allo stesso offset della
+        # run, ciascuno con DUE voci: la carica del PMT che ha sparato (2-5 PE, la coda dei
+        # suoi impulsi propri) e quella dell'altro, buio, che finisce nel picco a zero.
+        # Per il PMT buio lo scan da' solo QUANTI sono: la sua carica e' rumore, e il
+        # rumore dello scan non e' quello della 0011 e della 0013 (coi PMT invertiti il
+        # piedistallo e' piu' largo, sigma 320/370 contro 234-269). La forma la da' il
+        # rumore del MC, fatto con tracce vere di piedistallo: le cariche del PMT buio
+        # negli eventi del MC col trigger della run.
+        OFFSET = {"0011": 200, "0013": 100}
+        mod = {20: np.zeros(len(b) - 1), 21: np.zeros(len(b) - 1)}
+        rumore = {}
+        for f in (GAMMA_F, MU_F):
+            z = np.load(f if _os.path.exists(f) else _os.path.join(MIS, f))
+            w0 = float(z["peso_hz"])
+            for r in RUN:
+                A_ = np.array(SOGLIE[RUN[r]]["soglia"])
+                S_ = np.array(SOGLIE[RUN[r]]["sigma_q"])
+                trig = (z["amp"][:, 0] >= A_[0]) | (z["amp"][:, 1] >= A_[1])
+                sop = z["q"] > 3 * S_[None, :]
+                tieni = trig & ~(sop[:, 0] ^ sop[:, 1])
+                for j, ch in ((0, 20), (1, 21)):
+                    mod[ch] += np.histogram(z["q"][tieni, j], b)[0] * w0 * T[r] / TT
+                    if f == GAMMA_F:
+                        h_ = np.histogram(z["q"][trig & ~sop[:, j], j], b)[0].astype(float)
+                        rumore[(r, ch)] = h_ / max(h_.sum(), 1.0)
+        uno_scan = {}
+        for r in RUN:
+            for j, ch in ((0, 20), (1, 21)):
+                k = (zs["canale"] == ch) & (zs["offset"] == OFFSET[r])
+                qk = zs["q"][k]
+                solo = (qk[:, j] > 3 * zs["sigma_q"][j]) & (qk[:, 1 - j] <= 3 * zs["sigma_q"][1 - j])
+                peso = T[r] / TT / durate_s["ch%d_off%g" % (ch, OFFSET[r])]
+                uno_scan[(r, ch)] = solo.sum() / durate_s["ch%d_off%g" % (ch, OFFSET[r])]
+                mod[ch] += np.histogram(qk[solo, j], b)[0] * peso
+                altro = 21 if ch == 20 else 20
+                mod[altro] += rumore[(r, altro)] * solo.sum() * peso
+        for ch, col, ls in ((20, "#3c3c3c", "-"), (21, "#8c8c8c", "--")):
+            a.stairs(mod[ch] / dens, b, color=col, lw=1.7, ls=ls, zorder=3,
+                     label="MODEL ch%d: MC + PMT own pulses (events with one PMT alone, from the self-trigger "
+                           "scan of 30/10)" % ch)
+        print("eventi con un PMT solo nello scan allo stesso offset: " +
+              ", ".join("%s ch%d %.3f Hz" % (r, ch, v) for (r, ch), v in uno_scan.items()))
     s_med = [np.mean([SOGLIE[RUN[r]]["sigma_q"][j] for r in RUN]) for j in (0, 1)]
     a.axvline(3 * np.mean(s_med), color="k", ls=":", lw=1.2,
               label="3σ of the pedestal, %.0f ADC·ns = %.2f PE (σ = %.0f-%.0f ADC·ns)"
@@ -218,8 +283,8 @@ if arg.piedistallo:
     sel = cd["both > 3σ"]
     testo = ("noise and dark counts in the selection (both PMTs > 3σ):\n"
              "  electronic noise above 3σ (from the negative tail): %.1e Hz = %.2f%% of %.3f Hz\n"
-             "  PMT dark counts (%.0f / %.0f Hz from run 0036, 260 ns gate): %.1e Hz = %.4f%%"
-             % (nrum / TT, 100 * nrum / TT / sel, sel, r_dc[20], r_dc[21], ndc / TT, 100 * ndc / TT / sel))
+             "  PMT dark counts (%.0f / %.0f Hz above 3σ, %s): %.1e Hz = %.4f%%"
+             % (nrum / TT, 100 * nrum / TT / sel, sel, r_dc[20], r_dc[21], fonte_dc, ndc / TT, 100 * ndc / TT / sel))
     a.text(0.012, 0.025, testo, transform=a.transAxes, fontsize=8.5, va="bottom", ha="left", family="monospace",
            bbox=dict(facecolor="white", edgecolor="#bbb", alpha=0.92))
     print("rumore: %.0f eventi su %.0f con un PMT solo -> %.2e Hz (%.2f%%); buio %.0f/%.0f Hz -> %.2e Hz (%.4f%%)"
@@ -230,7 +295,9 @@ else:
     a.set_xscale("log")
 a.set_yscale("log")
 if arg.piedistallo:
-    a.set_ylim(1e-8, 30)                              # spazio per la legenda sopra i dati
+    # spazio per la legenda sopra i dati; col modello per PMT le righe sono due di piu' e,
+    # col limite a 30, le ultime coprivano i punti del massimo a 2-3 PE
+    a.set_ylim(1e-8, 2000 if arg.un_pmt_scan else 30)
     a.set_ylabel("rate per 100 ADC·ns [Hz]")
 else:
     a.set_ylim(1e-7, 3)

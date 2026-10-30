@@ -70,7 +70,7 @@ testo = """# =======================================================
 # Perche' due macro: gun_gammas_background.mac usa lo spettro DEPOSITATO in
 # un NaI 3"x3" (Bellini 2013, Fig. 3), che sottopesa le righe alte; questa
 # usa le righe emesse, senza il continuo dei gamma diffusi nella roccia.
-# Con lo stesso flusso (0.35 cm^-2 s^-1) la prima da' il limite inferiore
+# Con lo stesso flusso (Hall A, J = 0.28 cm^-2 s^-1 per cm^2 di superficie) la prima da' il limite inferiore
 # del fondo Compton, questa quello superiore.
 # Frazione dei gamma sopra 0.42 MeV (soglia Cherenkov via Compton):
 # %.1f%% qui, ~12.7%% nella macro NaI.

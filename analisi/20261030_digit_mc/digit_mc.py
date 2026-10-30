@@ -1,10 +1,14 @@
 """Digitalizza il MC del WC prototipo come i dati veri della catena LNGS, e
 gli applica la stessa analisi e lo stesso trigger.
 
-    python3 analisi/20261030_digit_mc/digit_mc.py MC_DIR NOME OUT.npz [REPLICHE] [--k K] [--rate HZ]
+    python3 analisi/20261030_digit_mc/digit_mc.py MC_DIR NOME OUT.npz [REPLICHE] [--k K] [--rate HZ] [--geo GEO]
 
-NOME seleziona i file MC: sim_single_<NOME>_X0mm_Y0mm_Th0deg.root oppure le
-parti sim_single_<NOME>_part*_X0mm_Y0mm_Th0deg.root (Run_gamma_parallel.sh).
+NOME seleziona i file MC: sim_<GEO>_<NOME>_X0mm_Y0mm_Th0deg.root oppure le
+parti sim_<GEO>_<NOME>_part*_X0mm_Y0mm_Th0deg.root (Run_gamma_parallel.sh);
+GEO di serie e' single. Con GEO = single_pan (i tre pannelli EJ-200 sotto il
+serbatoio) si salva anche l'energia depositata in ciascun pannello, e il
+rate di serie dei gamma e' quello della scatola di
+gun_gammas_background_righe_pannelli.mac (81400 cm^2).
 
 Perche' non Signal_maker: quello rappresenta la catena del test beam (PMT
 senza amplificatore, singolo PE da ~3 mV su 3.5 conteggi di rumore bianco):
@@ -56,6 +60,7 @@ ap.add_argument("nome")
 ap.add_argument("out")
 ap.add_argument("repliche", nargs="?", type=int, default=1)
 ap.add_argument("--k", type=float, default=None, help="ADC*ns per fotoelettrone")
+ap.add_argument("--geo", default="single", help="geometria del MC (nome dei file): single, single_pan, ...")
 ap.add_argument("--rate", type=float, default=None,
                 help="Hz della sorgente (di serie: 13832 per i gamma, 0.0127 per i muoni)")
 a = ap.parse_args()
@@ -83,10 +88,12 @@ if a.rate is None:
     # il valore di Hall A di arXiv:1101.5298, che conta i gamma ENTRANTI per cm^2 di superficie
     # del NaI, cioe' J = phi/4 (analisi/20261029_normalizzazione_gamma/flusso_haffke.py). Fino
     # al 2026-10-29 qui c'era 0.35/4 * A_gen: il 4 veniva diviso due volte, 3.2 volte meno gamma.
-    a.rate = 0.0127 if "mu" in a.nome else 0.28 * (2 * 130 * 130 + 4 * 130 * 30)
+    # single_pan: la scatola della macro coi pannelli, 190 x 130 x 50 cm
+    a_gen = (2 * 190 * 130 + 2 * 190 * 50 + 2 * 130 * 50) if a.geo == "single_pan" else (2 * 130 * 130 + 4 * 130 * 30)
+    a.rate = 0.0127 if "mu" in a.nome else 0.28 * a_gen
 
-files = sorted(glob.glob(_os.path.join(a.mc_dir, "sim_single_%s_part*_X0mm_Y0mm_Th0deg.root" % a.nome))) \
-    or [_os.path.join(a.mc_dir, "sim_single_%s_X0mm_Y0mm_Th0deg.root" % a.nome)]
+files = sorted(glob.glob(_os.path.join(a.mc_dir, "sim_%s_%s_part*_X0mm_Y0mm_Th0deg.root" % (a.geo, a.nome)))) \
+    or [_os.path.join(a.mc_dir, "sim_%s_%s_X0mm_Y0mm_Th0deg.root" % (a.geo, a.nome))]
 rng = np.random.default_rng(7)
 
 
@@ -98,7 +105,7 @@ def onda(tempi, g, ch):
     return w
 
 
-Q, A, TL, NPE, EF = [], [], [], [], []
+Q, A, TL, NPE, EF, EP = [], [], [], [], [], []
 n_gen = 0
 for fn in files:
     f = uproot.open(fn)
@@ -111,6 +118,12 @@ for fn in files:
                            ("Edep_fiber_L_MeV", "Edep_fiber_C_MeV", "Edep_fiber_R_MeV")], 1)
     except Exception:
         ef_all = np.full((len(tl_all), 3), np.nan)
+    # energia nei tre pannelli (alto, mezzo, basso): solo nei file della geometria single_pan
+    try:
+        ep_all = np.stack([f["Eventi"].arrays([k], library="np")[k] for k in
+                           ("Edep_panel_top_MeV", "Edep_panel_mid_MeV", "Edep_panel_bot_MeV")], 1)
+    except Exception:
+        ep_all = np.full((len(tl_all), 3), np.nan)
     ph = f["Fotoni"].arrays(["EventID", "PMT_ID", "E_Hit_eV", "Arrival_Time_ns"], library="np")
     ev = ph["EventID"].astype(np.int64)
     pid = ph["PMT_ID"].astype(int)
@@ -143,13 +156,14 @@ for fn in files:
             NPE.append(n_ev)
             TL.append(tl_all[e])
             EF.append(ef_all[e])
+            EP.append(ep_all[e])
     print("%s: %d eventi generati finora, %d digitalizzati" % (_os.path.basename(fn), n_gen, len(Q)))
 
 Q, A = np.array(Q), np.array(A)
 trig = (A[:, 0] >= SOGLIA[0]) | (A[:, 1] >= SOGLIA[1])
 w = a.rate / n_gen / a.repliche
 np.savez_compressed(a.out, q=Q, amp=A, npe=np.array(NPE), trig=trig, trackl=np.array(TL),
-                    edep_fibre=np.array(EF), peso_hz=w,
+                    edep_fibre=np.array(EF), edep_pannelli=np.array(EP), geo=a.geo, peso_hz=w,
                     n_gen=n_gen, rate_hz=a.rate, k=a.k, repliche=a.repliche, soglia=SOGLIA, t_trig=T_TRIG,
                     file_mc=np.array([_os.path.basename(x) for x in files]))
 print("scritto %s: %d eventi generati, %d con PE, %d col trigger; K = %.0f ADC*ns/PE; "

@@ -586,9 +586,16 @@ self-trigger su tutti e cinque.
   PMT **10.7 ns** (quasi solo singoli fotoelettroni, a offset 10). Prima
   dell'inverter gli impulsi di un PMT erano 8.0-8.3 ns: se l'inverter li
   allarghi e' da verificare.
-- **A 750 MS/s l'offset non e' calibrato in mV.** Le forme d'onda di ogni
-  passo sono nella run (`eventi_da`/`eventi_a` nei JSON), per
-  `calibra_selftrigger.py`.
+- **In mV: i SiPM si', i PMT no.** Per i SiPM (~195 ns) vale il punto degli
+  impulsi larghi, **0.436 mV/offset** misurato a 750 MS/s su impulsi positivi
+  da 189 ns: offset 50 = 22 mV, 600 = 262 mV, 1200 = 523 mV. Per i PMT
+  (11 ns) nessun punto misurato sta entro un fattore 2 della larghezza. Le
+  forme d'onda di ogni passo sono nella run (`eventi_da`/`eventi_a` nei JSON),
+  per `calibra_selftrigger.py`.
+- **Il riquadro *Scan plots* della pagina elenca i JSON, non i PNG**: le curve
+  si vedono selezionando le misure (ch 16, 17, 18 del 30/10) e disegnandole,
+  e la pagina propone da se' la calibrazione giusta. Il 2026-10-30 avevo detto
+  all'utente che i grafici erano li', e non c'erano.
 - **A offset 100 un PMT da solo scatta a 1.4-1.7 Hz**, come gli eventi con un
   solo PMT della 0013 (1.6-2.0 Hz) e 5-6 volte il MC. Il confronto e' a pari
   offset, con impulsi invertiti nello scan e diretti nella 0013. Da qui

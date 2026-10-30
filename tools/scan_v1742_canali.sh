@@ -136,7 +136,25 @@ for g in "$@"; do
     done
     if (( ${#json[@]} > 0 )); then
         nome="$PLOTS/scan_canali_${STAMP}_ch$(echo $canali | tr ' ' '-').png"
-        python3 "$ROOT/tools/plot_scan.py" --logy -o "$nome" "${json[@]}" && GRAFICI+=("$nome")
+        # La conversione in mV la sceglie calibrazione.py dalla larghezza
+        # degli impulsi, come fa la pagina di controllo. plot_scan.py da solo
+        # guarda la sola frequenza, e a 750 MS/s scriveva "NOT CALIBRATED"
+        # anche sui SiPM, che una calibrazione misurata ce l'hanno.
+        mv=$(python3 - "$ROOT" "${json[@]}" <<'EOF'
+import json, os, sys
+sys.path.insert(0, os.path.join(sys.argv[1], "tools"))
+import calibrazione
+valori = set()
+for f in sys.argv[2:]:
+    d = json.load(open(f))
+    tag = next((t for t in ("5Gs", "2.5Gs", "1Gs", "750Ms") if t in str(d.get("file", ""))), None)
+    valori.add(calibrazione.scegli(tag, d.get("larghezza_fwhm_ns"))[0])
+print(valori.pop() if len(valori) == 1 and None not in valori else "")
+EOF
+)
+        opz=(--logy)
+        [[ -n "$mv" ]] && opz+=(--mv-per-offset "$mv")
+        python3 "$ROOT/tools/plot_scan.py" "${opz[@]}" -o "$nome" "${json[@]}" && GRAFICI+=("$nome")
     fi
     (( completo )) || break
 done

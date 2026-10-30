@@ -53,7 +53,6 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import calibrazione
 import canali as canali_mod
 import nomi
 import tomledit
@@ -666,36 +665,15 @@ def elenco_misure(n=20):
                 d = json.load(f)
         except (OSError, ValueError):
             continue
-        # Quale calibrazione offset -> mV si applica a QUESTO scan. La
-        # larghezza degli impulsi, quando lo scan l'ha registrata, decide
-        # meglio della frequenza di campionamento: vedi tools/calibrazione.py.
-        mv, nota = (None, None)
-        mv_cfd, nota_cfd = (None, None)
-        if d.get("tipo") != "v812":
-            tag = next((t for t in ("5Gs", "2.5Gs", "1Gs", "750Ms")
-                        if t in str(d.get("file", ""))), None)
-            mv, nota = calibrazione.scegli(tag, d.get("larghezza_fwhm_ns"))
-            # Lo stesso fattore riferito all'ingresso del CFD. Serve quando si
-            # sovrappone questo scan a uno del V812, il cui asse e' gia' in
-            # millivolt misurati LI'. La pagina sceglie da sola quale usare.
-            mv_cfd = calibrazione.al_cfd(mv)
-            # La nota si da' SEMPRE, anche -- anzi soprattutto -- quando il
-            # valore non c'e': una casella vuota senza spiegazione sembra un
-            # guasto, e chi la trova ci scrive dentro il primo numero che ha
-            # in mente.
-            nota_cfd = calibrazione.nota_cfd(mv)
         fuori.append({"nome": nome, "quando": st.st_mtime,
                       "punti": len(d.get("punti", [])),
                       "tipo": "V812 CFD" if d.get("tipo") == "v812" else "V1742 self-trigger",
-                      "canali": d.get("canali"),
-                      "mvoff": mv, "mvoff_nota": nota,
-                      "mvoff_cfd": mv_cfd, "mvoff_cfd_nota": nota_cfd})
+                      "canali": d.get("canali")})
     fuori.sort(key=lambda x: -x["quando"])
     return fuori[:n]
 
 
-def disegna_misure(nomi, logy, per_canale=False, canali="", mv_per_offset="",
-                   limiti=None):
+def disegna_misure(nomi, logy, per_canale=False, canali="", limiti=None):
     """Lancia plot_scan.py sulle misure scelte. Torna (esito, messaggio, png)."""
     scelti = []
     for nome in nomi[:8]:
@@ -715,7 +693,6 @@ def disegna_misure(nomi, logy, per_canale=False, canali="", mv_per_offset="",
     # stesso file, e il browser lo rilegge grazie al parametro anti-cache.
     firma = hashlib.sha1(("|".join(sorted(nomi)) + ("|log" if logy else "|lin") +
                           ("|ch:" + canali if per_canale else "|or") +
-                          ("|mv:" + str(mv_per_offset or "")) +
                           ("|lim:" + ",".join(str(x or "") for x in (limiti or []))))
                          .encode()).hexdigest()[:8]
     uscita = os.path.join(GRAFICI, "view_%s.png" % firma)
@@ -739,19 +716,9 @@ def disegna_misure(nomi, logy, per_canale=False, canali="", mv_per_offset="",
                            % canali.strip()[:40]), None
         if canali_scelti:
             cmd += ["--channels", " ".join(str(c) for c in canali_scelti)]
-    # La conversione forzata e' l'unica via per disegnare il conteggio per
-    # canale a una frequenza dove non e' stata misurata. plot_scan.py si
-    # rifiuta di inventarla, e fa bene; ma la via d'uscita esisteva solo da
-    # riga di comando, cosi' dalla pagina la funzione risultava "rotta".
-    # Il grafico scrive da se' che quel numero e' assunto.
-    if str(mv_per_offset or "").strip():
-        try:
-            k = float(str(mv_per_offset).replace(",", "."))
-        except ValueError:
-            return False, "mV/offset non e' un numero: %s" % mv_per_offset, None
-        if not 0 < k < 100:
-            return False, "mV/offset fuori da ogni scala plausibile: %g" % k, None
-        cmd += ["--mv-per-offset", repr(k)]
+    # Niente conversione in mV dalla pagina (decisione dell'utente,
+    # 2026-10-30): gli scan del self-trigger si disegnano in conteggi di
+    # offset, SiPM e PMT. La casella c'era e non si usava, e confondeva.
     # Limiti degli assi, se chiesti. Un valore illeggibile si dice, non si
     # ignora: una scala che non e' quella che hai scritto e' peggio di un
     # messaggio di errore.
@@ -781,22 +748,20 @@ def disegna_misure(nomi, logy, per_canale=False, canali="", mv_per_offset="",
         return False, "Plot failed: %s" % e, None
     if r.returncode != 0:
         detto = (r.stderr.strip() or r.stdout.strip() or "plot_scan failed")
-        # plot_scan.py parla a chi sta in un terminale, e il suo rifiuto dice
-        # "usa --mv-per-offset". Qui dentro quell'opzione e' una casella, e
-        # rimandare l'utente a un'opzione da riga di comando lo lascia fermo
-        # davanti a una pagina che AVEVA gia' quello che serviva. Succede
-        # solo per questo rifiuto, quindi si riscrive solo questo.
+        # plot_scan.py parla a chi sta in un terminale, e i suoi rifiuti
+        # rimandano a --mv-per-offset, che dalla pagina non c'e'. Si
+        # riscrivono questi due, in modo che dicano cosa fare QUI.
         if "offset -> mV non e' misurata" in detto:
             freq = re.search(r"\ba ([0-9.]+ [GM]S/s)\b", detto)
             return False, (
-                "Per channel needs the mV per offset unit, and at %s it has "
-                "never been measured: the conversion changes by 29%% between "
-                "2.5 and 1 GS/s, so it is not interpolated. Type a number in "
-                "the mV/offset box above \u2014 2.7 is the value measured at "
-                "1 GS/s \u2014 and the plot will label the axis ASSUMED. "
-                "Or untick per channel: the trigger-rate plot is in offset "
-                "counts and needs no conversion."
+                "Per channel recounts each channel on the recorded waveforms, and "
+                "for that it needs the mV per offset unit, which at %s has never "
+                "been measured. Untick per channel: the trigger-rate plot is in "
+                "offset counts and needs no conversion."
                 % (freq.group(1) if freq else "this sampling rate")), None
+        if "non stanno sullo stesso asse" in detto:
+            return False, ("V812 scans are in mV at the CFD input, self-trigger "
+                           "scans in offset counts: draw them separately."), None
         return False, detto[-400:], None
     return True, "Plot drawn.", os.path.basename(uscita)
 
@@ -2852,9 +2817,6 @@ PAGINA = r"""<!doctype html>
       </label>
       <input id="gchan" placeholder="all — or 16,18 / 16-18" style="width:98px;font-size:12px"
              title="which channels to draw: 16, or 16,18, or 16-18 - empty means every channel in the file, including the unconnected ones">
-      <input id="gmvoff" placeholder="mV/offset" style="width:98px;font-size:12px"
-             data-auto="1"
-             title="mV per offset unit, to convert the threshold. Empty = the measured value for that sampling rate (2.5 GS/s and 1 GS/s only). At other rates the per-channel plot needs a number here, and the plot will say it is assumed.">
       <div style="display:flex;gap:4px">
         <input id="gxmin" placeholder="x min" style="width:47px;font-size:12px"
                title="limiti dell'asse x del grafico, nelle unita' dell'asse; vuoto = automatico">
@@ -2865,7 +2827,6 @@ PAGINA = r"""<!doctype html>
                title="limiti dell'asse y (rate in Hz); vuoto = automatico">
         <input id="gymax" placeholder="y max" style="width:47px;font-size:12px">
       </div>
-      <div id="gmvoffnota" style="font-size:11px;color:#6b6a65;max-width:190px;line-height:1.35"></div>
       <button id="gdraw" style="background:#2a78d6;color:#fff">Draw</button>
       <button id="ggo" style="background:#ececea">Refresh list</button>
       <a id="gapri" href="#" target="_blank" style="font-size:12px">open full size</a>
@@ -2873,12 +2834,13 @@ PAGINA = r"""<!doctype html>
   </div>
   <div id="aiutoplot" class="aiuto">
     Pick one or more measurements (ctrl-click) and draw them together. Up to 8:
-    beyond that the curves stop being distinguishable. <b>per channel</b> puts the
-    threshold in millivolts, so it needs the mV per offset unit: that is measured
-    at 2.5 GS/s and 1 GS/s only, and at any other rate you must type it in the
-    <b>mV/offset</b> box &mdash; the plot then labels the axis ASSUMED. With <b>per channel</b>,
-    leaving the channel box empty draws every channel in the file &mdash; including
-    the ones with nothing plugged in, which sit flat near zero.
+    beyond that the curves stop being distinguishable. Self-trigger scans are
+    drawn in <b>offset counts</b>, SiPM and PMT alike; V812 scans are in mV at the
+    CFD input, so the two kinds are drawn separately. <b>per channel</b> recounts
+    each channel on the recorded waveforms: it works at 2.5 GS/s and 1 GS/s only,
+    where the conversion it needs is measured. With <b>per channel</b>, leaving
+    the channel box empty draws every channel in the file &mdash; including the
+    ones with nothing plugged in, which sit flat near zero.
   </div>
   <div id="gvuoto" style="color:#6b6a65;font-size:12px;margin-top:8px"></div>
   <img id="gimg" style="margin-top:10px;max-width:100%;border:1px solid #e2e2de;border-radius:6px;display:none">
@@ -3647,51 +3609,11 @@ async function caricaGrafici(){
       if(scelti.has(o.value)){ o.selected = true; qualcuno = true; }
     if(!qualcuno) $("gsel").options[0].selected = true;
   }
-  MISURE = m;
-  suggerisciMvOff();
 }
 
-// La conversione soglia -> millivolt la propone il server, che sa con quali
-// impulsi ogni punto di calibrazione e' stato misurato. Si SCRIVE nella
-// casella invece di dirlo in un messaggio: chi disegna vuole il grafico, non
-// un compito. Resta modificabile, e accanto c'e' scritto su che impulso quel
-// numero vale -- perche' il fattore dipende dalla larghezza molto piu' che
-// dalla frequenza di campionamento, e un numero senza quella frase e' una
-// trappola per il prossimo che lo legge.
-let MISURE = [], MVOFF_MIO = false;
 // L'ultimo stato intero: i due pannelli degli alimentatori si guardano a
 // vicenda, perche' cosa si puo' premere sull'uno dipende dall'altro.
 let ULTIMO_STATO = null;
-
-function suggerisciMvOff(){
-  const scelti = new Set(Array.from($("gsel").selectedOptions).map(o => o.value));
-  const sel = MISURE.filter(x => scelti.has(x.nome));
-  // Un V812 nella selezione cambia il punto in cui si misurano i millivolt:
-  // il suo asse e' nativo all'ingresso del CFD, quindi gli offset del
-  // self-trigger vanno portati LI', non all'ingresso del digitizer. Senza
-  // questo si sovrappongono due assi che si chiamano "mV" e non lo sono nello
-  // stesso posto -- e le curve non tornano per un fattore 1.7.
-  const conCfd = sel.some(x => x.tipo === "V812 CFD")
-              && sel.some(x => x.tipo !== "V812 CFD");
-  const campo = conCfd ? "mvoff_cfd" : "mvoff";
-  const campoNota = conCfd ? "mvoff_cfd_nota" : "mvoff_nota";
-  const note = [...new Set(sel.map(x => x[campoNota]).filter(Boolean))];
-  const valori = [...new Set(sel.map(x => x[campo]).filter(v => v !== null && v !== undefined))];
-  $("gmvoffnota").textContent = note.length === 1 ? note[0] :
-      (note.length ? "the selected scans need different calibrations: "
-                     + note.join("  |  ") : "");
-  // Quello che hai scritto tu non si tocca.
-  if(MVOFF_MIO) return;
-  $("gmvoff").value = valori.length === 1 ? String(valori[0]) : "";
-}
-
-$("gsel").addEventListener("change", suggerisciMvOff);
-$("gmvoff").addEventListener("input", () => {
-  // Vuota vuol dire "torna a proporre": non si resta prigionieri di una
-  // cancellatura.
-  MVOFF_MIO = $("gmvoff").value.trim() !== "";
-  if(!MVOFF_MIO) suggerisciMvOff();
-});
 
 async function disegna(){
   const scelti = Array.from($("gsel").selectedOptions).map(o => o.value);
@@ -3700,7 +3622,6 @@ async function disegna(){
                                  logy: $("glog").checked ? "1" : "0",
                                  perch: $("gperch").checked ? "1" : "0",
                                  canali: $("gchan").value.trim(),
-                                 mvoff: $("gmvoff").value.trim(),
                                  gxmin: $("gxmin").value.trim(),
                                  gxmax: $("gxmax").value.trim(),
                                  gymin: $("gymin").value.trim(),
@@ -4327,7 +4248,6 @@ def crea_handler(ctrl, token):
                 esito, messaggio, png = disegna_misure(
                     qs.get("misura", []), qs.get("logy", ["0"])[0] == "1",
                     qs.get("perch", ["0"])[0] == "1", qs.get("canali", [""])[0],
-                    qs.get("mvoff", [""])[0],
                     [qs.get(k, [""])[0] for k in ("gxmin", "gxmax", "gymin", "gymax")])
                 extra["png"] = png
 

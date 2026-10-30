@@ -272,7 +272,9 @@ def per_canale(d, tipo, k_mv_offset):
     non e' nell'OR, lo si vede solo quando ha sparato qualcun altro, e il
     conteggio sarebbe quello delle coincidenze, non delle sue soglie.
 
-    Ritorna {canale: (soglie_mV, rate_Hz)}.
+    Ritorna {canale: (soglie_mV, rate_Hz, soglie_asse)}: le soglie_asse sono
+    quelle da disegnare, in conteggi di offset per il self-trigger (in mV per
+    il V812). I mV servono comunque, per il confronto con l'ampiezza.
     """
     fuori = {}
 
@@ -280,13 +282,15 @@ def per_canale(d, tipo, k_mv_offset):
         if tipo == "v812":
             nome, durata = p.get("file"), p.get("durata_s")
             soglia_mv, prima, dopo = p.get("soglia_mv"), None, None
+            asse = soglia_mv
         else:
             nome, durata = d.get("file"), d.get("secondi_per_punto")
             # abs() per la stessa ragione di leggi(): col fronte di salita
             # "distanza" e' negativa, e una soglia negativa qui sotto e'
             # peggio di un asse specchiato -- il confronto con |ampiezza| la
             # supera sempre, quindi ogni canale contava TUTTI gli eventi.
-            soglia_mv = abs(p.get("distanza", 0)) * k_mv_offset
+            asse = abs(p.get("distanza", 0))
+            soglia_mv = asse * k_mv_offset
             prima, dopo = p.get("eventi_da"), p.get("eventi_a")
         if not nome or not durata:
             continue
@@ -315,11 +319,12 @@ def per_canale(d, tipo, k_mv_offset):
         _, _, amp, _ = daqio.baseline_amplitude(dd)
         for i, ch in enumerate(hdr["ChannelList"]):
             n = int((np.abs(amp[:, i]) * MV_PER_CONTEGGIO > soglia_mv).sum())
-            fuori.setdefault(int(ch), ([], []))
+            fuori.setdefault(int(ch), ([], [], []))
             fuori[int(ch)][0].append(soglia_mv)
             fuori[int(ch)][1].append(n / float(durata))
+            fuori[int(ch)][2].append(asse)
 
-    return {c: (np.array(x), np.array(y)) for c, (x, y) in fuori.items()}
+    return {c: (np.array(x), np.array(y), np.array(a)) for c, (x, y, a) in fuori.items()}
 
 
 def frequenza(nome_file):
@@ -358,7 +363,13 @@ def leggi(path, mv_per_offset_forzato):
 
     # formato di noise_scan.py: soglia in conteggi di offset
     tag = frequenza(d.get("file", ""))
-    k = mv_per_offset_forzato or MV_PER_OFFSET.get(tag)
+    # In conteggi di offset sempre, SiPM e PMT, salvo una conversione chiesta
+    # a mano: decisione dell'utente del 2026-10-30. Uno scan del self-trigger
+    # e' una misura in offset, e un asse in millivolt dipende da una
+    # calibrazione che cambia di un fattore otto con la larghezza degli
+    # impulsi: con SiPM e PMT nella stessa run, meta' delle curve sarebbero
+    # finite in mV e meta' no.
+    k = mv_per_offset_forzato
 
     # Il valore assoluto, non il numero firmato: "distanza" e' baseline meno
     # soglia, quindi cambia segno col fronte di discriminazione -- positiva
@@ -371,12 +382,7 @@ def leggi(path, mv_per_offset_forzato):
     lim = np.array([p.get("conteggi", 1) == 0 for p in punti])
 
     if k is None:
-        # Senza calibrazione si disegna comunque, in conteggi di offset: e' la
-        # grandezza che lo scan ha davvero variato. Inventare un fattore --
-        # anche solo prendendo quello della frequenza vicina -- vorrebbe dire
-        # scrivere "mV" su un asse che non lo e'.
-        nota = "V1742 self-trigger   %s   (offset counts: mV NOT CALIBRATED at %s)" % (
-            _canali(d.get("canali")), leggibile(tag))
+        nota = "V1742 self-trigger   %s   (%s)" % (_canali(d.get("canali")), leggibile(tag))
         return "v1742", dist, y, lim, nota, d, "offset"
 
     # %.3f, non %.1f: con %.1f il fattore 0.246 si leggeva "0.2 mV/offset",
@@ -462,10 +468,10 @@ def main():
     if len(unita) > 1:
         raise SystemExit(
             "Questi scan non stanno sullo stesso asse: %s.\n"
-            "Succede quando uno e' a una frequenza con la calibrazione misurata e "
-            "un altro no (per esempio 750 MS/s).\n"
-            "Con --mv-per-offset <valore> si forza la conversione per tutti, "
-            "sapendo che a quella frequenza e' un'assunzione." % ", ".join(unita))
+            "Gli scan del V812 sono in mV all'ingresso del CFD, quelli del "
+            "self-trigger in conteggi di offset: vanno disegnati separatamente.\n"
+            "Per sovrapporli: --mv-per-offset <valore>, sapendo che la "
+            "conversione dipende dalla larghezza degli impulsi." % ", ".join(unita))
     unita = unita[0]
 
     note = [s[4] for s in serie]
@@ -528,10 +534,10 @@ def main():
         for tipo, _, _, _, nota, d, _u in serie:
             # Qui il fattore serve per forza: il conteggio per canale confronta
             # la soglia con l'ampiezza RICOSTRUITA, che e' in millivolt, quindi
-            # la soglia va portata in millivolt e non c'e' un asse alternativo
-            # in conteggi di offset. Prima c'era un default nascosto di 3.5
-            # mV/offset: a 750 MS/s avrebbe applicato la calibrazione dei
-            # 2.5 GS/s senza dirlo, cioe' un numero sbagliato scritto "mV".
+            # la soglia va portata in millivolt per il confronto -- l'asse
+            # resta in conteggi di offset come negli altri grafici. Prima c'era
+            # un default nascosto di 3.5 mV/offset: a 750 MS/s avrebbe
+            # applicato la calibrazione dei 2.5 GS/s senza dirlo.
             k = args.mv_per_offset or (MV_PER_OFFSET.get(frequenza(d.get("file", "")))
                                        if tipo == "v1742" else 1.0)
             if k is None:
@@ -555,7 +561,8 @@ def main():
                 if n >= len(PALETTE):
                     raise SystemExit("Troppe curve per i colori disponibili: "
                                      "scegli meno canali o meno scan.")
-                x, y = canali[ch]
+                x_mv, y, x_asse = canali[ch]
+                x = x_mv if unita == "mV" else x_asse
                 ordine = np.argsort(x)
                 etichetta = "ch %d" % ch
                 if len(serie) > 1:

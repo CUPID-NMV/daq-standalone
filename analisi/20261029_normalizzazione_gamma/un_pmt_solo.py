@@ -1,12 +1,18 @@
 """Eventi con un solo PMT sopra 3 sigma: dati 0013 (offset 100) e 0011 (offset
 200) contro il MC dei gamma e dei muoni, ciascuno col trigger della sua run.
 
-    python3 analisi/20261029_normalizzazione_gamma/un_pmt_solo.py OUT.png [GAMMA.npz] [MUONI.npz]
+    python3 analisi/20261029_normalizzazione_gamma/un_pmt_solo.py OUT.png [GAMMA.npz] [MUONI.npz] [--scan SCAN.npz]
 
 La domanda: il massimo a 2-3 PE della carica di un PMT (nella sovrapposizione
 col piedistallo) sono eventi in cui un solo PMT supera la soglia. Il MC li
 ha? E quanti? Si mostra la carica del PMT acceso, separata per PMT (ch20 solo,
 ch21 solo), in rate.
+
+Con --scan (l'uscita di 20261030_calibrazione_selftrigger/un_pmt_scan.py) si
+aggiunge la stessa cosa misurata nello scan del self-trigger del 2026-10-30,
+al passo con lo stesso offset della run: un altro giorno, PMT invertiti, il
+trigger lo applica l'hardware. Ogni evento dello scan e' classificato con la
+sigma del piedistallo dello scan stesso.
 """
 # --- percorsi: lo script gira da qualunque cartella, sul PC DAQ o sul Mac ---
 import os as _os, sys as _sys
@@ -19,14 +25,20 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-OUT = sys.argv[1]
-GAMMA_F = sys.argv[2] if len(sys.argv) > 2 else "mc_digit_gamma_righe_s3500.npz"
-MU_F = sys.argv[3] if len(sys.argv) > 3 else "mc_digit_mu_lngs_s3500.npz"
+import argparse
+ap = argparse.ArgumentParser()
+ap.add_argument("out")
+ap.add_argument("gamma", nargs="?", default="mc_digit_gamma_righe_s3500.npz")
+ap.add_argument("muoni", nargs="?", default="mc_digit_mu_lngs_s3500.npz")
+ap.add_argument("--scan", default=None)
+arg = ap.parse_args()
+OUT, GAMMA_F, MU_F = arg.out, arg.gamma, arg.muoni
 MIS = _os.path.join(ROOT, "measurements")
 SOGLIE = json.load(open(_os.path.join(MIS, "soglie_trigger_lngs.json")))
 RUN = {"0013": "LNGS__54-0V_0013_750Ms_55PT", "0011": "LNGS__54-0V_0011_750Ms_55PT"}
 OFFSET = {"0013": 100, "0011": 200}
 mc = [np.load(_os.path.join(MIS, f)) for f in (GAMMA_F, MU_F)]
+scan = np.load(arg.scan if _os.path.exists(arg.scan) else _os.path.join(MIS, arg.scan)) if arg.scan else None
 K = float(mc[0]["k"])
 b = np.logspace(np.log10(1000), np.log10(200000), 24)
 bc = np.sqrt(b[1:] * b[:-1])
@@ -54,7 +66,22 @@ for a, r in zip(ax, RUN):
             hm += np.histogram(m["q"][sel, j], b)[0] * float(m["peso_hz"])
             tot += sel.sum() * float(m["peso_hz"])
         a.stairs(hm, b, color=col, lw=1.6, ls="--", label="MC (Hall A γ + μ), only ch%d above 3σ: %.3f Hz" % (ch, tot))
-        righe.append((ch, solo.sum() / T, tot))
+        rs = None
+        if scan is not None:
+            durate = dict(zip(scan["passo"].tolist(), scan["durata"].tolist()))
+            chiave = "ch%d_off%g" % (ch, OFFSET[r])
+            Ss = scan["sigma_q"]
+            k = (scan["canale"] == ch) & (scan["offset"] == OFFSET[r])
+            qs = scan["q"][k]
+            ss = (qs[:, j] > 3 * Ss[j]) & (qs[:, 1 - j] <= 3 * Ss[1 - j])
+            hs = np.histogram(qs[ss, j], b)[0]
+            oks = hs > 0
+            rs = ss.sum() / durate[chiave]
+            a.errorbar(bc[oks] * 1.04, hs[oks] / durate[chiave], yerr=np.sqrt(hs[oks]) / durate[chiave],
+                       fmt="s", ms=6, mfc="white", mec=col, color=col, lw=0.8,
+                       label="SCAN 30/10 (inverted PMTs), same offset, only ch%d above 3σ: %.2f Hz (%d events)"
+                       % (ch, rs, ss.sum()))
+        righe.append((ch, solo.sum() / T, tot, rs))
     a.axvline(2 * K, color="#888", ls=":", lw=1)
     a.axvline(3 * K, color="#888", ls=":", lw=1)
     a.text(2 * K * 1.03, 3e-1, "2-3 PE", fontsize=9, color="#555")
@@ -67,8 +94,9 @@ for a, r in zip(ax, RUN):
                 % (r, OFFSET[r], A[0], A[1], T / 3600), fontsize=10, loc="left")
     a.legend(fontsize=8.5, frameon=False, loc="upper right")
     a.grid(alpha=0.25, which="both")
-    for ch, rd, rm in righe:
-        print("%s ch%d solo: dati %.3f Hz, MC %.3f Hz, rapporto %.1f" % (r, ch, rd, rm, rd / rm if rm else np.inf))
+    for ch, rd, rm, rs in righe:
+        print("%s ch%d solo: dati %.3f Hz, MC %.3f Hz, rapporto %.1f%s" % (r, ch, rd, rm, rd / rm if rm else np.inf,
+              "" if rs is None else "; scan 30/10 allo stesso offset %.3f Hz" % rs))
 ax[0].set_ylabel("rate per bin [Hz]  (10 bins per decade)")
 fig.suptitle("Events with ONE PMT above 3σ: data vs Monte Carlo (Hall A γ with fibre scintillation + μ), "
              "each with the trigger of its run", fontsize=11)

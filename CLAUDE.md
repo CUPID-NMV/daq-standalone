@@ -623,6 +623,28 @@ self-trigger su tutti e cinque.
     di AMPIEZZA: un impulso dei pannelli e' largo ~195 ns e i suoi
     fotoelettroni non arrivano insieme, quindi non e' il numero di
     fotoelettroni dell'evento.
+- **Il massimo a 2-3 PE degli eventi con un PMT solo sono impulsi propri dei
+  PMT** (2026-10-30, `analisi/20261030_calibrazione_selftrigger/`):
+  - **lo scan lo riproduce** in un altro giorno e coi PMT invertiti: allo
+    stesso offset della 0013 (100) un PMT solo scatta a 1.27 / 1.18 Hz, contro
+    1.98 / 1.59 nella 0013 e 0.27 / 0.30 nel MC, con lo stesso spettro; a 200
+    (0011) 0.050 / 0.067 Hz con 3-4 eventi, contro 0.10 e 0.03;
+  - **sono la coda alta degli impulsi del passo a offset 10** (~25 Hz, quasi
+    tutti da un fotoelettrone, ampiezza con sigma/media ~0.6): tagliati in
+    software alla soglia di offset 100 danno 0.85-2.7 Hz (fra quantili e bordo
+    basso) e lo stesso spettro di carica, 2-5 PE. Che siano fotoelettroni
+    singoli col guadagno in alto o impulsi da piu' PE del PMT, qui non si
+    distingue; nel MC non ci sono, perche' il rumore della digitalizzazione
+    viene da tracce scelte senza impulsi;
+  - **il modello ibrido** (MC senza i suoi eventi con un PMT solo, piu' quelli
+    misurati nello scan) nella sovrapposizione per PMT singolo porta il picco a
+    zero da dati/MC ~5 a 1.2-2, il massimo a 2-3 PE da ~4 a ~1.6, e il trigger
+    della 0013 da 1.20 a 3.08 Hz contro 4.22 misurati. Il resto e' compatibile
+    con una soglia appena piu' alta nello scan (1.8-2.2 PE contro ~1.7), dove
+    il rate cambia di un fattore 2.7 fra offset 80 e 100;
+  - **con l'inverter il piedistallo dei PMT e' piu' largo**: sigma della carica
+    a vuoto 320 / 370 ADC·ns contro 234-269 nella 0011 e 0013, centrata a
+    -60. Lo stesso senza SiPM accesi. Perche', non si sa.
 - **Il riquadro *Scan plots* della pagina elenca i JSON, non i PNG**: le curve
   si vedono selezionando le misure (ch 16, 17, 18 del 30/10) e disegnandole.
   Il 2026-10-30 avevo detto all'utente che i grafici erano li', e non c'erano.

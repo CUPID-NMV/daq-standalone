@@ -196,3 +196,11 @@ python3 tools/calibra_selftrigger.py plots/noise_scan_20261030_155318_ch20.json 
 |---|---|---|
 | `spe_pmt_scan.py` | RUN.h5 SCAN_ch20.json SCAN_ch21.json OUT | ampiezza e carica degli impulsi che fanno scattare ciascun PMT al passo piu' basso (offset 10, quasi solo impulsi da un fotoelettrone): il PE in mV e in ADC·ns, con un fit gaussiano ripetuto su tre intervalli. Scrive anche le ampiezze e le cariche evento per evento (`.npz`). Gira sul PC |
 | `soglie_pe.py` | OUT | calibrazione offset -> mV coi due stimatori (quantili dei rate, bordo basso), e rate di ogni canale da solo contro la soglia in p.e.: PMT col PE di `spe_pmt_scan.py`, SiPM col p.e. del DCR della 0039. Tabella offset -> mV -> p.e. in `OUT.json`. Gira sul Mac, sui JSON di `measurements/` |
+| `un_pmt_scan.py` | RUN.h5 SCAN_ch20.json SCAN_ch21.json SCAN_SIPM.json OUT | a ogni passo dello scan di un PMT, la carica dei due PMT con la ricetta della 0011/0013 (cancello 240-500 ns, piedistallo 0-150) e la classificazione "un PMT solo / entrambi"; sigma del piedistallo dal PMT parcheggiato. Scrive `measurements/un_pmt_scan_20261030.npz/.json`. Gira sul PC |
+| `coda_pe_singolo.py` | OUT | gli eventi con un PMT solo registrati a offset 100 contro gli impulsi del passo a offset 10 tagliati in software alla soglia di offset 100 (fra bordo basso e quantili): stesso rate e stesso spettro di carica. Gira sul Mac |
+
+Le due sovrapposizioni del 2026-10-29 hanno un'opzione per lo scan:
+`un_pmt_solo.py OUT --scan un_pmt_scan_20261030.npz` aggiunge gli eventi con un
+PMT solo dello scan allo stesso offset della run; `sovrapposizione_pmt_singolo.py
+OUT --un-pmt-scan un_pmt_scan_20261030.npz` fa il modello ibrido (MC senza i suoi
+eventi con un PMT solo, piu' quelli misurati nello scan).

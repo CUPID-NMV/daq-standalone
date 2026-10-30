@@ -13,6 +13,15 @@ anche il MC ha il suo picco a zero: e' la previsione di quante volte un PMT
 resta buio quando l'altro fa scattare il trigger.
 Asse x lineare attorno a zero e logaritmico oltre 2000 ADC*ns; tutto in Hz per
 100 ADC*ns.
+
+Con --un-pmt-scan SCAN.npz (l'uscita di 20261030_calibrazione_selftrigger/
+un_pmt_scan.py) il modello diventa ibrido: dal MC si tolgono gli eventi con un
+solo PMT sopra 3 sigma, e al loro posto si mettono quelli misurati nello scan
+del self-trigger del 2026-10-30 al passo con lo stesso offset della run (100
+per la 0013, 200 per la 0011), con le loro due cariche. Toglierli dal MC evita
+di contare due volte la luce che arriva a un PMT solo, che il MC ha e lo scan
+anche. Le cariche dello scan sono state prese con la stessa ricetta, ma con i
+PMT invertiti e un piedistallo piu' largo (sigma 320/370 contro 240-270).
 """
 # --- percorsi: lo script gira da qualunque cartella, sul PC DAQ o sul Mac ---
 import os as _os, sys as _sys
@@ -31,6 +40,7 @@ ap.add_argument("gamma", nargs="?", default="mc_digit_gamma_righe_s3500.npz:3500
 ap.add_argument("--muoni", default="mc_digit_mu_lngs_s3500.npz:3500")
 ap.add_argument("--v812", default=None)
 ap.add_argument("--evidenzia", type=int, nargs="*", default=[])
+ap.add_argument("--un-pmt-scan", default=None)
 arg = ap.parse_args()
 GAMMA_F, RESA = (arg.gamma.split(":") + ["?"])[:2]
 MU_F, RESA_MU = (arg.muoni.split(":") + ["?"])[:2]
@@ -39,6 +49,7 @@ SOGLIE = json.load(open(_os.path.join(MIS, "soglie_trigger_lngs.json")))
 RUN = {"0011": "LNGS__54-0V_0011_750Ms_55PT", "0013": "LNGS__54-0V_0013_750Ms_55PT"}
 T = {r: SOGLIE[n]["durata_s"] for r, n in RUN.items()}
 TT = sum(T.values())
+OFFSET = {"0011": 200, "0013": 100}
 
 
 def apri(f):
@@ -61,18 +72,41 @@ mc = {}
 for chiave, f in (("gamma", GAMMA_F), ("mu", MU_F)):
     z = apri(f)
     w0, rep = float(z["peso_hz"]), int(z["repliche"])
-    qq, ww, rr, ee, cc = [], [], [], [], []
+    qq, ww, rr, ee, cc, uu = [], [], [], [], [], []
     for r in RUN:
         A = np.array(SOGLIE[RUN[r]]["soglia"])
+        S = np.array(SOGLIE[RUN[r]]["sigma_q"])
         trig = (z["amp"][:, 0] >= A[0]) | (z["amp"][:, 1] >= A[1])
+        sopra = z["q"] > 3 * S[None, :]
+        uu.append(np.repeat((sopra[:, 0] ^ sopra[:, 1])[trig], 2))
         qq.append(z["q"][trig].ravel())
         ww.append(np.full(2 * trig.sum(), w0 * T[r] / TT))
         rr.append(np.full(2 * trig.sum(), r))
         ee.append(np.repeat(np.nansum(z["edep_fibre"][trig], 1), 2))
         cc.append(np.tile([20, 21], trig.sum()))
     mc[chiave] = dict(q=np.concatenate(qq), w=np.concatenate(ww), r=np.concatenate(rr), ef=np.concatenate(ee),
-                      ch=np.concatenate(cc), rep=rep, rate=float(z["rate_hz"]), ngen=int(z["n_gen"]), k=float(z["k"]))
+                      ch=np.concatenate(cc), u=np.concatenate(uu), rep=rep, rate=float(z["rate_hz"]),
+                      ngen=int(z["n_gen"]), k=float(z["k"]))
 K = mc["gamma"]["k"]
+
+# Lo scan: eventi con un PMT solo al passo con l'offset della run, le due
+# cariche come due voci, peso (1 / durata del passo) * T_run / TT.
+sc_q = sc_w = sc_r = sc_ch = None
+if arg.un_pmt_scan:
+    z = apri(arg.un_pmt_scan)
+    durate = dict(zip(z["passo"].tolist(), z["durata"].tolist()))
+    Ss = z["sigma_q"]
+    qq, ww, rr, cc = [], [], [], []
+    for r in RUN:
+        for j, ch in ((0, 20), (1, 21)):
+            k = (z["canale"] == ch) & (z["offset"] == OFFSET[r])
+            q = z["q"][k]
+            solo = (q[:, j] > 3 * Ss[j]) & (q[:, 1 - j] <= 3 * Ss[1 - j])
+            qq.append(q[solo].ravel())
+            ww.append(np.full(2 * solo.sum(), T[r] / TT / durate["ch%d_off%g" % (ch, OFFSET[r])]))
+            rr.append(np.full(2 * solo.sum(), r))
+            cc.append(np.tile([20, 21], solo.sum()))
+    sc_q, sc_w, sc_r, sc_ch = (np.concatenate(x) for x in (qq, ww, rr, cc))
 
 # rate sopra 3 sigma per PMT, dati e MC
 riquadro = []
@@ -83,12 +117,28 @@ for ch, j in ((20, 0), (21, 1)):
         for r in RUN:
             s = (m["ch"] == ch) & (m["r"] == r)
             rm += m["w"][s][m["q"][s] > 3 * SOGLIE[RUN[r]]["sigma_q"][j]].sum()
-    riquadro.append("ch%d above 3σ: data %.3f Hz, MC %.3f Hz (data/MC %.1f)" % (ch, rd, rm, rd / rm))
+    if sc_q is None:
+        riquadro.append("ch%d above 3σ: data %.3f Hz, MC %.3f Hz (data/MC %.1f)" % (ch, rd, rm, rd / rm))
+    else:
+        ri = 0.0
+        for m in mc.values():
+            for r in RUN:
+                s_ = (m["ch"] == ch) & (m["r"] == r) & ~m["u"]
+                ri += m["w"][s_][m["q"][s_] > 3 * SOGLIE[RUN[r]]["sigma_q"][j]].sum()
+        Ss = apri(arg.un_pmt_scan)["sigma_q"]
+        ri += sc_w[(sc_ch == ch) & (sc_q > 3 * Ss[j])].sum()
+        riquadro.append("ch%d above 3σ: data %.3f Hz, MC %.3f Hz, hybrid %.3f Hz (data/hybrid %.2f)"
+                        % (ch, rd, rm, ri, rd / ri))
     print(riquadro[-1])
 for r in RUN:
     nd = (dr == r).sum() / 2 / T[r]
     nm = sum(m["w"][(m["r"] == r)].sum() / 2 * TT / T[r] for m in mc.values())
-    riquadro.append("run %s, trigger rate: data %.2f Hz, MC %.2f Hz" % (r, nd, nm))
+    if sc_q is None:
+        riquadro.append("run %s, trigger rate: data %.2f Hz, MC %.2f Hz" % (r, nd, nm))
+    else:
+        ni_ = sum(m["w"][(m["r"] == r) & ~m["u"]].sum() / 2 * TT / T[r] for m in mc.values())
+        ni_ += sc_w[sc_r == r].sum() / 2 * TT / T[r]
+        riquadro.append("run %s, trigger rate: data %.2f Hz, MC %.2f Hz, hybrid %.2f Hz" % (r, nd, nm, ni_))
     print(riquadro[-1])
 
 b = np.concatenate([np.arange(-2000, 2000, 100.0), np.logspace(np.log10(2000), np.log10(200000), 21)])
@@ -96,9 +146,11 @@ dens = np.diff(b) / 100.0
 bc = np.where(b[:-1] > 0, np.sqrt(np.clip(b[1:] * b[:-1], 1e-12, None)), 0.5 * (b[1:] + b[:-1]))
 
 
-def n_indip(bins):
+def n_indip(bins, tenuti=None):
     # voci gamma col trigger della 0013 (contiene quelle della 0011), repliche correlate
     k = mc["gamma"]["r"] == "0013"
+    if tenuti is not None:
+        k = k & tenuti
     return np.histogram(mc["gamma"]["q"][k], bins)[0] / mc["gamma"]["rep"]
 
 
@@ -115,18 +167,37 @@ hd = np.histogram(dq, b)[0]
 ok = hd > 0
 hg = np.histogram(mc["gamma"]["q"], b, weights=mc["gamma"]["w"])[0] / dens
 hm = np.histogram(mc["mu"]["q"], b, weights=mc["mu"]["w"])[0] / dens
-ni = n_indip(b)
-et = (hg + hm) / np.sqrt(np.clip(ni, 1e-9, None)) * (ni > 0)
-a.stairs(hg + hm + et, b, baseline=np.clip(hg + hm - et, 1e-14, None), fill=True, color="#7b2d8b", alpha=0.18, lw=0,
-         label="MC statistical uncertainty (±1σ)")
-a.stairs(hg + hm, b, color="#7b2d8b", lw=2.4, label="MC total, Hall A γ + μ")
-sc = mc["gamma"]["ef"] > 0
-for m_, col, nome in ((~sc, "#1aa39a", "Cherenkov light only (Compton electrons in the water)"),
-                      (sc, "#e8710a", "with energy in the fibre cores (scintillation + Cherenkov)")):
-    a.stairs(np.histogram(mc["gamma"]["q"][m_], b, weights=mc["gamma"]["w"][m_])[0] / dens, b, color=col, lw=1.4,
-             ls="--", label="  Hall A γ, %s" % nome)
-a.stairs(hm, b, color="#2a6fdb", lw=1.2, ls="--",
-         label="  Hall A μ, fibre scintillation %s photons/MeV" % RESA_MU)
+if sc_q is None:
+    ni = n_indip(b)
+    et = (hg + hm) / np.sqrt(np.clip(ni, 1e-9, None)) * (ni > 0)
+    a.stairs(hg + hm + et, b, baseline=np.clip(hg + hm - et, 1e-14, None), fill=True, color="#7b2d8b", alpha=0.18,
+             lw=0, label="MC statistical uncertainty (±1σ)")
+    a.stairs(hg + hm, b, color="#7b2d8b", lw=2.4, label="MC total, Hall A γ + μ")
+    sc = mc["gamma"]["ef"] > 0
+    for m_, col, nome in ((~sc, "#1aa39a", "Cherenkov light only (Compton electrons in the water)"),
+                          (sc, "#e8710a", "with energy in the fibre cores (scintillation + Cherenkov)")):
+        a.stairs(np.histogram(mc["gamma"]["q"][m_], b, weights=mc["gamma"]["w"][m_])[0] / dens, b, color=col,
+                 lw=1.4, ls="--", label="  Hall A γ, %s" % nome)
+    a.stairs(hm, b, color="#2a6fdb", lw=1.2, ls="--",
+             label="  Hall A μ, fibre scintillation %s photons/MeV" % RESA_MU)
+else:
+    kg, km = ~mc["gamma"]["u"], ~mc["mu"]["u"]
+    hgk = np.histogram(mc["gamma"]["q"][kg], b, weights=mc["gamma"]["w"][kg])[0] / dens
+    hmk = np.histogram(mc["mu"]["q"][km], b, weights=mc["mu"]["w"][km])[0] / dens
+    hs = np.histogram(sc_q, b, weights=sc_w)[0] / dens
+    hs2 = np.histogram(sc_q, b, weights=sc_w ** 2)[0] / dens ** 2
+    nik = n_indip(b, kg)
+    emc2 = np.where(nik > 0, (hgk + hmk) ** 2 / np.clip(nik, 1e-9, None), 0.0)
+    ibr = hgk + hmk + hs
+    et = np.sqrt(emc2 + hs2)
+    a.stairs(ibr + et, b, baseline=np.clip(ibr - et, 1e-14, None), fill=True, color="#c0392b", alpha=0.16, lw=0,
+             label="hybrid statistical uncertainty (±1σ: MC replicas and scan events)")
+    a.stairs(hg + hm, b, color="#7b2d8b", lw=1.2, alpha=0.75, label="MC total, Hall A γ + μ (as before)")
+    a.stairs(hgk + hmk, b, color="#7b2d8b", lw=1.4, ls="--",
+             label="  MC without its events with ONE PMT above 3σ")
+    a.stairs(hs, b, color="#e8710a", lw=1.6, ls="--",
+             label="  events with ONE PMT above 3σ measured in the self-trigger scan of 30/10, at the offset of each run")
+    a.stairs(ibr, b, color="#c0392b", lw=2.6, label="HYBRID = MC without its one-PMT events + one-PMT events of the scan")
 a.errorbar(bc[ok], hd[ok] / TT / dens[ok], yerr=np.sqrt(hd[ok]) / TT / dens[ok], xerr=[(bc - b[:-1])[ok], (b[1:] - bc)[ok]],
            fmt="o", ms=4, color="k", lw=0.8, zorder=5,
            label="DATA LNGS 0011 + 0013 (%.1f h at offset 200 + %.0f min at offset 100)" % (T["0011"] / 3600, T["0013"] / 60))
@@ -169,8 +240,26 @@ sm = np.histogram(mc["gamma"]["q"], br, weights=mc["gamma"]["w"])[0] + np.histog
 nn = n_indip(br)
 okr = (nd > 0) & (nn > 0) & (sm > 0)
 rr = (nd[okr] / TT) / sm[okr]
-a.errorbar(cr[okr], rr, yerr=rr * np.sqrt(1 / nd[okr] + 1 / nn[okr]), xerr=[(cr - br[:-1])[okr], (br[1:] - cr)[okr]],
-           fmt="o", ms=5, color="k", lw=1)
+if sc_q is None:
+    a.errorbar(cr[okr], rr, yerr=rr * np.sqrt(1 / nd[okr] + 1 / nn[okr]), xerr=[(cr - br[:-1])[okr], (br[1:] - cr)[okr]],
+               fmt="o", ms=5, color="k", lw=1)
+else:
+    a.errorbar(cr[okr] * 0.97, rr, yerr=rr * np.sqrt(1 / nd[okr] + 1 / nn[okr]), fmt="o", ms=4, color="#9a9a9a",
+               lw=0.8, label="data / MC (as before)")
+    kg, km = ~mc["gamma"]["u"], ~mc["mu"]["u"]
+    smk = (np.histogram(mc["gamma"]["q"][kg], br, weights=mc["gamma"]["w"][kg])[0]
+           + np.histogram(mc["mu"]["q"][km], br, weights=mc["mu"]["w"][km])[0])
+    ss = np.histogram(sc_q, br, weights=sc_w)[0]
+    ss2 = np.histogram(sc_q, br, weights=sc_w ** 2)[0]
+    nnk = n_indip(br, kg)
+    mod = smk + ss
+    var = np.where(nnk > 0, smk ** 2 / np.clip(nnk, 1e-9, None), 0.0) + ss2
+    oki = (nd > 0) & (mod > 0)
+    ri = (nd[oki] / TT) / mod[oki]
+    a.errorbar(cr[oki] * 1.03, ri, yerr=ri * np.sqrt(1 / nd[oki] + var[oki] / mod[oki] ** 2),
+               xerr=[(cr - br[:-1])[oki], (br[1:] - cr)[oki]], fmt="o", ms=5, color="#c0392b", lw=1,
+               label="data / HYBRID")
+    a.legend(fontsize=8.5, frameon=False, loc="upper left")
 a.axhline(1, color="k", lw=0.8)
 a.axvline(3 * s_med, color="k", ls=":", lw=1.2)
 a.axvline(K, color="k", ls="-.", lw=1.0)
@@ -178,11 +267,15 @@ scala_x(a)
 a.set_yscale("log")
 a.set_ylim(0.3, 30)
 a.set_xlabel("charge of a PMT [ADC·ns]  (gate 240-500 ns, pedestal 0-150 ns; 1 PE = %.0f ADC·ns)" % K)
-a.set_ylabel("DATA / MC total")
-a.set_title("data / MC (MC statistical error counts replicas as correlated)", fontsize=9.5, loc="left")
+a.set_ylabel("DATA / MC total" if sc_q is None else "DATA / model")
+a.set_title("data / MC (MC statistical error counts replicas as correlated)" if sc_q is None else
+            "data / hybrid model (errors: data, MC replicas, scan events) and data / MC as before",
+            fontsize=9.5, loc="left")
 a.grid(alpha=0.25, which="both")
-fig.suptitle("LNGS background, EACH PMT (runs 0011 + 0013) vs Monte Carlo: Hall A γ (J·A normalisation) + Hall A μ; "
-             "scintillation of the fibre cores %s photons/MeV" % RESA, fontsize=11)
+fig.suptitle(("LNGS background, EACH PMT (runs 0011 + 0013) vs Monte Carlo: Hall A γ (J·A normalisation) + Hall A μ; "
+              "scintillation of the fibre cores %s photons/MeV" % RESA) if sc_q is None else
+             ("LNGS background, EACH PMT (runs 0011 + 0013) vs a HYBRID model: Monte Carlo (Hall A γ + μ) for the events "
+              "with both PMTs lit, the self-trigger scan of 30/10 for the events with ONE PMT"), fontsize=11)
 fig.tight_layout()
 fig.savefig(arg.out, dpi=100)
 print("scritto", arg.out)

@@ -953,6 +953,16 @@ LNGS; solo correzione CAEN):
   ADC·ns/PE** (a 1750 era 1696; un muone fa 5.91 PE per PMT contro 5.71) e
   il MC da' 0.325 Hz contro 0.305: dati/MC 0.87 / 0.74 / 0.82 / 1.17 nelle
   quattro fasce, classe C 1.00 (`mc_digit_*_s3500.npz`, `mc_digit_K.json`);
+- **di cosa e' fatto il fondo selezionato** (`sovrapposizione_0011_0013.py
+  --componenti --piedistallo`, 2026-10-30): nel MC lo 0.313 su 0.325 Hz
+  sono eventi con energia nel nucleo delle fibre (scintillazione + Cherenkov),
+  solo 0.013 Hz sola luce Cherenkov, tutti sotto ~10000 ADC·ns. La
+  scomposizione per isotopo non si fa: lo spettro di CUPID sono canali di
+  ~2.8 keV di uno spettro estratto, con righe spostate o divise e voci che
+  non sono righe note. **Rumore e buio nella selezione** (entrambi i PMT > 3
+  sigma): il rumore elettronico oltre 3 sigma, stimato dalla coda negativa
+  del piedistallo, porta 2.2e-3 Hz (0.7%); il buio dei PMT (133 / 470 Hz
+  dagli impulsi larghi della 0036, pochi impulsi) 6e-5 Hz (0.02%);
 - **il fotoelettrone singolo** dai pochi impulsi di buio veri della run a
   trigger software 0036 vale ~1700-2000 ADC·ns, come la scala ricavata dai
   muoni (1726; 1696 con la scintillazione delle fibre, che a un muone

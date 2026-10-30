@@ -2,11 +2,18 @@
 gamma di Hall A (Compton + scintillazione delle fibre) e muoni di Hall A.
 
     python3 analisi/20261029_normalizzazione_gamma/sovrapposizione_0011_0013.py OUT.png [GAMMA.npz:RESA]
-            [--muoni MUONI.npz:RESA] [--v812 CARICHE.npz --evidenzia N ...]
+            [--muoni MUONI.npz:RESA] [--v812 CARICHE.npz --evidenzia N ...] [--componenti] [--piedistallo]
 
 GAMMA.npz: i gamma digitalizzati da usare (di serie mc_digit_gamma_righe_s1750.npz:1750);
 RESA e' la resa di scintillazione delle fibre di quella produzione, per la legenda.
 --muoni: i muoni digitalizzati (di serie mc_digit_mu_lngs_s1750.npz:1750).
+--componenti: i gamma divisi fra eventi con sola luce Cherenkov (nessuna energia nel
+nucleo delle fibre) ed eventi con energia nelle fibre (scintillazione + Cherenkov).
+Per isotopo (K, U, Th) non si fa: lo spettro di CUPID sono canali di ~2.8 keV di uno
+spettro estratto, con le righe spostate o divise e voci che non sono righe note.
+--piedistallo: asse x lineare attorno a zero e logaritmico oltre 2000 ADC*ns, con la
+carica di ciascun PMT in tutti gli eventi (il picco a zero e' il rumore elettronico) e
+la stima di quanti eventi rumore e buio dei PMT portano nella selezione.
 --v812: le cariche (tools/carica_padme.py) di una run presa col trigger del
 V812, per esempio la run da 24 ore coi pannelli (carica_0000_54V_24h.npz): i
 suoi eventi con entrambi i PMT sopra 3 sigma vanno in un pannello a parte,
@@ -40,6 +47,8 @@ ap.add_argument("gamma", nargs="?", default="mc_digit_gamma_righe_s1750.npz:1750
 ap.add_argument("--muoni", default="mc_digit_mu_lngs_s1750.npz:1750")
 ap.add_argument("--v812", default=None)
 ap.add_argument("--evidenzia", type=int, nargs="*", default=[])
+ap.add_argument("--componenti", action="store_true")
+ap.add_argument("--piedistallo", action="store_true")
 arg = ap.parse_args()
 OUT = arg.out
 GAMMA_F, RESA = (arg.gamma.split(":") + ["?"])[:2]
@@ -86,13 +95,14 @@ mc = {}
 for chiave, f in (("gamma", GAMMA_F), ("mu", MU_F)):
     z = np.load(f if _os.path.exists(f) else _os.path.join(MIS, f))
     w0, rep = float(z["peso_hz"]), int(z["repliche"])
-    qq, ww, rr = [], [], []
+    qq, ww, rr, ee = [], [], [], []
     for r in RUN:
         m = scelti(z["q"], z["amp"], r)
         qq.append(z["q"][m].max(1))
         ww.append(np.full(m.sum(), w0 * T[r] / TT))
         rr.append(np.full(m.sum(), r))
-    mc[chiave] = dict(q=np.concatenate(qq), w=np.concatenate(ww), r=np.concatenate(rr), rep=rep,
+        ee.append(np.nansum(z["edep_fibre"][m], 1))      # energia nel nucleo delle fibre, MeV
+    mc[chiave] = dict(q=np.concatenate(qq), w=np.concatenate(ww), r=np.concatenate(rr), rep=rep, ef=np.concatenate(ee),
                       rate=float(z["rate_hz"]), ngen=int(z["n_gen"]), k=float(z["k"]))
 
 cd = classi(dq, dw)
@@ -131,10 +141,23 @@ a.stairs(hg + hm + et, b, baseline=np.clip(hg + hm - et, 1e-12, None), fill=True
          lw=0, label="MC statistical uncertainty (±1σ)")
 a.stairs(hg + hm, b, color="#7b2d8b", lw=2.4,
          label="MC total, Hall A γ + μ: %.3f Hz" % (cg["both > 3σ"] + cm["both > 3σ"]))
-a.stairs(hg, b, color="#e8710a", lw=1.2, ls="--",
-         label="  Hall A γ, Compton + fibre scintillation %s photons/MeV (%d M γ at %.0f Hz = %.0f min of Hall A): %.3f Hz"
-               % (RESA, mc["gamma"]["ngen"] // 10**6, mc["gamma"]["rate"],
-                  mc["gamma"]["ngen"] / mc["gamma"]["rate"] / 60, cg["both > 3σ"]))
+if arg.componenti:
+    # i due modi in cui un gamma fa luce: l'elettrone Compton fa Cherenkov nell'acqua, e se
+    # attraversa il nucleo di una fibra la fa scintillare (luce lenta, ~3500 fotoni/MeV)
+    sc = mc["gamma"]["ef"] > 0
+    for m_, col, nome in ((~sc, "#1aa39a", "Cherenkov light only (Compton electrons in the water)"),
+                          (sc, "#e8710a", "with energy in the fibre cores (scintillation + Cherenkov)")):
+        a.stairs(np.histogram(mc["gamma"]["q"][m_], b, weights=mc["gamma"]["w"][m_])[0], b, color=col, lw=1.4, ls="--",
+                 label="  Hall A γ, %s: %.3f Hz" % (nome, mc["gamma"]["w"][m_].sum()))
+        cl_ = classi(mc["gamma"]["q"][m_], mc["gamma"]["w"][m_])
+        print("gamma, %-60s" % nome + "  ".join("%s %.3f" % (k_, v_) for k_, v_ in cl_.items()))
+    print("(Hall A γ in tutto: %d M γ a %.0f Hz = %.0f min di Hall A, fibre a %s fotoni/MeV)"
+          % (mc["gamma"]["ngen"] // 10**6, mc["gamma"]["rate"], mc["gamma"]["ngen"] / mc["gamma"]["rate"] / 60, RESA))
+else:
+    a.stairs(hg, b, color="#e8710a", lw=1.2, ls="--",
+             label="  Hall A γ, Compton + fibre scintillation %s photons/MeV (%d M γ at %.0f Hz = %.0f min of Hall A): %.3f Hz"
+                   % (RESA, mc["gamma"]["ngen"] // 10**6, mc["gamma"]["rate"],
+                      mc["gamma"]["ngen"] / mc["gamma"]["rate"] / 60, cg["both > 3σ"]))
 a.stairs(hm, b, color="#2a6fdb", lw=1.2, ls="--",
          label="  Hall A μ, fibre scintillation %s photons/MeV (%d k μ at %.4f Hz on 6.5 × 6.5 m = %.0f days): %.5f Hz"
                % (RESA_MU, mc["mu"]["ngen"] // 1000, mc["mu"]["rate"], mc["mu"]["ngen"] / mc["mu"]["rate"] / 86400,
@@ -146,18 +169,75 @@ a.errorbar(bc[ok], hd[ok] / TT, yerr=np.sqrt(hd[ok]) / TT, xerr=[(bc - b[:-1])[o
 for v in (7000, 10000):
     a.axvline(v, color="#888", ls=":", lw=1)
 a.text(10400, 1.3e-7, "class C →", fontsize=9, color="#555")
-a.set_xscale("log")
+if arg.piedistallo:
+    # la carica di ciascun PMT in TUTTI gli eventi, senza selezione: il picco a zero sono gli
+    # eventi in cui quel PMT non ha luce, cioe' il rumore elettronico nel cancello di 260 ns
+    bp = np.arange(-2000, 2001, 100.0)
+    tutte = {20: [], 21: []}
+    nrum, nuno, ndc = 0.0, 0.0, 0.0
+    buio = np.load(_os.path.join(MIS, "buio_0036.npz"))
+    # buio vero dei PMT: impulsi larghi (carica/ampiezza >= 5 ns) nelle finestre casuali della
+    # 0036; nel file "largo" e' gia' l'esito di quel criterio (vero/falso), non la larghezza
+    r_dc = {ch: buio["largo%d" % ch].astype(bool).sum() / float(buio["t_vivo_s"]) for ch in (20, 21)}
+    for r in RUN:
+        z = np.load(_os.path.join(MIS, "carica_%s_testbeam.npz" % r))
+        q = np.stack([z["q_caen_ch20"], z["q_caen_ch21"]], 1)
+        S = np.array(SOGLIE[RUN[r]]["sigma_q"])
+        sopra = q > 3 * S[None, :]
+        for j, ch in enumerate((20, 21)):
+            tutte[ch].append(q[:, j])
+            # eventi con l'altro PMT acceso e questo no: il rumore o un impulso di buio di
+            # questo PMT li porterebbe in "entrambi > 3 sigma". Coda del rumore oltre +3 sigma
+            # dal lato negativo (i segnali sono positivi): stessa frazione per simmetria
+            sotto = ~sopra[:, j]
+            uno = sopra[:, 1 - j] & sotto
+            f_coda = (q[sotto, j] < -3 * S[j]).mean()
+            nrum += uno.sum() * f_coda
+            nuno += uno.sum()
+            ndc += uno.sum() * r_dc[ch] * 260e-9
+    # linea per i centri dei bin, non a gradini: a gradini finirebbe con un salto a 2000 e
+    # sembrerebbe che la distribuzione si fermi li' (oltre ci sono segnali veri)
+    for ch, col in ((20, "#4d4d4d"), (21, "#a0a0a0")):
+        hp = np.histogram(np.concatenate(tutte[ch]), bp)[0] / TT
+        # bin vuoti come buchi: in scala logaritmica la linea crollerebbe al fondo dell'asse
+        a.plot(0.5 * (bp[1:] + bp[:-1]), np.where(hp > 0, hp, np.nan), color=col, lw=1.4,
+               label="PMT ch%d charge in all triggered events (bins of 100 ADC·ns): the peak at 0 is the electronic noise"
+                     % ch)
+    a.annotate("above: real light", (1900, 1.3e-3), textcoords="offset points", xytext=(4, 14), fontsize=8.5,
+               color="#555", arrowprops=dict(arrowstyle="->", color="#777", lw=0.8))
+    s_med = [np.mean([SOGLIE[RUN[r]]["sigma_q"][j] for r in RUN]) for j in (0, 1)]
+    a.axvline(3 * np.mean(s_med), color="k", ls=":", lw=1.2,
+              label="3σ of the pedestal, %.0f ADC·ns = %.2f PE (σ = %.0f-%.0f ADC·ns)"
+                    % (3 * np.mean(s_med), 3 * np.mean(s_med) / K,
+                       min(min(SOGLIE[RUN[r]]["sigma_q"]) for r in RUN), max(max(SOGLIE[RUN[r]]["sigma_q"]) for r in RUN)))
+    a.axvline(K, color="k", ls="-.", lw=1.0, label="1 photoelectron, K = %.0f ADC·ns" % K)
+    sel = cd["both > 3σ"]
+    testo = ("noise and dark counts in the selection (both PMTs > 3σ):\n"
+             "  electronic noise above 3σ (from the negative tail): %.1e Hz = %.2f%% of %.3f Hz\n"
+             "  PMT dark counts (%.0f / %.0f Hz from run 0036, 260 ns gate): %.1e Hz = %.4f%%"
+             % (nrum / TT, 100 * nrum / TT / sel, sel, r_dc[20], r_dc[21], ndc / TT, 100 * ndc / TT / sel))
+    a.text(0.012, 0.025, testo, transform=a.transAxes, fontsize=8.5, va="bottom", ha="left", family="monospace",
+           bbox=dict(facecolor="white", edgecolor="#bbb", alpha=0.92))
+    print("rumore: %.0f eventi su %.0f con un PMT solo -> %.2e Hz (%.2f%%); buio %.0f/%.0f Hz -> %.2e Hz (%.4f%%)"
+          % (nrum, nuno, nrum / TT, 100 * nrum / TT / sel, r_dc[20], r_dc[21], ndc / TT, 100 * ndc / TT / sel))
+    a.set_xscale("symlog", linthresh=2000, linscale=0.6)
+    a.set_xlim(-1500, 200000)
+else:
+    a.set_xscale("log")
 a.set_yscale("log")
-a.set_ylim(1e-7, 3)   # spazio per la legenda sopra i dati
-a.set_ylabel("rate per bin [Hz]  (10 bins per decade)")
+a.set_ylim(1e-7, 30 if arg.piedistallo else 3)   # spazio per la legenda sopra i dati
+a.set_ylabel("rate per bin [Hz]  (10 bins per decade%s)" % ("; pedestal: 100 ADC·ns" if arg.piedistallo else ""))
 a.set_title("both PMTs > 3σ; MC with the trigger and the 3σ cut of each run (edges %.0f/%.0f and %.0f/%.0f counts), "
             "time-weighted;  K = %.0f ADC·ns/PE"
             % tuple(SOGLIE[RUN["0011"]]["soglia"] + SOGLIE[RUN["0013"]]["soglia"] + [K]),
             fontsize=9.5, loc="left")
 a.legend(fontsize=9, frameon=False, loc="upper right")
 a.grid(alpha=0.25, which="both")
-sec = a.secondary_xaxis("top", functions=(lambda x: x / K, lambda x: x * K))
-sec.set_xlabel("photoelectrons in the brighter PMT (charge / K)", fontsize=9)
+if not arg.piedistallo:
+    # con l'asse misto lineare/logaritmico l'asse secondario non segue la conversione e
+    # segna valori sbagliati: in quel caso la scala in PE va nell'etichetta dell'asse
+    sec = a.secondary_xaxis("top", functions=(lambda x: x / K, lambda x: x * K))
+    sec.set_xlabel("photoelectrons in the brighter PMT (charge / K)", fontsize=9)
 
 if arg.v812:
     # eventi di una run col trigger del V812: stessa selezione dei dati (entrambi i PMT
@@ -211,11 +291,16 @@ for chi, col, al, mk, lab in ((None, "k", 1.0, "o", "0011 + 0013"), ("0011", "#1
 a.axhline(1, color="k", lw=0.8)
 for v in (7000, 10000):
     a.axvline(v, color="#888", ls=":", lw=1)
-a.set_xscale("log")
+if arg.piedistallo:
+    a.set_xscale("symlog", linthresh=2000, linscale=0.6)
+    a.set_xlim(-1500, 200000)
+else:
+    a.set_xscale("log")
+    a.set_xlim(2000, 200000)
 a.set_yscale("log")
 a.set_ylim(0.3, 30)
-a.set_xlim(2000, 200000)
-a.set_xlabel("charge of the brighter PMT [ADC·ns]  (gate 240-500 ns, pedestal 0-150 ns)")
+a.set_xlabel("charge of the brighter PMT [ADC·ns]  (gate 240-500 ns, pedestal 0-150 ns%s)"
+             % ("; 1 PE = %.0f ADC·ns" % K if arg.piedistallo else ""))
 a.set_ylabel("DATA / MC total")
 a.set_title("data / MC (MC statistical error counts replicas as correlated)", fontsize=9.5, loc="left")
 a.legend(fontsize=8.5, frameon=False, loc="upper left", ncol=3)

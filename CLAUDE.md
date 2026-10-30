@@ -1036,7 +1036,8 @@ LNGS; solo correzione CAEN):
 | | |
 |---|---|
 | `tools/run_check.py` | riepilogo di una run: ampiezza, larghezza, purezza, rumore, deriva, rate |
-| `tools/noise_scan.py` | scan in soglia a run in corso; scrive i confini in eventi di ogni passo |
+| `tools/noise_scan.py` | scan in soglia a run in corso; scrive i confini in eventi di ogni passo. `--canale N`: un canale solo, gli altri alla soglia massima (offset 4095), offset di partenza rimessi alla fine anche se interrotto |
+| `tools/scan_v1742_canali.sh` | scan del self-trigger un canale alla volta, gruppi `"canali: offset"`; si registra nella pagina di controllo (avanzamento, Stop scan), un grafico per gruppo in `plots/`; `-F` ferma la run alla fine, `-R sezione.chiave=valore` rimette il TOML |
 | `tools/live_monitor.py` | monitor HTTP; `-b 0.0.0.0` per evitare inoltri di porta |
 | `tools/check_page.py` | sulla pagina viva: ogni `getElementById` ha il suo elemento, ogni funzione chiamata e' definita, il JS compila |
 | `tools/probe_link.py` | determina i parametri di apertura di un collegamento |

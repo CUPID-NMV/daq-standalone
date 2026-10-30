@@ -20,6 +20,14 @@ Serve una run gia' avviata con SelfTrigger = true E IL SEGNALE SPENTO
 (alta tensione dei PMT giu', o guadagno al minimo).
 
     python3 tools/noise_scan.py --offsets 5 4.5 4 3.5 3 2.5 --sigma 0.72
+
+Con --canale lo scan muove UN solo canale, col segnale acceso: gli altri
+canali del trigger stanno alla soglia massima, cosi' il rate e' quello del
+canale scelto, e a fine scan (anche se interrotto) tornano tutti agli offset
+di partenza. Serve quando sulla scheda ci sono rivelatori diversi -- SiPM e
+PMT -- che con lo stesso offset non hanno niente in comune.
+
+    python3 tools/noise_scan.py --canale 20 --offsets 400 200 100 50 --seconds 60
 """
 
 import argparse
@@ -28,6 +36,7 @@ import json
 import math
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -61,18 +70,33 @@ def set_offset(data_dir, channels, offset, timeout=15):
     offset diversi possono finire sullo stesso valore intero. Serve la
     distanza vera fra baseline e soglia, che e' la grandezza fisica.
     """
-    with open(os.path.join(data_dir, "live-threshold.txt"), "w") as f:
-        for ch in channels:
-            f.write(f"{ch} {offset}\n")
+    return set_offsets(data_dir, {ch: offset for ch in channels}, timeout)
+
+
+def set_offsets(data_dir, offsets, timeout=15):
+    """Come set_offset, con un offset per canale: {canale: offset}."""
+    path = os.path.join(data_dir, "live-threshold.txt")
+    # La DAQ si accorge del comando dal tempo di modifica del file, che ha la
+    # risoluzione del secondo: una seconda scrittura nello stesso secondo non
+    # la vede, e il passo aspetterebbe un offset che non arriva mai. Succede
+    # fra il ripristino di un canale e il primo punto del successivo.
+    try:
+        while int(time.time()) <= int(os.path.getmtime(path)):
+            time.sleep(0.1)
+    except OSError:
+        pass
+    with open(path, "w") as f:
+        for ch, off in offsets.items():
+            f.write(f"{ch} {off}\n")
     t0 = time.time()
     while time.time() - t0 < timeout:
         st = status(data_dir)
         applied = {int(c["ch"]): c["offset"] for c in st["channels"]}
-        if all(abs(applied.get(ch, -1) - offset) < 1e-6 for ch in channels):
+        if all(abs(applied.get(ch, -1) - off) < 1e-6 for ch, off in offsets.items()):
             return {int(c["ch"]): (c["baseline"], int(c["threshold"]))
                     for c in st["channels"]}
         time.sleep(0.5)
-    sys.exit(perche_non_applica(data_dir, offset, timeout))
+    sys.exit(perche_non_applica(data_dir, offsets, timeout))
 
 
 def daq_viva():
@@ -90,7 +114,11 @@ def perche_non_applica(data_dir, offset, timeout):
     100000 col self-trigger saturo a ~940 Hz e' meno di due minuti, lo scan
     si e' fermato al sesto passo dicendo che la DAQ "non aveva applicato"
     l'offset, mentre la DAQ era chiusa da venti secondi."""
-    msg = f"La DAQ non ha applicato l'offset {offset:g} entro {timeout} s."
+    if isinstance(offset, dict):
+        offset = ", ".join(f"ch{c} {o:g}" for c, o in offset.items())
+    else:
+        offset = f"{offset:g}"
+    msg = f"La DAQ non ha applicato l'offset {offset} entro {timeout} s."
     if not daq_viva():
         log = ultimo_log(data_dir)
         fine = ""
@@ -241,6 +269,39 @@ def larghezza_impulsi(path, canali, quanti=300):
         return None
 
 
+def scrivi_misura(args, path, st, channels, sigma, rows, iniziali=None, interrotto=None):
+    """Misura salvata per intero, cosi' due scan si possono confrontare davvero."""
+    rec = {
+        "file": os.path.basename(path),
+        "quando": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "canali": channels,
+        "baseline": {str(int(c["ch"])): c["baseline"] for c in st["channels"]},
+        "sigma_assunto": sigma,
+        "secondi_per_punto": args.seconds,
+        "larghezza_fwhm_ns": larghezza_impulsi(path, channels),
+        "punti": [{"offset": r[0], "distanza": r[1], "rate": r[2],
+                   "atteso": r[3], "conteggi": r[4],
+                   "eventi_da": r[5], "eventi_a": r[6]} for r in rows],
+    }
+    nome = "noise_scan_%s" % time.strftime("%Y%m%d_%H%M%S")
+    if args.canale is not None:
+        # Col segnale acceso il rate "atteso" dal rumore gaussiano non vuol
+        # dire niente: resta nei punti per chi legge il formato, ma si dice.
+        rec.update({"canale_scansionato": args.canale,
+                    "parcheggio": args.parcheggio,
+                    "offset_iniziali": {str(c): o for c, o in iniziali.items()},
+                    "segnale_acceso": True,
+                    "interrotto": interrotto})
+        nome += "_ch%d" % args.canale
+    os.makedirs(args.out, exist_ok=True)
+    rec_path = os.path.join(args.out, nome + ".json")
+    with open(rec_path, "w") as f:
+        json.dump(rec, f, indent=2)
+    if args.canale is not None:
+        print(f"misura : {rec_path}", flush=True)
+    return rec_path
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -254,6 +315,13 @@ def main():
                          "Se omesso si usa quello nel file di stato")
     ap.add_argument("-d", "--data-dir", default=os.path.join(ROOT, "data"))
     ap.add_argument("-o", "--out", default=os.path.join(ROOT, "plots"))
+    ap.add_argument("--canale", type=int, default=None,
+                    help="scan di UN canale, col segnale acceso: gli altri canali del "
+                         "trigger restano a --parcheggio e a fine scan tornano tutti "
+                         "agli offset di partenza")
+    ap.add_argument("--parcheggio", type=float, default=4095,
+                    help="offset dei canali fermi con --canale (default 4095: la soglia "
+                         "va al massimo del registro e quei canali non scattano)")
     args = ap.parse_args()
 
     files = glob.glob(os.path.join(args.data_dir, "*.h5"))
@@ -262,7 +330,11 @@ def main():
     path = max(files, key=os.path.getmtime)
 
     st = status(args.data_dir)
-    channels = [int(c["ch"]) for c in st["channels"]]
+    tutti = [int(c["ch"]) for c in st["channels"]]
+    iniziali = {int(c["ch"]): c["offset"] for c in st["channels"]}
+    if args.canale is not None and args.canale not in tutti:
+        sys.exit(f"ch{args.canale} non partecipa al trigger di questa run ({tutti}).")
+    channels = tutti if args.canale is None else [args.canale]
     sigma = args.sigma or 0.72
 
     # Senza baseline registrata due scan non sono confrontabili: la "distanza"
@@ -276,63 +348,107 @@ def main():
         print(f"   ch{int(c['ch'])}: {c['baseline']:.3f}")
     print()
     eventi_previsti(path, len(args.offsets), args.seconds)
-    print("ATTENZIONE: il segnale deve essere spento. Se i PMT sono attivi,")
-    print("            quello che misuri e' segnale piu' rumore.\n")
+    if args.canale is None:
+        print("ATTENZIONE: il segnale deve essere spento. Se i PMT sono attivi,")
+        print("            quello che misuri e' segnale piu' rumore.\n")
+    else:
+        fermi = [c for c in tutti if c != args.canale]
+        print(f"scan del solo ch{args.canale}: {', '.join('ch%d' % c for c in fermi)} "
+              f"a offset {args.parcheggio:g}")
+        print("offset di partenza, rimessi a fine scan: "
+              + ", ".join(f"ch{c} {o:g}" for c, o in iniziali.items()) + "\n")
+        # SIGTERM e' quello che manda "Stop scan" della pagina di controllo:
+        # deve passare dal ripristino degli offset come la fine normale, se no
+        # la run resta con quattro canali su cinque spenti.
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit("scan interrotto (SIGTERM)"))
+    # Col segnale acceso il modello del rumore non c'entra: le sue due colonne
+    # sarebbero numeri senza significato accanto a quelli misurati.
+    rumore = args.canale is None
     print(f"  {'offset':>7} {'soglie':>13} {'distanza':>10} {'rate misurato':>16} "
-          f"{'atteso':>11} {'sigma implicito':>16}")
+          + (f"{'atteso':>11} {'sigma implicito':>16}" if rumore else f"{'eventi':>9}"))
 
     rows = []
     prev_thr = None
-    for k, off in enumerate(args.offsets, 1):
-        # Marcatore di avanzamento, letto dalla pagina di controllo. Senza, da
-        # fuori non si distingue uno scan che sta lavorando da uno piantato:
-        # la tabella stampa una riga solo a punto FINITO, e con 20 s per punto
-        # sono venti secondi di silenzio.
-        print(f"[punto {k}/{len(args.offsets)}] offset {off:g}", flush=True)
-        applied = set_offset(args.data_dir, channels, off)
-        thr = tuple(applied[ch][1] for ch in channels)
-        # Il valore ASSOLUTO: la soglia sta sotto il piedistallo con gli
-        # impulsi negativi e sopra con quelli positivi, e la coda gaussiana
-        # non sa distinguere i due casi -- e' la stessa coda vista dai due
-        # lati. Senza abs(), col fronte di salita le distanze venivano
-        # negative, erfc() tendeva a 2 e il rate atteso usciva saturo a 3e7 Hz
-        # su tutta la riga, mentre il sigma implicito non si poteva nemmeno
-        # calcolare. Il verso e' registrato altrove (campo "polarity" di
-        # live-status.json), qui non aggiunge niente.
-        dists = [abs(applied[ch][0] - applied[ch][1]) for ch in channels]
+    interrotto = None
+    try:
+        for k, off in enumerate(args.offsets, 1):
+            # Marcatore di avanzamento, letto dalla pagina di controllo. Senza,
+            # da fuori non si distingue uno scan che sta lavorando da uno
+            # piantato: la tabella stampa una riga solo a punto FINITO, e con
+            # 20 s per punto sono venti secondi di silenzio.
+            quale = "" if args.canale is None else f"ch{args.canale} "
+            print(f"[punto {k}/{len(args.offsets)}] {quale}offset {off:g}", flush=True)
+            if args.canale is None:
+                applied = set_offset(args.data_dir, channels, off)
+            else:
+                applied = set_offsets(args.data_dir, {c: (off if c == args.canale
+                                                          else args.parcheggio)
+                                                      for c in tutti})
+            thr = tuple(applied[ch][1] for ch in channels)
+            # Il valore ASSOLUTO: la soglia sta sotto il piedistallo con gli
+            # impulsi negativi e sopra con quelli positivi, e la coda gaussiana
+            # non sa distinguere i due casi -- e' la stessa coda vista dai due
+            # lati. Senza abs(), col fronte di salita le distanze venivano
+            # negative, erfc() tendeva a 2 e il rate atteso usciva saturo a
+            # 3e7 Hz su tutta la riga, mentre il sigma implicito non si poteva
+            # nemmeno calcolare. Il verso e' registrato altrove (campo
+            # "polarity" di live-status.json), qui non aggiunge niente.
+            dists = [abs(applied[ch][0] - applied[ch][1]) for ch in channels]
 
-        if thr == prev_thr:
-            print(f"  {off:7g} {str(thr):>13}   COLLASSA sulla soglia precedente, salto")
-            continue
-        prev_thr = thr
+            if thr == prev_thr:
+                print(f"  {off:7g} {str(thr):>13}   COLLASSA sulla soglia precedente, salto")
+                continue
+            prev_thr = thr
 
-        time.sleep(1.0)                        # la soglia entra in vigore
-        # Gli estremi vanno registrati, non ricostruiti dopo: dedurli da
-        # rate x durata sbaglia appena la DAQ perde eventi o il rate varia
-        # dentro il passo, e l'analisi finisce per campionare il segmento
-        # sbagliato senza accorgersene.
-        start = n_events(path)
-        t0 = time.time()
-        time.sleep(args.seconds)
-        dt = time.time() - t0
-        counts = n_events(path) - start
-        rate = counts / dt
+            time.sleep(1.0)                        # la soglia entra in vigore
+            # Gli estremi vanno registrati, non ricostruiti dopo: dedurli da
+            # rate x durata sbaglia appena la DAQ perde eventi o il rate varia
+            # dentro il passo, e l'analisi finisce per campionare il segmento
+            # sbagliato senza accorgersene.
+            start = n_events(path)
+            t0 = time.time()
+            time.sleep(args.seconds)
+            dt = time.time() - t0
+            counts = n_events(path) - start
+            rate = counts / dt
 
-        # Zero conteggi non e' "rate nullo": e' un limite superiore
-        meas = (f"{rate:10.1f} Hz" if counts > 0
-                else f"  < {3.0/dt:5.2f} Hz")
-        exp = predicted(dists, sigma)
-        exp_s = f"{exp:8.1f} Hz" if exp < 1e4 else "  saturo"
-        sfit = sigma_from_rate(dists, rate)
-        sfit_s = f"{sfit:14.2f}" if sfit else "             -"
+            # Zero conteggi non e' "rate nullo": e' un limite superiore
+            meas = (f"{rate:10.1f} Hz" if counts > 0
+                    else f"  < {3.0/dt:5.2f} Hz")
+            exp = predicted(dists, sigma)
+            exp_s = f"{exp:8.1f} Hz" if exp < 1e4 else "  saturo"
+            sfit = sigma_from_rate(dists, rate)
+            sfit_s = f"{sfit:14.2f}" if sfit else "             -"
 
-        print(f"  {off:7g} {str(thr):>13} {np.mean(dists):9.2f} {meas:>16} "
-              f"{exp_s:>11} {sfit_s}")
-        rows.append((off, np.mean(dists), rate, exp, counts, start, start + counts))
+            print(f"  {off:7g} {str(thr):>13} {np.mean(dists):9.2f} {meas:>16} "
+                  + (f"{exp_s:>11} {sfit_s}" if rumore else f"{counts:9d}"), flush=True)
+            rows.append((off, np.mean(dists), rate, exp, counts, start, start + counts))
 
-        if rate > 5000:
-            print("     rate molto alto: mi fermo qui per non intasare la DAQ")
-            break
+            if rate > 5000:
+                print("     rate molto alto: mi fermo qui per non intasare la DAQ")
+                break
+    except (SystemExit, KeyboardInterrupt) as e:
+        if args.canale is None:
+            raise
+        interrotto = e
+    finally:
+        if args.canale is not None:
+            try:
+                set_offsets(args.data_dir, iniziali)
+                print("offset di partenza rimessi: "
+                      + ", ".join(f"ch{c} {o:g}" for c, o in iniziali.items()), flush=True)
+            except SystemExit as e:
+                print(f"ATTENZIONE: offset di partenza NON rimessi. {e.code}", flush=True)
+
+    if args.canale is not None:
+        # I punti misurati valgono anche se lo scan e' stato interrotto: si
+        # registrano, e il JSON dice che il canale non e' completo.
+        if rows:
+            scrivi_misura(args, path, st, channels, sigma, rows, iniziali,
+                          None if interrotto is None else str(getattr(interrotto, "code", "") or "interrotto"))
+        if interrotto is not None:
+            raise interrotto
+        return
 
     # --- grafico ---
     os.makedirs(args.out, exist_ok=True)
@@ -364,24 +480,7 @@ def main():
     fig.savefig(out, dpi=120)
     plt.close(fig)
 
-    # Misura salvata per intero, cosi' due scan si possono confrontare davvero
-    rec = {
-        "file": os.path.basename(path),
-        "quando": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "canali": channels,
-        "baseline": {str(int(c["ch"])): c["baseline"] for c in st["channels"]},
-        "sigma_assunto": sigma,
-        "secondi_per_punto": args.seconds,
-        "larghezza_fwhm_ns": larghezza_impulsi(path, channels),
-        "punti": [{"offset": r[0], "distanza": r[1], "rate": r[2],
-                   "atteso": r[3], "conteggi": r[4],
-                   "eventi_da": r[5], "eventi_a": r[6]} for r in rows],
-    }
-    stamp = time.strftime("%Y%m%d_%H%M%S")
-    rec_path = os.path.join(args.out, f"noise_scan_{stamp}.json")
-    with open(rec_path, "w") as f:
-        json.dump(rec, f, indent=2)
-
+    rec_path = scrivi_misura(args, path, st, channels, sigma, rows)
     print(f"\ngrafico: {out}")
     print(f"misura : {rec_path}")
     if fitted:

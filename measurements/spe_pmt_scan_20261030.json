@@ -1,0 +1,61 @@
+{
+  "run": "LNGS_scan_54-0V_0000_750Ms_55PT.h5",
+  "scan": [
+    "noise_scan_20261030_155318_ch20.json",
+    "noise_scan_20261030_160639_ch21.json"
+  ],
+  "canali": {
+    "20": {
+      "offset": 10.0,
+      "eventi": 1738,
+      "durata_s": 60.000080585479736,
+      "istante_ns": 260.0,
+      "pe_ampiezza_mv": 35.55785924747231,
+      "pe_ampiezza_err_mv": 1.3295151453801461,
+      "pe_ampiezza_var_intervalli_mv": 3.2669735813703156,
+      "pe_ampiezza_sigma_mv": 21.496338723815477,
+      "pe_carica_adcns": 1719.4565680761716,
+      "pe_carica_err_adcns": 53.750310684206426,
+      "pe_carica_var_intervalli_adcns": 24.145253767947906,
+      "pe_carica_sigma_adcns": 1125.2331862363178,
+      "fit_ampiezza_mv": [
+        18,
+        75
+      ],
+      "fit_carica_adcns": [
+        600,
+        3600
+      ],
+      "finestra_carica_ns": [
+        -10.0,
+        30.0
+      ]
+    },
+    "21": {
+      "offset": 10.0,
+      "eventi": 1467,
+      "durata_s": 60.00007176399232,
+      "istante_ns": 265.3333333333333,
+      "pe_ampiezza_mv": 38.02240261555836,
+      "pe_ampiezza_err_mv": 1.308099099273152,
+      "pe_ampiezza_var_intervalli_mv": 1.6985110768119256,
+      "pe_ampiezza_sigma_mv": 21.78020480390711,
+      "pe_carica_adcns": 1708.7822616161309,
+      "pe_carica_err_adcns": 57.89035897336252,
+      "pe_carica_var_intervalli_adcns": 86.21680006750944,
+      "pe_carica_sigma_adcns": 1104.7363332673895,
+      "fit_ampiezza_mv": [
+        18,
+        75
+      ],
+      "fit_carica_adcns": [
+        600,
+        3600
+      ],
+      "finestra_carica_ns": [
+        -10.0,
+        30.0
+      ]
+    }
+  }
+}

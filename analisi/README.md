@@ -178,3 +178,21 @@ scintillazione delle fibre.
 
 `MC_DIR` e' la cartella `data/` del progetto MC: lo script legge `../gun_muons_lngs.mac`.
 
+
+## 20261030_calibrazione_selftrigger/ -- soglie del self-trigger in p.e., per canale (LNGS)
+
+Dallo scan per canale del 2026-10-30 (`tools/scan_v1742_canali.sh`, run
+`data/LNGS/scan/LNGS_scan_54-0V_0000_750Ms_55PT`, PMT invertiti). La
+calibrazione offset -> mV la fa `tools/calibra_selftrigger.py` sul PC, su ogni
+JSON dello scan, con la run decompressa una volta sola in una cartella di
+lavoro:
+
+```
+python3 tools/calibra_selftrigger.py plots/noise_scan_20261030_155318_ch20.json \
+    -d /tmp/calib_scan --verifica -o /tmp/calib_scan/calib_selftrigger_20261030_ch20.json
+```
+
+| script | argomenti | cosa mostra |
+|---|---|---|
+| `spe_pmt_scan.py` | RUN.h5 SCAN_ch20.json SCAN_ch21.json OUT | ampiezza e carica degli impulsi che fanno scattare ciascun PMT al passo piu' basso (offset 10, quasi solo impulsi da un fotoelettrone): il PE in mV e in ADC·ns, con un fit gaussiano ripetuto su tre intervalli. Scrive anche le ampiezze e le cariche evento per evento (`.npz`). Gira sul PC |
+| `soglie_pe.py` | OUT | calibrazione offset -> mV coi due stimatori (quantili dei rate, bordo basso), e rate di ogni canale da solo contro la soglia in p.e.: PMT col PE di `spe_pmt_scan.py`, SiPM col p.e. del DCR della 0039. Tabella offset -> mV -> p.e. in `OUT.json`. Gira sul Mac, sui JSON di `measurements/` |

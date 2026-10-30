@@ -598,6 +598,31 @@ self-trigger su tutti e cinque.
   PMT (11 ns) nessun punto misurato si applica. Le forme d'onda di ogni passo
   sono nella run (`eventi_da`/`eventi_a` nei JSON), per
   `calibra_selftrigger.py`.
+- **Calibrazione e soglie in p.e.** (2026-10-30, `analisi/20261030_calibrazione_selftrigger/`,
+  `measurements/calib_selftrigger_20261030_chNN.json`, `soglie_pe_20261030.json`):
+  - **SiPM: 0.418-0.424 mV/offset**, intercetta ~0, i due stimatori d'accordo
+    punto per punto entro l'1-2%: conferma l'altopiano degli impulsi larghi.
+  - **PMT invertiti (10.7 ns): quantili 0.72 / 0.81 mV/offset (+7 / +2 mV),
+    bordo basso 0.645 / 0.651 (+3 / +4 mV)** (ch20 / ch21), misurati solo fino
+    a offset 100 (sopra i passi hanno meno di 50 eventi). I due stimatori
+    distano il ~15% punto per punto, come per i PMT amplificati il 2026-10-18.
+    Ipotesi, non verificata: con impulsi corti la soglia non e' un gradino,
+    perche' il comparatore campiona a ~30 MHz e un impulso da 11 ns scatta o no
+    a seconda della fase; il bordo basso prende i casi fortunati. Con gli
+    impulsi larghi dei SiPM la fase non conta, e i due coincidono.
+  - **Il PE dei PMT invertiti**, dagli impulsi del passo a offset 10 (~25-29 Hz
+    per PMT, quasi tutti da un fotoelettrone): **35.6 +- 3.3 / 38.0 +- 1.7 mV**
+    di ampiezza (gobba larga, sigma ~21 mV), **1719 +- 54 / 1709 +- 86
+    ADC·ns** di carica: la stessa K di prima (1647-1726), l'inverter non ha
+    cambiato il guadagno.
+  - **Soglie in p.e. di ampiezza**: PMT offset 50 (la soglia di prima dello
+    scan) = 1.0-1.2 PE, offset 100 = 1.8-2.2 PE, e sotto ~0.6 PE il rate si
+    ferma a ~25 Hz: sono gli impulsi da un fotoelettrone del PMT. SiPM offset
+    600 = 83-92 p.e., offset 50 = 6.5-7.9 p.e., col p.e. del DCR della 0039
+    (2.75 / 3.02 / 2.92 mV, segnale filtrato a 50 MHz). Per i SiPM e' un p.e.
+    di AMPIEZZA: un impulso dei pannelli e' largo ~195 ns e i suoi
+    fotoelettroni non arrivano insieme, quindi non e' il numero di
+    fotoelettroni dell'evento.
 - **Il riquadro *Scan plots* della pagina elenca i JSON, non i PNG**: le curve
   si vedono selezionando le misure (ch 16, 17, 18 del 30/10) e disegnandole.
   Il 2026-10-30 avevo detto all'utente che i grafici erano li', e non c'erano.

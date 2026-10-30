@@ -1108,10 +1108,18 @@ LNGS; solo correzione CAEN):
 Le misure stanno in `measurements/*.json` con i dati grezzi, e gli script di
 plot li rileggono da lì: i grafici si rifanno, i numeri no.
 
-Le due pagine web girano sul PC DAQ e sopravvivono alla caduta della rete:
+Le due pagine web girano sul PC DAQ e sopravvivono alla caduta della rete.
+**Il controllore si avvia e si riavvia con `start_DAQ-controller.sh`**, nella
+radice del repository, mai con la riga nuda di `daq_control.py`. Lo script
+trova il controllore acceso dalla porta, controlla che non ci siano una run o
+una coda in corso prima di fermarlo, avvisa se la copia locale e' indietro
+rispetto a git, e aspetta che la pagina risponda. Il 2026-10-30 ho dato
+all'utente la riga nuda, e il riavvio e' finito in "porta gia' in uso".
 
 ```
-python3 tools/daq_control.py -b 0.0.0.0        # controllo, porta 8766
+./start_DAQ-controller.sh -- --psu-host 192.168.99.104 --psu-ampli-host 192.168.99.106   # al LNGS
+./start_DAQ-controller.sh --stato     # come sta, senza toccare niente
+./start_DAQ-controller.sh --ferma
 ```
 
 Il monitor conviene accenderlo **da dentro la pagina** (*Start monitor*): così

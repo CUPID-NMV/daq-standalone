@@ -949,7 +949,10 @@ LNGS; solo correzione CAEN):
   48% (a 1750 il 22%). **L'eccesso si spiega con la resa delle fibre, senza
   sorgenti in piu'**; da confermare misurando la resa della BCF-9995XL al
   banco (Sr-90). Resa e flusso sono in parte degeneri: il flusso scala tutto,
-  la resa cambia la forma. K non e' ritarato a 3500 (effetto ~2%);
+  la resa cambia la forma. **Coi muoni anch'essi a 3500, K = 1647
+  ADC·ns/PE** (a 1750 era 1696; un muone fa 5.91 PE per PMT contro 5.71) e
+  il MC da' 0.325 Hz contro 0.305: dati/MC 0.87 / 0.74 / 0.82 / 1.17 nelle
+  quattro fasce, classe C 1.00 (`mc_digit_*_s3500.npz`, `mc_digit_K.json`);
 - **il fotoelettrone singolo** dai pochi impulsi di buio veri della run a
   trigger software 0036 vale ~1700-2000 ADC·ns, come la scala ricavata dai
   muoni (1726; 1696 con la scintillazione delle fibre, che a un muone

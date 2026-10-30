@@ -1,7 +1,7 @@
 {
- "K_adcns_per_pe": 1696.42294816437,
+ "K_adcns_per_pe": 1647.4001250899578,
  "da": "mediana della carica per PMT, muoni MC digitalizzati contro muoni LNF (Frascati 0005, 3 SiPM, cancello LNGS)",
  "mediana_lnf": 8392.3916015625,
- "mediana_mc": 8539.964601769949,
- "k_prima": 1726.2530890785251
+ "mediana_mc": 8642.129793510321,
+ "k_prima": 1696.42294816437
 }

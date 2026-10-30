@@ -2,10 +2,11 @@
 gamma di Hall A (Compton + scintillazione delle fibre) e muoni di Hall A.
 
     python3 analisi/20261029_normalizzazione_gamma/sovrapposizione_0011_0013.py OUT.png [GAMMA.npz:RESA]
-            [--v812 CARICHE.npz --evidenzia N ...]
+            [--muoni MUONI.npz:RESA] [--v812 CARICHE.npz --evidenzia N ...]
 
 GAMMA.npz: i gamma digitalizzati da usare (di serie mc_digit_gamma_righe_s1750.npz:1750);
 RESA e' la resa di scintillazione delle fibre di quella produzione, per la legenda.
+--muoni: i muoni digitalizzati (di serie mc_digit_mu_lngs_s1750.npz:1750).
 --v812: le cariche (tools/carica_padme.py) di una run presa col trigger del
 V812, per esempio la run da 24 ore coi pannelli (carica_0000_54V_24h.npz): i
 suoi eventi con entrambi i PMT sopra 3 sigma vanno in un pannello a parte,
@@ -36,11 +37,13 @@ import matplotlib.pyplot as plt
 ap = argparse.ArgumentParser()
 ap.add_argument("out")
 ap.add_argument("gamma", nargs="?", default="mc_digit_gamma_righe_s1750.npz:1750")
+ap.add_argument("--muoni", default="mc_digit_mu_lngs_s1750.npz:1750")
 ap.add_argument("--v812", default=None)
 ap.add_argument("--evidenzia", type=int, nargs="*", default=[])
 arg = ap.parse_args()
 OUT = arg.out
 GAMMA_F, RESA = (arg.gamma.split(":") + ["?"])[:2]
+MU_F, RESA_MU = (arg.muoni.split(":") + ["?"])[:2]
 MIS = _os.path.join(ROOT, "measurements")
 SOGLIE = json.load(open(_os.path.join(MIS, "soglie_trigger_lngs.json")))
 RUN = {"0011": "LNGS__54-0V_0011_750Ms_55PT", "0013": "LNGS__54-0V_0013_750Ms_55PT"}
@@ -80,7 +83,7 @@ dq, dw, dr = np.concatenate(dq), np.concatenate(dw), np.concatenate(dr)
 
 # MC: ogni evento entra una volta per run, col trigger e il taglio di quella run, pesato T_run / TT
 mc = {}
-for chiave, f in (("gamma", GAMMA_F), ("mu", "mc_digit_mu_lngs_s1750.npz")):
+for chiave, f in (("gamma", GAMMA_F), ("mu", MU_F)):
     z = np.load(f if _os.path.exists(f) else _os.path.join(MIS, f))
     w0, rep = float(z["peso_hz"]), int(z["repliche"])
     qq, ww, rr = [], [], []
@@ -133,8 +136,8 @@ a.stairs(hg, b, color="#e8710a", lw=1.2, ls="--",
                % (RESA, mc["gamma"]["ngen"] // 10**6, mc["gamma"]["rate"],
                   mc["gamma"]["ngen"] / mc["gamma"]["rate"] / 60, cg["both > 3σ"]))
 a.stairs(hm, b, color="#2a6fdb", lw=1.2, ls="--",
-         label="  Hall A μ, fibre scintillation 1750 photons/MeV (%d k μ at %.4f Hz on 6.5 × 6.5 m = %.0f days): %.5f Hz"
-               % (mc["mu"]["ngen"] // 1000, mc["mu"]["rate"], mc["mu"]["ngen"] / mc["mu"]["rate"] / 86400,
+         label="  Hall A μ, fibre scintillation %s photons/MeV (%d k μ at %.4f Hz on 6.5 × 6.5 m = %.0f days): %.5f Hz"
+               % (RESA_MU, mc["mu"]["ngen"] // 1000, mc["mu"]["rate"], mc["mu"]["ngen"] / mc["mu"]["rate"] / 86400,
                   cm["both > 3σ"]))
 a.errorbar(bc[ok], hd[ok] / TT, yerr=np.sqrt(hd[ok]) / TT, xerr=[(bc - b[:-1])[ok], (b[1:] - bc)[ok]],
            fmt="o", ms=4, color="k", lw=0.8, zorder=5,

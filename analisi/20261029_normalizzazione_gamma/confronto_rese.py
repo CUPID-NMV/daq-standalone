@@ -1,7 +1,7 @@
 """Fondo LNGS 0011 + 0013 sommato contro il MC dei gamma di Hall A con diverse
 rese di scintillazione delle fibre (piu' i muoni, che non contano).
 
-    python3 analisi/20261029_normalizzazione_gamma/confronto_rese.py OUT.png GAMMA1.npz:ETICHETTA [GAMMA2.npz:ETICHETTA ...]
+    python3 analisi/20261029_normalizzazione_gamma/confronto_rese.py OUT.png GAMMA1.npz:ETICHETTA[:MUONI1.npz] [...]
 
 GAMMA*.npz: uscite di digit_mc.py (per esempio measurements/mc_digit_gamma_righe_s3500.npz:3500).
 Trigger e taglio a 3 sigma di ogni run, pesati con la durata, come in
@@ -25,7 +25,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 OUT = sys.argv[1]
-GAMMA = [(a.split(":")[0], a.split(":")[1] if ":" in a else _os.path.basename(a)) for a in sys.argv[2:]]
+# GAMMA.npz:RESA[:MUONI.npz]: senza i muoni si usano quelli a 1750 fotoni/MeV
+GAMMA = [(a.split(":") + [None, None])[:3] for a in sys.argv[2:]]
 MIS = _os.path.join(ROOT, "measurements")
 SOGLIE = json.load(open(_os.path.join(MIS, "soglie_trigger_lngs.json")))
 RUN = {"0011": "LNGS__54-0V_0011_750Ms_55PT", "0013": "LNGS__54-0V_0013_750Ms_55PT"}
@@ -81,10 +82,10 @@ for r in RUN:
     dq.append(q[m])
     dw.append(np.full(m.sum(), 1 / TT))
 dq, dw = np.concatenate(dq), np.concatenate(dw)
-zmu = np.load(_os.path.join(MIS, "mc_digit_mu_lngs_s1750.npz"))
-muq, muw, _ = raccogli(zmu["q"], zmu["amp"], float(zmu["peso_hz"]))
 mc = []
-for f, eti in GAMMA:
+for f, eti, fmu in GAMMA:
+    zmu = np.load(_os.path.join(MIS, fmu or "mc_digit_mu_lngs_s1750.npz"))
+    muq, muw, _ = raccogli(zmu["q"], zmu["amp"], float(zmu["peso_hz"]))
     z = np.load(f if _os.path.exists(f) else _os.path.join(MIS, f))
     gq, gw, gr = raccogli(z["q"], z["amp"], float(z["peso_hz"]))
     mc.append(dict(eti=eti, q=np.concatenate([gq, muq]), w=np.concatenate([gw, muw]), gq=gq, gr=gr,

@@ -89,7 +89,7 @@ def main():
     ap.add_argument("scan", help="il JSON di noise_scan.py")
     ap.add_argument("-d", "--data-dir", default=os.path.join(ROOT, "data"))
     ap.add_argument("--riferimento", type=int, default=0,
-                    help="indice del passo da cui prendere la distribuzione (default: il primo)")
+                    help="indice del passo da cui prendere la distribuzione, coi passi in ordine di offset (default: il piu' basso)")
     ap.add_argument("--tieni-spuri", action="store_true",
                     help="non vetare i picchi spuri del V1742")
     ap.add_argument("--verifica", action="store_true",
@@ -98,7 +98,11 @@ def main():
     a = ap.parse_args()
 
     d = json.load(open(a.scan))
-    punti = d["punti"]
+    # In ordine di offset, non di tempo: il riferimento deve essere il passo
+    # piu' BASSO in soglia, e gli scan per canale (scan_v1742_canali.sh) vanno
+    # dall'alto al basso. Preso il primo nel tempo, il riferimento era il
+    # passo con meno eventi e la mappatura dei quantili non aveva punti.
+    punti = sorted(d["punti"], key=lambda p: p["offset"])
     canali = [int(c) for c in d["canali"]]
     rif = punti[a.riferimento]
 
@@ -122,7 +126,7 @@ def main():
     # riferimento. Su un file da 652 MB compressi fa la differenza fra un
     # minuto e dieci.
     t0 = time.time()
-    fino_a = punti[-1]["eventi_a"] if a.verifica else rif["eventi_a"]
+    fino_a = max(p["eventi_a"] for p in punti) if a.verifica else rif["eventi_a"]
     hdr, dati = daqio.load(h5, max_events=fino_a, channels=canali,
                            live=h5.endswith(".h5"))
     print("letti       : %d eventi in %.0f s" % (len(dati), time.time() - t0))

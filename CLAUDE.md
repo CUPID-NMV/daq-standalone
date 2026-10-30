@@ -972,6 +972,17 @@ LNGS; solo correzione CAEN):
   il trigger. Disegnare il piedistallo come dati su tutto l'intervallo, mai
   come curve fermate a una soglia: sembrano un modello e creano un vuoto
   che non esiste;
+- **eventi con un solo PMT sopra 3 sigma** (`un_pmt_solo.py`): il MC li ha
+  (luce dei gamma che arriva a un'estremita' sola), ma meno dei dati. 0013
+  (offset 100): dati 3.57 Hz contro MC 0.57 (x6), l'eccesso tutto a 2-3 PE,
+  sulla soglia; 0011 (offset 200): 0.21 contro 0.06 (x3.5), a 6-12 PE; sopra
+  ~12 PE dati e MC tornano. Nel MC mancano: gli impulsi del PMT stesso (buio
+  a piu' PE, afterpulse: il rumore del digitalizzatore sono tracce scelte
+  senza impulsi) e il modulo H14600 (nel MC il PMT e' un disco di vetro di
+  7.6 mm: niente involucro, cassa, generatore di alta tensione, ne' la loro
+  radioattivita'). Interpretazione, non verificata; gli impulsi di un PMT
+  solo sono veloci a ogni ampiezza (8 ns), cioe' luce sul fotocatodo. Non
+  toccano la selezione con entrambi i PMT; contano per il rate di trigger;
 - **il fotoelettrone singolo** dai pochi impulsi di buio veri della run a
   trigger software 0036 vale ~1700-2000 ADC·ns, come la scala ricavata dai
   muoni (1726; 1696 con la scintillazione delle fibre, che a un muone

@@ -61,6 +61,8 @@ data/
 # senza far divergere il template versionato (config/template-daq.toml)
 config/*-local.toml
 config/run-*.toml
+# Indirizzi degli alimentatori del PC DAQ, letti da start_DAQ-controller.sh
+config/*-local.env
 
 # Editor / manual backup files
 *~

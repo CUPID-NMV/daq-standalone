@@ -21,9 +21,10 @@ ad avere hardware e librerie CAEN.
   (`utun`, 192.168.99.10).
 - **Al Gran Sasso, 2026-10-23**: PLH250-P (bias SiPM) a `.104`, CPX400SP
   (amplificatore) a `.106` -- l'indirizzo di SERIE del bias, quindi il
-  controllore va avviato con `-- --psu-host 192.168.99.104 --psu-ampli-host
-  192.168.99.106`; ora comunque rifiuta un alimentatore del modello
-  sbagliato. `.102` e' il controller di gestione (BMC) di un server
+  controllore non puo' usare i valori di serie. Dal 2026-10-30 gli indirizzi
+  stanno in `config/controllore-local.env` sul PC (fuori da git), che
+  `start_DAQ-controller.sh` legge da solo: se cambiano, si corregge li'.
+  Il controllore comunque rifiuta un alimentatore del modello sbagliato. `.102` e' il controller di gestione (BMC) di un server
   Supermicro, `.107` risponde al ping e basta (sconosciuto). **Il bridge a
   `.105` non risponde al ping** ma risponde su 22/80 e al VME: non darlo per
   morto da un ping. Dal PC e dal Mac la rete non si vede uguale (il Mac via
@@ -1117,10 +1118,14 @@ rispetto a git, e aspetta che la pagina risponda. Il 2026-10-30 ho dato
 all'utente la riga nuda, e il riavvio e' finito in "porta gia' in uso".
 
 ```
-./start_DAQ-controller.sh -- --psu-host 192.168.99.104 --psu-ampli-host 192.168.99.106   # al LNGS
+./start_DAQ-controller.sh             # avvia, o riavvia se gira gia'
 ./start_DAQ-controller.sh --stato     # come sta, senza toccare niente
 ./start_DAQ-controller.sh --ferma
 ```
+
+Gli indirizzi degli alimentatori non vanno scritti a ogni avvio (l'utente:
+"non ricordero' mai gli argomenti"): li legge da `config/controllore-local.env`,
+due righe `PSU_HOST=` e `PSU_AMPLI_HOST=`. Argomenti dopo `--` vincono.
 
 Il monitor conviene accenderlo **da dentro la pagina** (*Start monitor*): così
 si aggancia da solo a `OutputDir`, che si cambia dalla pagina e che altrimenti

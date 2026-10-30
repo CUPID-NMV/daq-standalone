@@ -9,6 +9,9 @@
 #   ./start_DAQ-controller.sh -- --psu-host 127.0.0.1
 #                                       # tutto quello dopo "--" va a daq_control.py
 #
+# Gli indirizzi degli alimentatori li prende da config/controllore-local.env
+# (PSU_HOST, PSU_AMPLI_HOST), un file di questo PC fuori da git.
+#
 # Il monitor NON lo avvia: conviene accenderlo da dentro la pagina (Start
 # monitor), cosi' si aggancia da solo a OutputDir, che si cambia dalla pagina.
 # Avviato da fuori resta disallineato il giorno che si cambia cartella.
@@ -28,7 +31,22 @@ FORZA=0
 EXTRA=()          # quello che sta dopo "--" va a daq_control.py
 LOG="$ROOT/data/controllore.log"
 
-uso() { sed -n '3,15p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit "${1:-0}"; }
+uso() { sed -n '3,18p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit "${1:-0}"; }
+
+# --- indirizzi degli alimentatori -------------------------------------------
+# Cambiano con la sede e col DHCP (al LNGS il bias sta a .104, a Frascati a
+# .106), quindi non stanno ne' nel codice ne' in git: stanno in un file di
+# questo PC, che si corregge sul posto. Gli argomenti dopo "--" vincono
+# comunque, perche' daq_control.py usa queste variabili solo come valori di
+# serie. Si leggono solo le due chiavi, il file non si esegue.
+LOCALE="$ROOT/config/controllore-local.env"
+if [[ -f "$LOCALE" ]]; then
+    while IFS='=' read -r chiave valore; do
+        valore="${valore%%#*}"
+        valore="${valore//[[:space:]]/}"
+        [[ -n "$valore" ]] && export "$chiave=$valore"
+    done < <(grep -E '^[[:space:]]*(PSU_HOST|PSU_AMPLI_HOST)[[:space:]]*=' "$LOCALE" | tr -d ' \t')
+fi
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -193,7 +211,14 @@ if git -C "$ROOT" rev-parse --git-dir > /dev/null 2>&1; then
 fi
 
 mkdir -p "$(dirname "$LOG")"
-echo "avvio: python3 tools/daq_control.py -b $BIND -p $PORTA"
+echo "avvio: python3 tools/daq_control.py -b $BIND -p $PORTA ${EXTRA[*]+${EXTRA[*]}}"
+if [[ -f "$LOCALE" ]]; then
+    echo "alimentatori (da config/controllore-local.env, se non indicati dopo --):"
+    echo "  bias SiPM ${PSU_HOST:-di serie}, amplificatore ${PSU_AMPLI_HOST:-di serie}"
+else
+    echo "ATTENZIONE: manca config/controllore-local.env: alimentatori agli indirizzi"
+    echo "            di serie di daq_control.py, che al LNGS sono sbagliati."
+fi
 # setsid + nohup: la pagina deve sopravvivere alla chiusura del terminale e
 # alla caduta della rete, che e' tutto il motivo per cui gira sul PC DAQ.
 setsid nohup python3 "$ROOT/tools/daq_control.py" -b "$BIND" -p "$PORTA" \

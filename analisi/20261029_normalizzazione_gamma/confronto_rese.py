@@ -115,7 +115,7 @@ for i, m in enumerate(mc):
     h = np.histogram(m["q"].max(1), b, weights=m["w"])[0]
     e = h / np.sqrt(np.clip(n_indip(m, b), 1e-9, None)) * (n_indip(m, b) > 0)
     a.stairs(h + e, b, baseline=np.clip(h - e, 1e-12, None), fill=True, color=COL[i], alpha=0.16, lw=0)
-    a.stairs(h, b, color=COL[i], lw=2.2, label="MC Hall A γ + μ, fibre scintillation %s γ/MeV: %.3f Hz"
+    a.stairs(h, b, color=COL[i], lw=2.2, label="MC Hall A γ + μ, fibre scintillation %s photons/MeV: %.3f Hz"
                                                % (m["eti"], fasce(m["q"], m["w"])["both > 3σ"]))
 a.errorbar(bc[ok], hd[ok] / TT, yerr=np.sqrt(hd[ok]) / TT, xerr=[(bc - b[:-1])[ok], (b[1:] - bc)[ok]],
            fmt="o", ms=4, color="k", lw=0.8, zorder=5,
@@ -147,7 +147,7 @@ for i, m in enumerate(mc):
     rr = (nd[ok] / TT) / s_[ok]
     err = rr * np.sqrt(1 / nd[ok] + 1 / n_[ok])
     a.errorbar(cr[ok] * (1 + 0.04 * (i - (len(mc) - 1) / 2)), rr, yerr=err, fmt="o", ms=5, color=COL[i], lw=1,
-               label="DATA / MC (%s γ/MeV)" % m["eti"])
+               label="DATA / MC (%s photons/MeV)" % m["eti"])
 a.axhline(1, color="k", lw=0.8)
 for v in (7000, 10000, 15000):
     a.axvline(v, color="#888", ls=":", lw=1)
@@ -172,7 +172,7 @@ for i, m in enumerate(mc):
     c = m["q"].max(1) >= 10000
     l_ = asim(m["q"][c])
     a.hist(l_, bl, weights=m["w"][c], density=True, histtype="step", color=COL[i], lw=1.6,
-           label="MC %s γ/MeV: |ln| < 1 in %.0f%%, > 2 in %.0f%%  (%d γ entries, %d independent)"
+           label="MC %s photons/MeV: |ln| < 1 in %.0f%%, > 2 in %.0f%%  (%d γ entries, %d independent)"
                  % (m["eti"], 100 * np.average(np.abs(l_) < 1, weights=m["w"][c]),
                     100 * np.average(np.abs(l_) > 2, weights=m["w"][c]),
                     (m["gq"][m["gr"] == "0013"].max(1) >= 10000).sum(),
@@ -187,7 +187,7 @@ a.grid(alpha=0.25)
 a = ax[1, 1]
 nomi = [f[0] for f in FASCE]
 x = np.arange(len(nomi))
-serie = [("DATA 0011 + 0013", fd, "k")] + [("MC %s γ/MeV" % m["eti"], fasce(m["q"], m["w"]), COL[i])
+serie = [("DATA 0011 + 0013", fd, "k")] + [("MC %s photons/MeV" % m["eti"], fasce(m["q"], m["w"]), COL[i])
                                            for i, m in enumerate(mc)]
 wb = 0.8 / len(serie)
 for i, (lab, v, col) in enumerate(serie):

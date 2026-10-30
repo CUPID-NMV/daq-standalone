@@ -129,11 +129,13 @@ a.stairs(hg + hm + et, b, baseline=np.clip(hg + hm - et, 1e-12, None), fill=True
 a.stairs(hg + hm, b, color="#7b2d8b", lw=2.4,
          label="MC total, Hall A γ + μ: %.3f Hz" % (cg["both > 3σ"] + cm["both > 3σ"]))
 a.stairs(hg, b, color="#e8710a", lw=1.2, ls="--",
-         label="  Hall A γ, Compton + fibre scintillation %s γ/MeV (%.0f Hz generated, %d M): %.3f Hz"
-               % (RESA, mc["gamma"]["rate"], mc["gamma"]["ngen"] // 10**6, cg["both > 3σ"]))
+         label="  Hall A γ, Compton + fibre scintillation %s photons/MeV (%d M γ at %.0f Hz = %.0f min of Hall A): %.3f Hz"
+               % (RESA, mc["gamma"]["ngen"] // 10**6, mc["gamma"]["rate"],
+                  mc["gamma"]["ngen"] / mc["gamma"]["rate"] / 60, cg["both > 3σ"]))
 a.stairs(hm, b, color="#2a6fdb", lw=1.2, ls="--",
-         label="  Hall A μ, fibre scintillation 1750 γ/MeV (%.4f Hz on 6.5 × 6.5 m, %d k): %.5f Hz"
-               % (mc["mu"]["rate"], mc["mu"]["ngen"] // 1000, cm["both > 3σ"]))
+         label="  Hall A μ, fibre scintillation 1750 photons/MeV (%d k μ at %.4f Hz on 6.5 × 6.5 m = %.0f days): %.5f Hz"
+               % (mc["mu"]["ngen"] // 1000, mc["mu"]["rate"], mc["mu"]["ngen"] / mc["mu"]["rate"] / 86400,
+                  cm["both > 3σ"]))
 a.errorbar(bc[ok], hd[ok] / TT, yerr=np.sqrt(hd[ok]) / TT, xerr=[(bc - b[:-1])[ok], (b[1:] - bc)[ok]],
            fmt="o", ms=4, color="k", lw=0.8, zorder=5,
            label="DATA LNGS 0011 + 0013 (%.1f h at offset 200 + %.0f min at offset 100): %.3f Hz"
@@ -216,7 +218,7 @@ a.set_title("data / MC (MC statistical error counts replicas as correlated)", fo
 a.legend(fontsize=8.5, frameon=False, loc="upper left", ncol=3)
 a.grid(alpha=0.25, which="both")
 fig.suptitle("LNGS background (runs 0011 + 0013) vs Monte Carlo: Hall A γ (J·A normalisation, φ = 1.12 cm$^{-2}$s$^{-1}$) "
-             "+ Hall A μ, fibre scintillation %s γ/MeV" % RESA, fontsize=11)
+             "+ Hall A μ; scintillation of the fibre cores %s photons/MeV" % RESA, fontsize=11)
 fig.tight_layout()
 fig.savefig(OUT, dpi=100)
 print("scritto", OUT)

@@ -983,6 +983,13 @@ LNGS; solo correzione CAEN):
   radioattivita'). Interpretazione, non verificata; gli impulsi di un PMT
   solo sono veloci a ogni ampiezza (8 ns), cioe' luce sul fotocatodo. Non
   toccano la selezione con entrambi i PMT; contano per il rate di trigger;
+- **per PMT singolo, dal piedistallo in su** (`sovrapposizione_pmt_singolo.py`,
+  0011 + 0013, ogni PMT come una voce): sopra 3 PE dati/MC 1.2-2, fra 0.45 e
+  2 PE 0.5-1; le due discrepanze grosse sono il **picco a zero (dati/MC ~5)**
+  e il **massimo a 2-3 PE (~4)**, cioe' la stessa popolazione vista dai due
+  lati: un PMT con 2-3 PE e l'altro buio. La luce che viaggia nelle fibre si
+  divide fra le due estremita' (e' quello che fa il MC); questi eventi no.
+  Trigger della 0013: 4.22 Hz nei dati, 1.20 nel MC;
 - **il fotoelettrone singolo** dai pochi impulsi di buio veri della run a
   trigger software 0036 vale ~1700-2000 ADC·ns, come la scala ricavata dai
   muoni (1726; 1696 con la scintillazione delle fibre, che a un muone

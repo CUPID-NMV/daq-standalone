@@ -3,7 +3,7 @@ gamma di Hall A (Compton + scintillazione delle fibre) e muoni di Hall A.
 
     python3 analisi/20261029_normalizzazione_gamma/sovrapposizione_0011_0013.py OUT.png [GAMMA.npz:RESA]
             [--muoni MUONI.npz:RESA] [--v812 CARICHE.npz --evidenzia N ...] [--componenti] [--piedistallo]
-            [--un-pmt-scan SCAN.npz] [--solo-dati OUT_DATI.png]
+            [--un-pmt-scan SCAN.npz] [--solo-dati OUT_DATI.png] [--pmt-singoli OUT_PMT.png]
 
 GAMMA.npz: i gamma digitalizzati da usare (di serie mc_digit_gamma_righe_s1750.npz:1750);
 RESA e' la resa di scintillazione delle fibre di quella produzione, per la legenda.
@@ -30,6 +30,9 @@ sommare. --evidenzia: indici di eventi di quella run da segnare.
 da mostrare prima della sovrapposizione: niente MC ne' modello, e niente pannello del
 rapporto, che senza MC non ha senso. I pannelli che restano stanno sugli stessi pixel
 della sovrapposizione: alternando le due immagini i punti non si muovono.
+--pmt-singoli OUT_PMT.png (con --piedistallo): come --solo-dati, ma solo la carica di
+ciascun PMT in tutti gli eventi; via lo spettro con entrambi i PMT sopra 3 sigma e cio'
+che riguarda quella selezione (classe C, riquadro del rumore, pannello del V812).
 
 Le due run hanno soglie diverse (offset 200 e 100): sotto ~10000 ADC*ns la
 somma mescola due trigger. Il MC si somma allo stesso modo: per ogni run il
@@ -64,7 +67,10 @@ ap.add_argument("--componenti", action="store_true")
 ap.add_argument("--piedistallo", action="store_true")
 ap.add_argument("--un-pmt-scan", default=None)
 ap.add_argument("--solo-dati", default=None, metavar="OUT_DATI.png")
+ap.add_argument("--pmt-singoli", default=None, metavar="OUT_PMT.png")
 arg = ap.parse_args()
+if arg.pmt_singoli and not arg.piedistallo:
+    ap.error("--pmt-singoli vuole --piedistallo: senza, la carica dei singoli PMT non e' disegnata")
 OUT = arg.out
 GAMMA_F, RESA = (arg.gamma.split(":") + ["?"])[:2]
 MU_F, RESA_MU = (arg.muoni.split(":") + ["?"])[:2]
@@ -184,13 +190,12 @@ a.stairs(hm, b, color="#2a6fdb", lw=1.2, ls="--",
          label="  Hall A μ, fibre scintillation %s photons/MeV (%d k μ at %.4f Hz on 6.5 × 6.5 m = %.0f days): %.5f Hz"
                % (RESA_MU, mc["mu"]["ngen"] // 1000, mc["mu"]["rate"], mc["mu"]["ngen"] / mc["mu"]["rate"] / 86400,
                   cm["both > 3σ"]))
-a.errorbar(bc[ok], hd[ok] / TT / dens[ok], yerr=np.sqrt(hd[ok]) / TT / dens[ok], xerr=[(bc - b[:-1])[ok], (b[1:] - bc)[ok]],
-           fmt="o", ms=4, color="k", lw=0.8, zorder=5,
-           label="DATA LNGS 0011 + 0013 (%.1f h at offset 200 + %.0f min at offset 100): %.3f Hz"
-                 % (T["0011"] / 3600, T["0013"] / 60, cd["both > 3σ"]))
-for v in (7000, 10000):
-    a.axvline(v, color="#888", ls=":", lw=1)
-a.text(10400, 2e-8 if arg.piedistallo else 1.3e-7, "class C →", fontsize=9, color="#555")
+sel_dati = a.errorbar(bc[ok], hd[ok] / TT / dens[ok], yerr=np.sqrt(hd[ok]) / TT / dens[ok],
+                      xerr=[(bc - b[:-1])[ok], (b[1:] - bc)[ok]], fmt="o", ms=4, color="k", lw=0.8, zorder=5,
+                      label="DATA LNGS 0011 + 0013 (%.1f h at offset 200 + %.0f min at offset 100): %.3f Hz"
+                            % (T["0011"] / 3600, T["0013"] / 60, cd["both > 3σ"]))
+classe_c = [a.axvline(v, color="#888", ls=":", lw=1) for v in (7000, 10000)]
+classe_c.append(a.text(10400, 2e-8 if arg.piedistallo else 1.3e-7, "class C →", fontsize=9, color="#555"))
 if arg.piedistallo:
     # la carica di ciascun PMT in TUTTI gli eventi, senza selezione: il picco a zero sono gli
     # eventi in cui quel PMT non ha luce, cioe' il rumore elettronico nel cancello di 260 ns
@@ -315,8 +320,8 @@ if arg.piedistallo:
              "  electronic noise above 3σ (from the negative tail): %.1e Hz = %.2f%% of %.3f Hz\n"
              "  PMT dark counts (%.0f / %.0f Hz above 3σ, %s): %.1e Hz = %.4f%%"
              % (nrum / TT, 100 * nrum / TT / sel, sel, r_dc[20], r_dc[21], fonte_dc, ndc / TT, 100 * ndc / TT / sel))
-    a.text(0.012, 0.025, testo, transform=a.transAxes, fontsize=8.5, va="bottom", ha="left", family="monospace",
-           bbox=dict(facecolor="white", edgecolor="#bbb", alpha=0.92))
+    riquadro = a.text(0.012, 0.025, testo, transform=a.transAxes, fontsize=8.5, va="bottom", ha="left",
+                      family="monospace", bbox=dict(facecolor="white", edgecolor="#bbb", alpha=0.92))
     print("rumore: %.0f eventi su %.0f con un PMT solo -> %.2e Hz (%.2f%%); buio %.0f/%.0f Hz -> %.2e Hz (%.4f%%)"
           % (nrum, nuno, nrum / TT, 100 * nrum / TT / sel, r_dc[20], r_dc[21], ndc / TT, 100 * ndc / TT / sel))
     a.set_xscale("symlog", linthresh=2000, linscale=0.6)
@@ -435,8 +440,8 @@ fig.suptitle("LNGS background (runs 0011 + 0013) vs Monte Carlo: Hall A γ (J·A
              "+ Hall A μ; scintillation of the fibre cores %s photons/MeV" % RESA, fontsize=11)
 fig.tight_layout()
 # La regione da salvare si calcola qui come farebbe savefig -- la figura intera, o ritagliata
-# se nel matplotlibrc c'e' savefig.bbox = tight, come sul Mac -- perche' la versione coi soli
-# dati deve usare la stessa: il ritaglio dipende anche dai titoli, che nelle due cambiano.
+# se nel matplotlibrc c'e' savefig.bbox = tight, come sul Mac -- perche' le versioni coi soli
+# dati devono usare la stessa: il ritaglio dipende anche dai titoli, che cambiano.
 W, H = fig.get_size_inches()
 if plt.rcParams["savefig.bbox"] == "tight":
     fig.canvas.draw()
@@ -446,13 +451,27 @@ else:
 fig.savefig(OUT, dpi=100, bbox_inches=reg)
 print("scritto", OUT)
 
-if arg.solo_dati:
+
+def salva_sotto(asse, nome, xlabel):
+    """Salva la regione della sovrapposizione accorciata dal basso fin sotto `asse`, che prende
+    l'asse x. Il taglio e' un numero intero di pixel: i pannelli che restano cadono
+    esattamente sugli stessi pixel della sovrapposizione, e alternando le immagini i punti
+    non si muovono."""
+    salita = round((asse.get_position().y0 - ax[-1].get_position().y0) * H * 100) / 100
+    asse.xaxis.set_tick_params(which="both", labelbottom=True)
+    asse.set_xlabel(xlabel)
+    fig.savefig(nome, dpi=100, bbox_inches=Bbox.from_extents(reg.x0, reg.y0 + salita, reg.x1, reg.y1))
+    print("scritto", nome)
+
+
+if arg.solo_dati or arg.pmt_singoli:
     # Nel pannello principale i dati sono errorbar: tutto quello disegnato con stairs e' MC o
-    # modello, e si toglie. Il rapporto dati/MC si nasconde e l'asse x passa al pannello sopra.
-    # Si salva la stessa regione accorciata dal basso di un numero intero di pixel, cosi' i
-    # pannelli che restano cadono esattamente sugli stessi pixel della sovrapposizione.
+    # modello, e si toglie. Il rapporto dati/MC senza MC non ha senso, e si nasconde.
     for p in [p for p in ax[0].patches if isinstance(p, StepPatch)]:
         p.remove()
+    xlabel = ax[-1].get_xlabel()
+    ax[-1].set_visible(False)
+if arg.solo_dati:
     ax[0].legend(fontsize=9, frameon=False, loc="upper right")
     ax[0].set_title("both PMTs > 3σ, charge of the brighter PMT;  self-trigger edges %.0f/%.0f (0011) and %.0f/%.0f "
                     "(0013) amplitude counts;  K = %.0f ADC·ns/PE"
@@ -460,9 +479,22 @@ if arg.solo_dati:
                     fontsize=9.5, loc="left")
     fig.suptitle("LNGS background, runs 0011 + 0013: charge measured in the two WC PMTs "
                  "(data only, same axes as the comparison with the Monte Carlo)", fontsize=11)
-    salita = round((ax[-2].get_position().y0 - ax[-1].get_position().y0) * H * 100) / 100
-    ax[-1].set_visible(False)
-    ax[-2].xaxis.set_tick_params(which="both", labelbottom=True)
-    ax[-2].set_xlabel(ax[-1].get_xlabel())
-    fig.savefig(arg.solo_dati, dpi=100, bbox_inches=Bbox.from_extents(reg.x0, reg.y0 + salita, reg.x1, reg.y1))
-    print("scritto", arg.solo_dati)
+    salva_sotto(ax[-2], arg.solo_dati, xlabel)
+if arg.pmt_singoli:
+    # Solo la carica di ciascun PMT: via lo spettro con entrambi i PMT sopra 3 sigma e quello
+    # che riguarda quella selezione -- i confini della classe C, il riquadro del rumore nella
+    # selezione e il pannello del V812, che chiede anche lui entrambi i PMT.
+    sel_dati.remove()
+    for x in classe_c + [riquadro]:
+        x.remove()
+    for a_ in ax[1:-1]:
+        a_.set_visible(False)
+    ax[0].legend(fontsize=9, frameon=False, loc="upper right")
+    ax[0].set_title("charge of each PMT in all triggered events, no selection;  0011 (%.1f h at offset 200) + 0013 "
+                    "(%.0f min at offset 100), edges %.0f/%.0f and %.0f/%.0f amplitude counts;  K = %.0f ADC·ns/PE"
+                    % tuple([T["0011"] / 3600, T["0013"] / 60] + SOGLIE[RUN["0011"]]["soglia"]
+                            + SOGLIE[RUN["0013"]]["soglia"] + [K]), fontsize=9.5, loc="left")
+    fig.suptitle("LNGS background, runs 0011 + 0013: charge of each WC PMT in all triggered events "
+                 "(data only, same axes as the comparison with the Monte Carlo)", fontsize=11)
+    salva_sotto(ax[0], arg.pmt_singoli, "charge of each PMT [ADC·ns]  (gate 240-500 ns, pedestal 0-150 ns; "
+                                        "1 PE = %.0f ADC·ns)" % K)

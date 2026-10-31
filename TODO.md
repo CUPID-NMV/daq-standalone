@@ -40,10 +40,6 @@ installata; il funzionamento sta in CLAUDE.md. Restano:
   deve contare anche i `.log` nel numero di run, se no i nomi si ripetono;
 - **gli scan sul cloud**: serve che `cp_data` accetti la cartella di
   destinazione (chiedere a chi lo gestisce), poi si tolgono le esclusioni;
-- **le run mandate a mano dall'utente** prima dell'attivazione: se c'erano
-  anche i `.log` (servono all'analisi) e `data/LNGS/scan`, dove tre nomi sono
-  doppi (`test__54-0V_000[0-2]_750Ms_50PT.h5.gz`, anche in `data/LNGS`) e sul
-  cloud ne resterebbe uno solo. Chiesto il 2026-10-31;
 - **misurare** se compressione e trasferimento (stessa scheda di rete del
   bridge VME) abbassano il rate massimo della DAQ, vicino alla saturazione.
 

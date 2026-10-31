@@ -486,8 +486,9 @@ Da sapere:
 - **Le run di prima dell'attivazione** (2026-10-31 17:05, prima riga del
   registro) non le tocca da solo: `--aggiungi FILE` le manda sul cloud,
   `--comprimi FILE` le comprime. Quelle di `data/LNGS` le aveva gia' mandate
-  l'utente a mano con `cp_data`: il registro non lo sa, e un `--aggiungi` le
-  rimanderebbe identiche.
+  l'utente a mano con `cp_data`, dati e `.log`, non gli scan: il registro non
+  lo sa, e un `--aggiungi` le rimanderebbe identiche. Sul cloud i tre nomi
+  doppi `test__54-0V_000[0-2]_750Ms_50PT` sono quindi quelli di `data/LNGS`.
 - **Sul cloud un file e' il suo nome, senza cartella**, e S3 sovrascrive
   senza avvisare. Sul disco 43 nomi di run compaiono in piu' cartelle (3
   dentro `data/LNGS`, fra `LNGS/` e `LNGS/scan/`). Per questo le cartelle

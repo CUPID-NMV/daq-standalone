@@ -3,7 +3,7 @@ gamma di Hall A (Compton + scintillazione delle fibre) e muoni di Hall A.
 
     python3 analisi/20261029_normalizzazione_gamma/sovrapposizione_0011_0013.py OUT.png [GAMMA.npz:RESA]
             [--muoni MUONI.npz:RESA] [--v812 CARICHE.npz --evidenzia N ...] [--componenti] [--piedistallo]
-            [--un-pmt-scan SCAN.npz]
+            [--un-pmt-scan SCAN.npz] [--solo-dati OUT_DATI.png]
 
 GAMMA.npz: i gamma digitalizzati da usare (di serie mc_digit_gamma_righe_s1750.npz:1750);
 RESA e' la resa di scintillazione delle fibre di quella produzione, per la legenda.
@@ -26,6 +26,10 @@ V812, per esempio la run da 24 ore coi pannelli (carica_0000_54V_24h.npz): i
 suoi eventi con entrambi i PMT sopra 3 sigma vanno in un pannello a parte,
 in conteggi, perche' il trigger e' un altro e non se ne fa un rate da
 sommare. --evidenzia: indici di eventi di quella run da segnare.
+--solo-dati OUT_DATI.png: scrive anche lo stesso grafico coi soli dati, sulla stessa scala,
+da mostrare prima della sovrapposizione: niente MC ne' modello, e niente pannello del
+rapporto, che senza MC non ha senso. I pannelli che restano stanno sugli stessi pixel
+della sovrapposizione: alternando le due immagini i punti non si muovono.
 
 Le due run hanno soglie diverse (offset 200 e 100): sotto ~10000 ADC*ns la
 somma mescola due trigger. Il MC si somma allo stesso modo: per ogni run il
@@ -47,6 +51,8 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.patches import StepPatch
+from matplotlib.transforms import Bbox
 
 ap = argparse.ArgumentParser()
 ap.add_argument("out")
@@ -57,6 +63,7 @@ ap.add_argument("--evidenzia", type=int, nargs="*", default=[])
 ap.add_argument("--componenti", action="store_true")
 ap.add_argument("--piedistallo", action="store_true")
 ap.add_argument("--un-pmt-scan", default=None)
+ap.add_argument("--solo-dati", default=None, metavar="OUT_DATI.png")
 arg = ap.parse_args()
 OUT = arg.out
 GAMMA_F, RESA = (arg.gamma.split(":") + ["?"])[:2]
@@ -427,5 +434,35 @@ a.grid(alpha=0.25, which="both")
 fig.suptitle("LNGS background (runs 0011 + 0013) vs Monte Carlo: Hall A γ (J·A normalisation, φ = 1.12 cm$^{-2}$s$^{-1}$) "
              "+ Hall A μ; scintillation of the fibre cores %s photons/MeV" % RESA, fontsize=11)
 fig.tight_layout()
-fig.savefig(OUT, dpi=100)
+# La regione da salvare si calcola qui come farebbe savefig -- la figura intera, o ritagliata
+# se nel matplotlibrc c'e' savefig.bbox = tight, come sul Mac -- perche' la versione coi soli
+# dati deve usare la stessa: il ritaglio dipende anche dai titoli, che nelle due cambiano.
+W, H = fig.get_size_inches()
+if plt.rcParams["savefig.bbox"] == "tight":
+    fig.canvas.draw()
+    reg = fig.get_tightbbox(fig.canvas.get_renderer()).padded(plt.rcParams["savefig.pad_inches"])
+else:
+    reg = Bbox.from_extents(0, 0, W, H)
+fig.savefig(OUT, dpi=100, bbox_inches=reg)
 print("scritto", OUT)
+
+if arg.solo_dati:
+    # Nel pannello principale i dati sono errorbar: tutto quello disegnato con stairs e' MC o
+    # modello, e si toglie. Il rapporto dati/MC si nasconde e l'asse x passa al pannello sopra.
+    # Si salva la stessa regione accorciata dal basso di un numero intero di pixel, cosi' i
+    # pannelli che restano cadono esattamente sugli stessi pixel della sovrapposizione.
+    for p in [p for p in ax[0].patches if isinstance(p, StepPatch)]:
+        p.remove()
+    ax[0].legend(fontsize=9, frameon=False, loc="upper right")
+    ax[0].set_title("both PMTs > 3σ, charge of the brighter PMT;  self-trigger edges %.0f/%.0f (0011) and %.0f/%.0f "
+                    "(0013) amplitude counts;  K = %.0f ADC·ns/PE"
+                    % tuple(SOGLIE[RUN["0011"]]["soglia"] + SOGLIE[RUN["0013"]]["soglia"] + [K]),
+                    fontsize=9.5, loc="left")
+    fig.suptitle("LNGS background, runs 0011 + 0013: charge measured in the two WC PMTs "
+                 "(data only, same axes as the comparison with the Monte Carlo)", fontsize=11)
+    salita = round((ax[-2].get_position().y0 - ax[-1].get_position().y0) * H * 100) / 100
+    ax[-1].set_visible(False)
+    ax[-2].xaxis.set_tick_params(which="both", labelbottom=True)
+    ax[-2].set_xlabel(ax[-1].get_xlabel())
+    fig.savefig(arg.solo_dati, dpi=100, bbox_inches=Bbox.from_extents(reg.x0, reg.y0 + salita, reg.x1, reg.y1))
+    print("scritto", arg.solo_dati)

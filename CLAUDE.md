@@ -485,8 +485,9 @@ Da sapere:
   disco, tutti a 5, e sui chiusi bene, a 0.
 - **Le run di prima dell'attivazione** (2026-10-31 17:05, prima riga del
   registro) non le tocca da solo: `--aggiungi FILE` le manda sul cloud,
-  `--comprimi FILE` le comprime. Arretrato: ~110 run in `data/LNGS` (24 GB),
-  da decidere con l'utente.
+  `--comprimi FILE` le comprime. Quelle di `data/LNGS` le aveva gia' mandate
+  l'utente a mano con `cp_data`: il registro non lo sa, e un `--aggiungi` le
+  rimanderebbe identiche.
 - **Sul cloud un file e' il suo nome, senza cartella**, e S3 sovrascrive
   senza avvisare. Sul disco 43 nomi di run compaiono in piu' cartelle (3
   dentro `data/LNGS`, fra `LNGS/` e `LNGS/scan/`). Per questo le cartelle
@@ -498,9 +499,10 @@ Da sapere:
   numero di run dai file di DATI presenti, non dai `.log`. Cancellandoli i
   numeri ripartono, e una run nuova prende il nome di una vecchia, sul disco
   e sul cloud. Va prima fatto contare anche i `.log`.
-- **Le credenziali IAM sono in chiaro in `/usr/bin/cp_data`, leggibile da
-  ogni utente del PC** (permessi 755): segnalato all'utente il 2026-10-31.
-  Non copiarle in nessun file, e non stamparle.
+- **Le credenziali IAM sono in chiaro in `/usr/bin/cp_data`.** Restringerne
+  i permessi non serve: sul PC l'unico utente e' `daq`, che il comando lo
+  deve usare (l'avevo suggerito il 2026-10-31, a torto). Non copiarle in
+  nessun file e non stamparle: valgono da qualunque macchina.
 - Una sola scheda di rete (`eno1`) porta la lettura dal bridge VME e il
   trasferimento, che va a ~60 MB/s per qualche secondo a run: vicino alla
   saturazione della DAQ va misurato se disturba.

@@ -147,6 +147,7 @@ Digitizer::Digitizer()
     // e un avviso "using the built-in default" a ogni run per una funzione
     // che quasi nessuno usa insegna solo a ignorare gli avvisi.
     fSaveData = fConfig.GetTbl()["digitizer"]["SaveData"].value_or(true);
+    fCompressAtEnd = fConfig.GetTbl()["digitizer"]["CompressAtEnd"].value_or(true);
     fSoftwareTrigger = fConfig.GetTbl()["digitizer"]["SoftwareTrigger"].value_or(false);
     fSWTriggerRateHz = fConfig.GetTbl()["digitizer"]["SoftwareTriggerRate"].value_or(100.0);
     if (fSoftwareTrigger && !(fSWTriggerRateHz > 0.0 && fSWTriggerRateHz <= 5000.0)) {
@@ -2758,6 +2759,16 @@ void Digitizer::CloseOutputFile() {
                 std::filesystem::remove(fMidasPath);
             Log::OutSummary("→ Run di prova (SaveData = false): file dei dati cancellati, "
                             "resta il .log.");
+            return;
+        }
+
+        if (!fCompressAtEnd) {
+            // Il file resta .h5 e la DAQ esce subito. archivia.py lo riconosce
+            // come chiuso bene dai flag del superblocco, che la close() qui
+            // sopra azzera: se restano alzati la run e' morta, e lui non lo
+            // tocca.
+            Log::OutSummary("→ File HDF5 chiuso, non compresso (CompressAtEnd = false): "
+                            "lo comprime e lo manda sul cloud tools/archivia.py.");
             return;
         }
 

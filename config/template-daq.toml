@@ -284,6 +284,13 @@ SaveRaw = false
 # le TEST_.
 SaveData        = true
 
+# true = la DAQ comprime il file a fine run, prima di uscire: ~55 s per 1 GB
+# (run 0041-0054), e per quel tempo la coda resta ferma. false = la DAQ chiude
+# il file ed esce; lo comprime, e lo manda sul cloud se [archive] CloudUpload,
+# tools/archivia.py, che il controllore lancia a ogni fine run. Senza il
+# controllore acceso i file restano .h5 finche' non torna.
+CompressAtEnd   = true
+
 # "HDF5" oppure "both": con "both" la DAQ scrive ANCHE un .mid.gz nel formato
 # MIDAS della DAQ di CYGNO (blocchi DGH0/DIG0, sempre 32 canali), leggibile da
 # wclib.py e dagli strumenti del test beam, con lo stesso nome dell'HDF5.
@@ -421,3 +428,17 @@ IPAddress = "192.168.99.105"
 #   0 = niente     1 = solo errori     2 = errori e avvisi
 #   3 = riepilogo (consigliato)        4 = tutto, comprese le righe Debug
 verbosity = 3
+
+[archive]
+# Compressione e trasferimento delle run finite, fuori dalla DAQ: li fa
+# tools/archivia.py (con CompressAtEnd = false), lanciato dal controllore a
+# ogni fine run, all'avvio e ogni dieci minuti. Registro: data/archivio.jsonl;
+# "python3 tools/archivia.py --stato" dice cosa e' fatto e cosa aspetta.
+#
+# CloudUpload = true: ogni run compressa va sul cloud, .h5.gz e poi .log, con
+# CloudCommand (cp_data: bucket cygno-data al CNAF, cartella NMV/WC/LNGS, col
+# solo nome del file). Restano fuori le run di prova TEST_ e le cartelle che
+# si chiamano scan: con un nome solo per chiave, i nomi che si ripetono fra
+# cartelle si sovrascriverebbero.
+CloudUpload  = false
+CloudCommand = "/usr/bin/cp_data"

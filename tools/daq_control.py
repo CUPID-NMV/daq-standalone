@@ -28,7 +28,7 @@ Due principi, da non perdere strada facendo:
     niente e non puo' divergere dalla realta'.
 
   - L'arresto e' un segnale, non un'uccisione. La DAQ gestisce SIGTERM e
-    chiude la run per la porta buona: file compresso e board resettata. Un
+    chiude la run per la porta buona: file chiuso bene e board resettata. Un
     pulsante Stop che facesse kill -9 rimetterebbe in piedi tutti i problemi
     che quel meccanismo e' servito a togliere.
 """
@@ -99,6 +99,13 @@ ELOG_CRED = os.environ.get("ELOG_CRED",
 ELOG_PYTHON = os.environ.get("ELOG_PYTHON", os.path.expanduser("~/.venv-elog/bin/python"))
 ELOG_ULTIME = int(os.environ.get("ELOG_ULTIME", "20"))
 ELOG_LOG = "/tmp/elog_push.log"
+
+# Compressione e cloud delle run finite, fuori dalla DAQ (CompressAtEnd =
+# false): tools/archivia.py, lanciato a ogni fine run, all'avvio e ogni dieci
+# minuti. I ritentativi li decide lui; qui gli si da' solo l'occasione.
+ARCHIVIA = os.path.join(ROOT, "tools", "archivia.py")
+ARCHIVIO_LOG = os.path.join(ROOT, "data", "archivio.log")
+ARCHIVIO_OGNI_S = 600
 
 SCAN = {
     "v1742": {
@@ -1246,7 +1253,7 @@ class Alimentatore:
 class Controllo:
     def __init__(self, toml, log_path, porta_monitor=PORTA_MONITOR,
                  args_monitor=None, psu_host=None, psu_ampli_host=None,
-                 notifiche_cfg=None, porta=8766):
+                 notifiche_cfg=None, porta=8766, archivio=True):
         self.toml = os.path.abspath(toml)
         self.log_path = log_path
         # Rientrante: avvia() tiene il lock e dentro ci sta una scrittura del
@@ -1267,6 +1274,8 @@ class Controllo:
         self.notifiche = notifiche.Notifiche(notifiche_cfg, self._cartelle_dati, porta,
                                              log=lambda t: print(t, flush=True))
         self._daq_prima = trova_daq() is not None   # per vedere la FINE di una run
+        self.archivio = archivio
+        self._archivio_t = 0.0    # ultimo lancio di archivia.py: 0 = al primo giro
         # Un filo che guarda la fine delle run per conto suo. Non basta
         # accorgersene dentro stato(): quello gira solo quando qualcuno ha la
         # pagina aperta, e allora l'e-log si aggiornerebbe solo se c'e'
@@ -1533,6 +1542,9 @@ class Controllo:
                             self._fine_run(info)
                         except Exception as e:
                             print("notifiche: fine run: %s" % e, flush=True)
+                    self._archivia(os.path.dirname(info["log"]) if info and info["log"] else None)
+                elif time.time() - self._archivio_t > ARCHIVIO_OGNI_S:
+                    self._archivia()
                 self._daq_prima = vivo
             except Exception:
                 pass            # un errore qui non deve fermare il controllore
@@ -1797,6 +1809,31 @@ class Controllo:
                                                start_new_session=True))
         except OSError:
             pass
+
+    def _archivia(self, cartella=None):
+        """Lancia tools/archivia.py in background: comprime e manda sul cloud.
+
+        Si lancia anche se ce n'e' gia' uno al lavoro: compressione e
+        trasferimento hanno un lucchetto ciascuno, e un trasferimento lento
+        non deve far aspettare la compressione della run appena finita. Chi
+        trova tutto occupato esce subito. In un'altra sessione, come le run:
+        un riavvio del controllore non lo interrompe a meta'.
+        """
+        if not self.archivio:
+            return
+        self._archivio_t = time.time()
+        comando = [sys.executable, ARCHIVIA, "--toml", self.toml] + ([cartella] if cartella else [])
+        # Mai un'eccezione da qui: in _guarda_fine_run salterebbe
+        # l'aggiornamento di _daq_prima, e la fine run si ripeterebbe ogni due
+        # secondi, e-log compreso.
+        try:
+            self._raccogli_figli()
+            with open(ARCHIVIO_LOG, "a") as log:
+                self.figli.append(subprocess.Popen(comando, stdin=subprocess.DEVNULL, stdout=log,
+                                                   stderr=subprocess.STDOUT, cwd=ROOT,
+                                                   start_new_session=True))
+        except Exception as e:
+            print("archivio: %s" % e, flush=True)
 
     def _raccogli_figli(self):
         """Raccoglie le run gia' finite, cosi' non restano zombie.
@@ -4401,6 +4438,9 @@ def main():
     ap.add_argument("--psu-log", default=PSU_LOG,
                     help="CSV delle letture: una prova su un'altra porta deve "
                          "scriverne uno suo, non mescolarsi a quello vero")
+    ap.add_argument("--senza-archivio", action="store_true",
+                    help="non lanciare tools/archivia.py: una prova su un'altra porta "
+                         "non deve comprimere ne' mandare sul cloud i dati veri")
     args = ap.parse_args()
 
     args_mon = shlex.split(args.monitor_args)
@@ -4410,7 +4450,8 @@ def main():
         args_mon += ["-p", str(args.monitor_port)]
     PSU_LOG = args.psu_log
     ctrl = Controllo(args.config, args.log, args.monitor_port, args_mon,
-                     args.psu_host, args.psu_ampli_host, args.notifiche, args.port)
+                     args.psu_host, args.psu_ampli_host, args.notifiche, args.port,
+                     archivio=not args.senza_archivio)
     stampa = lambda s: print(s, flush=True)
     stampa("Configurazione : %s" % ctrl.toml)
     stampa("Binario        : %s%s" % (BINARIO, "" if os.path.exists(BINARIO) else "   NON ESISTE"))
@@ -4421,6 +4462,9 @@ def main():
                                     if args.psu_ampli_host else "nessuno"))
     stampa("Notifiche      : %s (%d destinatari)" % (args.notifiche,
                                                       len(ctrl.notifiche.cfg["destinatari"])))
+    stampa("Archivio       : %s" % ("tools/archivia.py a fine run e ogni %d min, uscita in %s"
+                                    % (ARCHIVIO_OGNI_S // 60, ARCHIVIO_LOG)
+                                    if ctrl.archivio else "spento (--senza-archivio)"))
     if args.token:
         stampa("Token          : attivo")
     pid = trova_daq()

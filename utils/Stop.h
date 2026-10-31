@@ -11,7 +11,7 @@
 //
 //  Qui il segnale non fa altro che alzare un flag: i cicli di acquisizione lo
 //  guardano a ogni giro ed escono dalla porta normale, quella che chiude il
-//  file, lo comprime e resetta il digitizer.
+//  file (e lo comprime, con CompressAtEnd = true) e resetta il digitizer.
 //
 //  Il secondo segnale invece termina subito. Serve una via d'uscita per quando
 //  il ciclo e' bloccato sul link: e' gia' successo che ReadData restasse a

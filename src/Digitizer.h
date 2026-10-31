@@ -108,6 +108,12 @@ private:
     // la run (il monitor lo legge in diretta), ma si chiama TEST_ e a fine
     // run si cancella invece di comprimerlo. Resta solo il .log.
     bool   fSaveData = true;
+    // Compressione a fine run. true: gzip qui, prima di uscire -- ~55 s su una
+    // run da 1 GB (0041-0054), e per quel tempo la coda resta ferma. false: il
+    // file si chiude e basta, e lo comprime (e lo manda sul cloud)
+    // tools/archivia.py, lanciato dal controllore mentre la run dopo e' gia'
+    // partita.
+    bool   fCompressAtEnd = true;
     bool   fSoftwareTrigger = false;
     double fSWTriggerRateHz = 100.0;
 

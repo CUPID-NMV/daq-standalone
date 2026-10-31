@@ -27,6 +27,25 @@ Da decidere con l'utente, prima di toccare qualcosa:
 
 Finche' non e' fatto vale la procedura di CLAUDE.md ("Due macchine").
 
+## Archivio e cloud: cosa resta dopo il 2026-10-31
+
+La fase 1 (`tools/archivia.py`, `CompressAtEnd`, aggancio nel controllore) e'
+installata; il funzionamento sta in CLAUDE.md. Restano:
+- **riquadro nella pagina di controllo** con lo stato dei file (in attesa,
+  compresso, sul cloud, fallito con l'errore): dal Gran Sasso la posta non
+  parte, ed e' l'unico posto dove ci si accorge che i trasferimenti si sono
+  fermati. Prima un PNG da far vedere all'utente;
+- **pulizia del disco** dei file gia' sul cloud: 439 GB liberi, ~18 GB al
+  giorno al ritmo delle run 0041-0054, cioe' circa tre settimane. Prima il C++
+  deve contare anche i `.log` nel numero di run, se no i nomi si ripetono;
+- **gli scan sul cloud**: serve che `cp_data` accetti la cartella di
+  destinazione (chiedere a chi lo gestisce), poi si tolgono le esclusioni;
+- **l'arretrato** (~110 run LNGS, 24 GB): lo decide l'utente; `--aggiungi`;
+- **permessi di `/usr/bin/cp_data`**, oggi leggibile da tutti con le
+  credenziali dentro: lo decide l'utente, serve root;
+- **misurare** se compressione e trasferimento (stessa scheda di rete del
+  bridge VME) abbassano il rate massimo della DAQ, vicino alla saturazione.
+
 ## Calibrazione: il punto a 20 ns — da fare lunedi 2026-10-12
 
 Nota del 2026-10-14: la premessa e' in dubbio. Sulle run al buio del

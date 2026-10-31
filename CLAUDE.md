@@ -49,7 +49,8 @@ ad avere hardware e librerie CAEN.
   confrontare gli md5, committare dal Mac, poi sul PC metterli da parte e
   fare pull. Fatto cosi' il 2026-10-29.
 - **L'analisi si spostera' sul Mac**: i dati andranno su cloud (deciso il
-  2026-10-29). Gli script di analisi non devono quindi dare per scontati i
+  2026-10-29; dal 2026-10-31 ce li manda `tools/archivia.py`, vedi
+  "Compressione e cloud a fine run"). Gli script di analisi non devono quindi dare per scontati i
   percorsi del PC: quelli in `analisi/` trovano da soli la radice del
   repository e prendono i file di dati come argomento. Sul Mac servono solo
   `numpy`, `h5py`, `matplotlib`. I JSON delle misure registrano i file col
@@ -449,6 +450,61 @@ prima a fine scan.
 
 ---
 
+## Compressione e cloud a fine run (dal 2026-10-31)
+
+Fino al 2026-10-31 la DAQ comprimeva il file a fine run con `gzip`, prima di
+uscire: **~55 s per una run da 1 GB** (0041-0054, da 1014 a 411 MB) a coda
+ferma, cioe' ~3% di tempo morto con le run da 33 minuti. Ora, con
+**`CompressAtEnd = false`** in `[digitizer]` (messo in `run-local.toml` il
+2026-10-31, backup `.bak-20261031-170436-archivio`), la DAQ chiude il file ed
+esce, e il resto lo fa **`tools/archivia.py`**, lanciato in background dal
+controllore a ogni fine run, al suo avvio e ogni 10 minuti:
+
+- aspetta 2 minuti (chi legge il file a fine run lo trova intero), comprime
+  con `pigz` -- stesso formato `.gz`: daqio e notebook non cambiano --,
+  verifica, rinomina e cancella il `.h5`. Il `.gz` tiene la data del `.h5`;
+- con `[archive] CloudUpload = true` manda il `.h5.gz` e poi il `.log` con
+  `/usr/bin/cp_data`: bucket `cygno-data` al CNAF, chiave
+  `NMV/WC/LNGS/<nome del file>`. **Misurato: 411 MB in 7 s, ~60 MB/s** (la
+  0054, prima run mandata). Se fallisce riprova dopo 5, 15, 45 minuti...;
+- registro in `data/archivio.jsonl`, uscita in `data/archivio.log`.
+  **`python3 tools/archivia.py --stato`** dice cosa e' fatto, cosa aspetta e
+  perche'.
+
+Da sapere:
+
+- **Senza controllore acceso i file restano `.h5`**, 2.5 volte piu' grandi,
+  finche' non torna: al primo giro li prende. Un **controllore di prova** va
+  lanciato con `--senza-archivio`, se no comprime e manda sul cloud i dati
+  veri.
+- **Un file chiuso male non si comprime.** Lo dice il flag di consistenza
+  nel superblocco dell'HDF5 (byte 11): la chiusura regolare lo azzera, una
+  run morta (timeout di uno scan, link perso, kill) lo lascia a 5. Quei file
+  si rileggono solo in SWMR, e daqio un `.gz` in SWMR non lo apre: la DAQ non
+  li comprimeva nemmeno prima. Verificato sui quattro `.h5` rimasti sul
+  disco, tutti a 5, e sui chiusi bene, a 0.
+- **Le run di prima dell'attivazione** (2026-10-31 17:05, prima riga del
+  registro) non le tocca da solo: `--aggiungi FILE` le manda sul cloud,
+  `--comprimi FILE` le comprime. Arretrato: ~110 run in `data/LNGS` (24 GB),
+  da decidere con l'utente.
+- **Sul cloud un file e' il suo nome, senza cartella**, e S3 sovrascrive
+  senza avvisare. Sul disco 43 nomi di run compaiono in piu' cartelle (3
+  dentro `data/LNGS`, fra `LNGS/` e `LNGS/scan/`). Per questo le cartelle
+  `scan` restano fuori, e un nome gia' mandato da un altro file si rifiuta e
+  si segnala (`conflitto`). Per mandare gli scan serve che `cp_data` accetti
+  la cartella di destinazione: non e' nostro
+  (`/home/daq/DAQ/online/source/cp_data.py`).
+- **Prima di cancellare dati locali gia' sul cloud**: il C++ calcola il
+  numero di run dai file di DATI presenti, non dai `.log`. Cancellandoli i
+  numeri ripartono, e una run nuova prende il nome di una vecchia, sul disco
+  e sul cloud. Va prima fatto contare anche i `.log`.
+- **Le credenziali IAM sono in chiaro in `/usr/bin/cp_data`, leggibile da
+  ogni utente del PC** (permessi 755): segnalato all'utente il 2026-10-31.
+  Non copiarle in nessun file, e non stamparle.
+- Una sola scheda di rete (`eno1`) porta la lettura dal bridge VME e il
+  trasferimento, che va a ~60 MB/s per qualche secondo a run: vicino alla
+  saturazione della DAQ va misurato se disturba.
+
 ## Le mail della DAQ
 
 Dal 2026-10-14 il controllore manda tre tipi di mail, con una lista di persone
@@ -501,7 +557,8 @@ guasti dell'**hardware**.
   intervalli di 2 minuti sopra la media di ogni run. Il monitor disegna la
   stessa curva ma la tiene in memoria: non serve per una giornata intera.
 - Un **controllore di prova** su un'altra porta va lanciato con
-  `--notifiche /tmp/qualcosa.json`, se no manda le mail vere a tutta la lista.
+  `--notifiche /tmp/qualcosa.json`, se no manda le mail vere a tutta la lista,
+  e con `--senza-archivio`, se no comprime e manda sul cloud i dati veri.
   Le sue azioni finiscono comunque in `data/azioni.jsonl`, che e' unico.
 
 ## PMT e SiPM sulla stessa scheda
@@ -1151,6 +1208,7 @@ LNGS; solo correzione CAEN):
 | `tools/carica_padme.py` | carica per canale (ADC·ns) con PADME; `--ped`, `--gate`, `--cancello CH DA A`, `--padme testbeam/piedistallo/nessuna`; scrive PNG, JSON e le cariche evento per evento in `.npz` |
 | `tools/padme.py` | tabella PADME per cella da una run a trigger software, e verifica del guadagno |
 | `tools/plot_majthr.py` | confronto delle due calibrazioni della somma del V812 |
+| `tools/archivia.py` | comprime le run finite e le manda sul cloud con `cp_data`, fuori dalla DAQ; lo lancia il controllore. `--stato`, `--aggiungi FILE`, `--comprimi FILE` |
 | `analisi/` | script delle singole analisi, con l'indice e i comandi in `analisi/README.md` |
 
 Le misure stanno in `measurements/*.json` con i dati grezzi, e gli script di

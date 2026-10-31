@@ -419,7 +419,8 @@ def ostacolo(path, reg):
     if n:
         dopo = ultimo + RIPROVA_S[min(n, len(RIPROVA_S)) - 1]
         if time.time() < dopo:
-            return "in pausa", "%d tentativi falliti, il prossimo dopo le %s" % (n, ora(dopo))
+            return "in pausa", "%s, il prossimo dopo le %s" % (
+                "1 tentativo fallito" if n == 1 else "%d tentativi falliti" % n, ora(dopo))
     return None
 
 
@@ -533,7 +534,11 @@ def mostra_stato(reg, cartelle, cloud, comando, attesa_s, occupati):
             stato = ("%s: %s" % perche) if perche else "da mandare"
             if reg.tentativi(manca)[0]:
                 stato += "; ultimo errore: %s" % reg.di("errore_carica", file=manca)[-1]["messaggio"]
-        print("  %-40s %s" % (os.path.basename(base_run(parti[0])), stato))
+        # Fuori da OutputDir si dice dove: due run possono avere lo stesso nome.
+        dove = os.path.dirname(parti[0])
+        nome = os.path.basename(base_run(parti[0])) + ("" if cartelle and dove == cartelle[0]
+                                                       else "  (in %s)" % dove)
+        print("  %-40s %s" % (nome, stato))
 
     print("\nUltime azioni:")
     for e in [e for e in reg.eventi if e["evento"] not in ("attivato", "cartella")][-10:]:

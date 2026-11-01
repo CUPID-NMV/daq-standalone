@@ -204,3 +204,18 @@ Le due sovrapposizioni del 2026-10-29 hanno un'opzione per lo scan:
 PMT solo dello scan allo stesso offset della run; `sovrapposizione_pmt_singolo.py
 OUT --un-pmt-scan un_pmt_scan_20261030.npz` fa il modello ibrido (MC senza i suoi
 eventi con un PMT solo, piu' quelli misurati nello scan).
+
+## 20261101_rate_veto/ -- il rate del veto completo, dal prototipo al LNGS
+
+Area d'acqua del veto vero dalla mesh del CAD (`cad/newcad_mesh.npz` del progetto
+MC, la stessa di `Analysis_script_background/view_cad_real.ipynb`) e rate di
+trigger del prototipo nella 0013 (offset 100) e nella 0011 (offset 200). Gira
+sul Mac:
+
+```
+python3 analisi/20261101_rate_veto/rate_veto.py
+```
+
+| script | argomenti | cosa mostra |
+|---|---|---|
+| `rate_veto.py` | [--cad DIR] [--out PREFISSO] | area d'acqua per faccia (proiezione del soffitto delle cavita', coi fori veri) contro i 960 x 360 mm del prototipo; rate di trigger del prototipo diviso in impulsi propri dei PMT (eventi di un PMT solo meno quelli del MC) e luce; rate del veto con tutto in proporzione all'area, o con gli impulsi propri in proporzione al numero di PMT. Scrive `measurements/rate_veto_20261101.json`, `_area.png`, `_rate.png` |

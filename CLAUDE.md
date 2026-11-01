@@ -1190,6 +1190,36 @@ LNGS; solo correzione CAEN):
   potrebbe venire in parte dalla luce (muoni che attraversano una fibra).
   Interpretazione, non verificata.
 
+## Il rate del veto completo, dal prototipo (2026-11-01)
+
+`analisi/20261101_rate_veto/rate_veto.py`, numeri in
+`measurements/rate_veto_20261101.json`.
+
+- **Area d'acqua del veto: 32.1 m^2** (inviluppo dei contenitori 33.6), dalla
+  mesh del CAD 20260713-Assy-WC-Y.stp: tetto 11.24, fondo 5.43 (80 mm d'acqua,
+  con un foro circolare di ~1.17 m di raggio), pareti 3.75-4.00 l'una. Sono
+  **92.8 volte** i 960 x 360 mm del prototipo; 96 PMT = 48 x 2.
+- **`cad/water_sectors_real.csv` del progetto MC somma 41.3 m^2**: le scatole
+  dei settori si sovrappongono sul tetto (16.6 contro 11.24) e riempiono il foro
+  del fondo (9.3 contro 5.43). Non toccato: e' del progetto MC, che lo usa come
+  sorgente attiva del modello del veto.
+- **Rate di trigger del prototipo** (un PMT qualunque sopra soglia): 0013,
+  offset 100, **4.22 Hz**, di cui 3.00 Hz di eventi con un PMT solo che il MC
+  non spiega (impulsi propri dei PMT) e 1.23 Hz di luce, come il trigger del MC
+  (1.20 Hz); 0011, offset 200, 0.445 Hz (0.15 + 0.30).
+- **Veto completo a offset 100: 392 Hz** con tutto in proporzione all'area,
+  **258 Hz** con gli impulsi propri in proporzione al numero di PMT (x48) e la
+  luce all'area (x92.8). A offset 200: 41 e 35 Hz. Errori statistici ~1%.
+- **Quanto vale "1.8 PE"**: offset 100 e' 1.8-2.2 PE coi due stimatori dello
+  scan del 30/10 (PMT invertiti), ~1.7 PE dalla soglia in ampiezza della 0013
+  (PMT diretti). Fra offset 80 e 100 il rate di un PMT da solo cambia di 2.4
+  volte: e' questa la precisione del numero.
+- Ipotesi non verificate: ogni tank vede il campo di gamma del prototipo sui
+  pannelli; la luce per PE non cambia con la taglia del tank (quelli del veto
+  sono in media 1.9 volte il prototipo: meno luce per PMT, meno eventi sopra
+  soglia); i PMT del veto hanno gli impulsi propri di quelli del prototipo (il
+  riferimento per il veto e' l'H10721-210, il prototipo ha gli H14600-103).
+
 ## Strumenti
 
 | | |

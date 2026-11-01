@@ -1,0 +1,90 @@
+{
+ "cad": "/Users/benussi/Testbeam2026_WC_unified/cad/newcad_mesh.npz",
+ "area_prototipo_m2": 0.34559999999999996,
+ "area_acqua_m2": 32.07216625,
+ "area_inviluppo_m2": 33.611109,
+ "rapporto_aree": 92.80140697337964,
+ "n_pmt": 96,
+ "facce": {
+  "Xp": {
+   "esterna_m2": 3.912031,
+   "acqua_m2": 3.74764125,
+   "spessore_acqua_mm": 100.00000000001
+  },
+  "Xm": {
+   "esterna_m2": 4.20738325,
+   "acqua_m2": 4.00155675,
+   "spessore_acqua_mm": 99.99999999994793
+  },
+  "Yp": {
+   "esterna_m2": 3.99298475,
+   "acqua_m2": 3.828157,
+   "spessore_acqua_mm": 98.99999999997704
+  },
+  "Ym": {
+   "esterna_m2": 4.023585,
+   "acqua_m2": 3.82705125,
+   "spessore_acqua_mm": 99.99999999998613
+  },
+  "Zp": {
+   "esterna_m2": 11.62898175,
+   "acqua_m2": 11.23915225,
+   "spessore_acqua_mm": 99.99999999999773
+  },
+  "Zm": {
+   "esterna_m2": 5.84614325,
+   "acqua_m2": 5.42860775,
+   "spessore_acqua_mm": 79.99999999999841
+  }
+ },
+ "rate": {
+  "0013": {
+   "run": "LNGS__54-0V_0013_750Ms_55PT",
+   "offset": [
+    100,
+    100
+   ],
+   "soglia_pe": "1.8-2.2",
+   "durata_s": 2367.313986,
+   "eventi": 10000,
+   "eventi_un_pmt": 8446,
+   "eventi_due_pmt": 1544,
+   "R_trigger_hz": 4.224196730614846,
+   "R_trigger_err": 0.04224196730614846,
+   "R_un_pmt_hz": 3.567756558677299,
+   "R_un_pmt_mc_hz": 0.5712659053000001,
+   "R_trigger_mc_hz": 1.1997962538666669,
+   "R_propri_pmt_hz": 2.9964906533772986,
+   "R_propri_err": 0.04792973611937394,
+   "R_luce_hz": 1.2277060772375474,
+   "veto_tutto_area_hz": 392.01139993340803,
+   "veto_tutto_area_err": 3.9201139993340806,
+   "veto_separato_hz": 257.7644026795234,
+   "veto_separato_err": 4.4697063989137344
+  },
+  "0011": {
+   "run": "LNGS__54-0V_0011_750Ms_55PT",
+   "offset": [
+    200,
+    200
+   ],
+   "soglia_pe": "3.5-4.3",
+   "durata_s": 11992.980293,
+   "eventi": 5337,
+   "eventi_un_pmt": 2488,
+   "eventi_due_pmt": 2841,
+   "R_trigger_hz": 0.4450103201716317,
+   "R_trigger_err": 0.006091461187004181,
+   "R_un_pmt_hz": 0.20745468926119914,
+   "R_un_pmt_mc_hz": 0.059480051100000014,
+   "R_trigger_mc_hz": 0.32512761580000005,
+   "R_propri_pmt_hz": 0.14797463816119913,
+   "R_propri_err": 0.009978347867293338,
+   "R_luce_hz": 0.2970356820104326,
+   "veto_tutto_area_hz": 41.29758382960157,
+   "veto_tutto_area_err": 0.5652961686777211,
+   "veto_separato_hz": 34.6681118436031,
+   "veto_separato_err": 0.7206997415495296
+  }
+ }
+}

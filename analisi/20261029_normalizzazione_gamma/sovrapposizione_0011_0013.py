@@ -3,7 +3,7 @@ gamma di Hall A (Compton + scintillazione delle fibre) e muoni di Hall A.
 
     python3 analisi/20261029_normalizzazione_gamma/sovrapposizione_0011_0013.py OUT.png [GAMMA.npz:RESA]
             [--muoni MUONI.npz:RESA] [--v812 CARICHE.npz --evidenzia N ...] [--componenti] [--piedistallo]
-            [--un-pmt-scan SCAN.npz] [--solo-dati OUT_DATI.png] [--pmt-singoli OUT_PMT.png]
+            [--un-pmt-scan SCAN.npz] [--solo-dati OUT_DATI.png] [--pmt-singoli OUT_PMT.png] [--soglia-pe X]
 
 GAMMA.npz: i gamma digitalizzati da usare (di serie mc_digit_gamma_righe_s1750.npz:1750);
 RESA e' la resa di scintillazione delle fibre di quella produzione, per la legenda.
@@ -33,7 +33,11 @@ vuoto). I pannelli che restano stanno sugli stessi pixel della sovrapposizione:
 alternando le due immagini i punti non si muovono.
 --pmt-singoli OUT_PMT.png (con --piedistallo): come --solo-dati, ma solo la carica di
 ciascun PMT in tutti gli eventi; via lo spettro con entrambi i PMT sopra 3 sigma e cio'
-che riguarda quella selezione (classe C, riquadro del rumore, pannello del V812).
+che riguarda quella selezione (riquadro del rumore, pannello del V812).
+--soglia-pe X: una riga verticale a X fotoelettroni (X * K) in tutti i pannelli, per far
+vedere dove cade sul fondo una soglia scelta per i PMT. La soglia vera del self-trigger e'
+in AMPIEZZA: in carica la riga e' indicativa, e gli impulsi del fondo, piu' larghi di un
+fotoelettrone singolo, superano la soglia in ampiezza solo a carica piu' alta.
 
 Le due run hanno soglie diverse (offset 200 e 100): sotto ~10000 ADC*ns la
 somma mescola due trigger. Il MC si somma allo stesso modo: per ogni run il
@@ -69,6 +73,7 @@ ap.add_argument("--piedistallo", action="store_true")
 ap.add_argument("--un-pmt-scan", default=None)
 ap.add_argument("--solo-dati", default=None, metavar="OUT_DATI.png")
 ap.add_argument("--pmt-singoli", default=None, metavar="OUT_PMT.png")
+ap.add_argument("--soglia-pe", type=float, default=None, metavar="X")
 arg = ap.parse_args()
 if arg.pmt_singoli and not arg.piedistallo:
     ap.error("--pmt-singoli vuole --piedistallo: senza, la carica dei singoli PMT non e' disegnata")
@@ -136,6 +141,17 @@ for nome, _, _ in CLASSI:
           % (nome, cd[nome], cg[nome], cm[nome], cg[nome] + cm[nome], cd[nome] / (cg[nome] + cm[nome])))
 
 K = mc["gamma"]["k"]
+
+
+def riga_soglia(a, label=False):
+    if arg.soglia_pe:
+        # sotto i punti dei dati e sotto il riquadro del rumore, che altrimenti attraversa
+        a.axvline(arg.soglia_pe * K, color="#d62728", lw=2.0, zorder=2.5,
+                  label=None if not label else
+                  "threshold assumed for every veto PMT: %.1f PE (on the pulse amplitude; drawn at %.1f K = %.0f ADC·ns)"
+                  % (arg.soglia_pe, arg.soglia_pe, arg.soglia_pe * K))
+
+
 # il rapporto dati/MC sta subito sotto lo spettro che confronta; il pannello del V812, che e'
 # un altro trigger e non entra nel rapporto, va in fondo
 if arg.v812:
@@ -197,8 +213,9 @@ sel_dati = a.errorbar(bc[ok], hd[ok] / TT / dens[ok], yerr=np.sqrt(hd[ok]) / TT 
                       xerr=[(bc - b[:-1])[ok], (b[1:] - bc)[ok]], fmt="o", ms=4, color="k", lw=0.8, zorder=5,
                       label="DATA LNGS 0011 + 0013 (%.1f h at offset 200 + %.0f min at offset 100): %.3f Hz"
                             % (T["0011"] / 3600, T["0013"] / 60, cd["both > 3σ"]))
-classe_c = [a.axvline(v, color="#888", ls=":", lw=1) for v in (7000, 10000)]
-classe_c.append(a.text(10400, 2e-8 if arg.piedistallo else 1.3e-7, "class C →", fontsize=9, color="#555"))
+# I confini delle fasce di carica (7000 e 10000 ADC*ns, la "classe C" delle note) non si
+# disegnano: queste figure vanno davanti ai colleghi, per cui la classe C non vuol dire niente
+# (tolti su richiesta dell'utente, 2026-11-01). I rate per fascia restano nella stampa.
 if arg.piedistallo:
     # la carica di ciascun PMT in TUTTI gli eventi, senza selezione: il picco a zero sono gli
     # eventi in cui quel PMT non ha luce, cioe' il rumore elettronico nel cancello di 260 ns
@@ -344,6 +361,7 @@ a.set_title("both PMTs > 3σ; MC with the trigger and the 3σ cut of each run (e
             "time-weighted;  K = %.0f ADC·ns/PE"
             % tuple(SOGLIE[RUN["0011"]]["soglia"] + SOGLIE[RUN["0013"]]["soglia"] + [K]),
             fontsize=9.5, loc="left")
+riga_soglia(a, label=True)
 a.legend(fontsize=9, frameon=False, loc="upper right")
 a.grid(alpha=0.25, which="both")
 if not arg.piedistallo:
@@ -368,8 +386,7 @@ if arg.v812:
         a.axvline(v, color="#d62728", lw=2.2,
                   label="event %d: muon candidate (all three panels saturated), %.0f ADC·ns = %.1f PE%s"
                         % (e, v, v / K, "" if sv[e] else ", one PMT only: not in the selection"))
-    for v in (7000, 10000):
-        a.axvline(v, color="#888", ls=":", lw=1)
+    riga_soglia(a)
     a.set_ylabel("events per bin")
     a.set_ylim(0, max(4, np.histogram(qv[sv].max(1), b)[0].max() * 1.6))
     a.set_title("the WC with the V812 trigger: run %s, majority 4 of 5 with the three scintillator panels "
@@ -421,8 +438,7 @@ if arg.piedistallo and arg.un_pmt_scan:
         a.errorbar(xs, rp, yerr=ep, xerr=None if vden is None else [(cp - bp[:-1])[okp], (bp[1:] - cp)[okp]],
                    fmt="s", ms=4.5, color=col, mfc=mfc, lw=0.9, label=lab)
 a.axhline(1, color="k", lw=0.8)
-for v in (7000, 10000):
-    a.axvline(v, color="#888", ls=":", lw=1)
+riga_soglia(a)
 if arg.piedistallo:
     a.set_xscale("symlog", linthresh=2000, linscale=0.6)
     a.set_xlim(-1500, 200000)
@@ -488,11 +504,10 @@ if arg.solo_dati:
     salva_sotto(ax[-1] if arg.v812 else ax[0], arg.solo_dati, xlabel)
 if arg.pmt_singoli:
     # Solo la carica di ciascun PMT: via lo spettro con entrambi i PMT sopra 3 sigma e quello
-    # che riguarda quella selezione -- i confini della classe C, il riquadro del rumore nella
-    # selezione e il pannello del V812, che chiede anche lui entrambi i PMT.
+    # che riguarda quella selezione -- il riquadro del rumore nella selezione e il pannello
+    # del V812, che chiede anche lui entrambi i PMT.
     sel_dati.remove()
-    for x in classe_c + [riquadro]:
-        x.remove()
+    riquadro.remove()
     for a_ in ax[2:]:
         a_.set_visible(False)
     ax[0].legend(fontsize=9, frameon=False, loc="upper right")

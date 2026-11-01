@@ -12,6 +12,10 @@ danno lo stesso rate; fra 10000 e 15000 no.
 Domanda: alzando la resa, l'eccesso ad alta carica si chiude senza rompere
 l'accordo a carica bassa? E l'asimmetria fra i due PMT della classe C si
 avvicina a quella dei dati?
+
+Nella figura niente righe ai confini delle fasce e niente "classe C": va davanti
+ai colleghi, per cui l'etichetta non vuol dire niente; le fasce si leggono
+nell'istogramma dei rate (richiesta dell'utente, 2026-11-01).
 """
 # --- percorsi: lo script gira da qualunque cartella, sul PC DAQ o sul Mac ---
 import os as _os, sys as _sys
@@ -121,8 +125,6 @@ for i, m in enumerate(mc):
 a.errorbar(bc[ok], hd[ok] / TT, yerr=np.sqrt(hd[ok]) / TT, xerr=[(bc - b[:-1])[ok], (b[1:] - bc)[ok]],
            fmt="o", ms=4, color="k", lw=0.8, zorder=5,
            label="DATA LNGS 0011 + 0013 (%.1f h): %.3f Hz" % (TT / 3600, fd["both > 3σ"]))
-for v in (7000, 10000, 15000):
-    a.axvline(v, color="#888", ls=":", lw=1)
 a.set_xscale("log")
 a.set_yscale("log")
 a.set_ylim(1e-4, 0.3)
@@ -150,8 +152,6 @@ for i, m in enumerate(mc):
     a.errorbar(cr[ok] * (1 + 0.04 * (i - (len(mc) - 1) / 2)), rr, yerr=err, fmt="o", ms=5, color=COL[i], lw=1,
                label="DATA / MC (%s photons/MeV)" % m["eti"])
 a.axhline(1, color="k", lw=0.8)
-for v in (7000, 10000, 15000):
-    a.axvline(v, color="#888", ls=":", lw=1)
 a.set_xscale("log")
 a.set_yscale("log")
 a.set_ylim(0.2, 20)
@@ -180,7 +180,7 @@ for i, m in enumerate(mc):
                     (m["gq"][m["gr"] == "0013"].max(1) >= 10000).sum() // m["rep"]))
 a.set_xlabel("ln(Q20 / Q21)")
 a.set_ylabel("normalised")
-a.set_title("class C (brighter PMT ≥ 10000 ADC·ns): light sharing between the two PMTs", fontsize=9.5, loc="left")
+a.set_title("brighter PMT ≥ 10000 ADC·ns: light sharing between the two PMTs", fontsize=9.5, loc="left")
 a.legend(fontsize=8.5, frameon=False, loc="upper left")
 a.grid(alpha=0.25)
 

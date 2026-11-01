@@ -9,7 +9,9 @@ per disegnarla tratteggiata; per esempio quella del commit 472c264:
     git show 472c264:measurements/mc_digit_gamma_righe_s1750.npz > /tmp/prima.npz
 Classi come in mc_scint_vs_dati.py: entrambi i PMT sopra 3 sigma, e la
 carica del PMT piu' illuminato sotto 7000 (B), fra 7000 e 10000, sopra 10000
-ADC*ns (C).
+ADC*ns (C). Nella figura le fasce si chiamano col loro intervallo, senza
+lettere ne' righe verticali: va davanti ai colleghi, per cui "classe C" non
+vuol dire niente (richiesta dell'utente, 2026-11-01).
 """
 # --- percorsi: lo script gira da qualunque cartella, sul PC DAQ o sul Mac ---
 import os as _os, sys as _sys
@@ -27,8 +29,8 @@ PRIMA = sys.argv[2] if len(sys.argv) > 2 else None
 MIS = _os.path.join(ROOT, "measurements")
 T13 = 2367.313986
 S = np.load(_os.path.join(MIS, "libreria_digit_0013.npz"))["sigma_q"]
-CLASSI = [("both > 3σ", None, None), ("B: < 7000", None, 7000), ("7000-10000", 7000, 10000),
-          ("C: ≥ 10000", 10000, None)]
+CLASSI = [("both > 3σ", None, None), ("< 7000", None, 7000), ("7000-10000", 7000, 10000),
+          ("≥ 10000", 10000, None)]
 
 
 def serie(q, tr, w, rep):
@@ -88,8 +90,6 @@ if PRIMA:
     a.step(bc, np.histogram(mc["prima"][0], b)[0] * mc["prima"][1], where="mid", color=COL["prima"], lw=1.1,
            ls="--", alpha=0.6, label="MC with fibre scintillation BEFORE: %.0f Hz generated, K = %.0f: %.3f Hz"
                                      % (r0, k0, mc["prima"][3]["both > 3σ"][0]))
-a.axvline(7000, color="#888", ls=":", lw=1)
-a.axvline(10000, color="#888", ls=":", lw=1)
 a.set_yscale("log")
 a.set_ylim(1e-5, 0.5)
 a.set_xlim(-1000, 40000)
@@ -115,8 +115,6 @@ for chiave, lab in (("s1750", "MC with fibre scintillation (now)"), ("prima", "s
     a.errorbar(cr[ok], rr, yerr=err, xerr=0.5 * np.diff(br)[ok], fmt="o" if chiave == "s1750" else "s",
                color=COL[chiave], ms=5, lw=1, alpha=1 if chiave == "s1750" else 0.45, label=lab)
 a.axhline(1, color="k", lw=0.8)
-a.axvline(7000, color="#888", ls=":", lw=1)
-a.axvline(10000, color="#888", ls=":", lw=1)
 a.set_yscale("log")
 a.set_ylim(0.3, 100)
 a.set_xlim(0, 40000)
@@ -148,7 +146,7 @@ a.set_ylim(5e-4, 5)
 a.set_xticks(x)
 a.set_xticklabels(nomi, fontsize=9)
 a.set_ylabel("rate [Hz]")
-a.set_title("rates per class (muons, MC: ≤ 1e-4 Hz in every class)", fontsize=10, loc="left")
+a.set_title("rates per charge band [ADC·ns] (muons, MC: ≤ 1e-4 Hz in every band)", fontsize=10, loc="left")
 a.legend(fontsize=8, frameon=False, loc="upper right")
 a.grid(alpha=0.25, axis="y", which="both")
 fig.suptitle("LNGS background vs Hall A γ in the MC, with the gamma rate corrected (J·A, φ = 1.12 cm$^{-2}$s$^{-1}$) "

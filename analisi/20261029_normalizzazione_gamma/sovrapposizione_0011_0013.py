@@ -23,13 +23,14 @@ self-trigger del 2026-10-30 allo stesso offset della run (l'uscita di
 che il MC non ha. Il buio dei PMT nel riquadro diventa quello misurato nello scan.
 --v812: le cariche (tools/carica_padme.py) di una run presa col trigger del
 V812, per esempio la run da 24 ore coi pannelli (carica_0000_54V_24h.npz): i
-suoi eventi con entrambi i PMT sopra 3 sigma vanno in un pannello a parte,
-in conteggi, perche' il trigger e' un altro e non se ne fa un rate da
-sommare. --evidenzia: indici di eventi di quella run da segnare.
+suoi eventi con entrambi i PMT sopra 3 sigma vanno in un pannello a parte, in
+fondo sotto il rapporto, in conteggi, perche' il trigger e' un altro e non se ne
+fa un rate da sommare. --evidenzia: indici di eventi di quella run da segnare.
 --solo-dati OUT_DATI.png: scrive anche lo stesso grafico coi soli dati, sulla stessa scala,
 da mostrare prima della sovrapposizione: niente MC ne' modello, e niente pannello del
-rapporto, che senza MC non ha senso. I pannelli che restano stanno sugli stessi pixel
-della sovrapposizione: alternando le due immagini i punti non si muovono.
+rapporto, che senza MC non ha senso (col pannello del V812 al suo posto resta uno spazio
+vuoto). I pannelli che restano stanno sugli stessi pixel della sovrapposizione:
+alternando le due immagini i punti non si muovono.
 --pmt-singoli OUT_PMT.png (con --piedistallo): come --solo-dati, ma solo la carica di
 ciascun PMT in tutti gli eventi; via lo spettro con entrambi i PMT sopra 3 sigma e cio'
 che riguarda quella selezione (classe C, riquadro del rumore, pannello del V812).
@@ -135,8 +136,10 @@ for nome, _, _ in CLASSI:
           % (nome, cd[nome], cg[nome], cm[nome], cg[nome] + cm[nome], cd[nome] / (cg[nome] + cm[nome])))
 
 K = mc["gamma"]["k"]
+# il rapporto dati/MC sta subito sotto lo spettro che confronta; il pannello del V812, che e'
+# un altro trigger e non entra nel rapporto, va in fondo
 if arg.v812:
-    fig, ax = plt.subplots(3, 1, figsize=(13, 13.5), height_ratios=[2.2, 0.85, 1], sharex=True)
+    fig, ax = plt.subplots(3, 1, figsize=(13, 13.5), height_ratios=[2.2, 1, 0.85], sharex=True)
 else:
     fig, ax = plt.subplots(2, 1, figsize=(13, 10.5), height_ratios=[2.2, 1], sharex=True)
 a = ax[0]
@@ -352,7 +355,7 @@ if not arg.piedistallo:
 if arg.v812:
     # eventi di una run col trigger del V812: stessa selezione dei dati (entrambi i PMT
     # sopra 3 sigma, sigma della 0013), in conteggi. Nessun MC: i pannelli non sono simulati.
-    a = ax[1]
+    a = ax[2]
     z = np.load(arg.v812 if _os.path.exists(arg.v812) else _os.path.join(MIS, arg.v812))
     qv = np.stack([z["q_caen_ch20"], z["q_caen_ch21"]], 1)
     S13 = np.array(SOGLIE[RUN["0013"]]["sigma_q"])
@@ -375,7 +378,7 @@ if arg.v812:
     a.grid(alpha=0.25, which="both")
     print("%s: %d eventi su %d con entrambi i PMT > 3 sigma" % (nome_v, sv.sum(), len(qv)))
 
-a = ax[-1]
+a = ax[1]
 br = np.logspace(np.log10(2000), np.log10(200000), 11)
 cr = np.sqrt(br[1:] * br[:-1])
 for chi, col, al, mk, lab in ((None, "k", 1.0, "o", "0011 + 0013"), ("0011", "#1aa39a", 0.6, "s", "0011 alone"),
@@ -428,8 +431,9 @@ else:
     a.set_xlim(2000, 200000)
 a.set_yscale("log")
 a.set_ylim(0.3, 30)
-a.set_xlabel("charge of the brighter PMT [ADC·ns]  (gate 240-500 ns, pedestal 0-150 ns%s)"
-             % ("; 1 PE = %.0f ADC·ns" % K if arg.piedistallo else ""))
+# l'asse x condiviso si legge sul pannello in fondo, che col V812 non e' il rapporto
+ax[-1].set_xlabel("charge of the brighter PMT [ADC·ns]  (gate 240-500 ns, pedestal 0-150 ns%s)"
+                  % ("; 1 PE = %.0f ADC·ns" % K if arg.piedistallo else ""))
 a.set_ylabel("DATA / MC total" if not arg.un_pmt_scan else "DATA / model")
 a.set_title("data / MC (MC statistical error counts replicas as correlated)" if not arg.un_pmt_scan else
             "round markers: selected spectrum (both PMTs > 3σ), data / MC;  squares: charge of each PMT in all "
@@ -470,7 +474,7 @@ if arg.solo_dati or arg.pmt_singoli:
     for p in [p for p in ax[0].patches if isinstance(p, StepPatch)]:
         p.remove()
     xlabel = ax[-1].get_xlabel()
-    ax[-1].set_visible(False)
+    ax[1].set_visible(False)
 if arg.solo_dati:
     ax[0].legend(fontsize=9, frameon=False, loc="upper right")
     ax[0].set_title("both PMTs > 3σ, charge of the brighter PMT;  self-trigger edges %.0f/%.0f (0011) and %.0f/%.0f "
@@ -479,7 +483,9 @@ if arg.solo_dati:
                     fontsize=9.5, loc="left")
     fig.suptitle("LNGS background, runs 0011 + 0013: charge measured in the two WC PMTs "
                  "(data only, same axes as the comparison with the Monte Carlo)", fontsize=11)
-    salva_sotto(ax[-2], arg.solo_dati, xlabel)
+    # col V812 in fondo, al posto del rapporto resta uno spazio vuoto: e' dove il rapporto
+    # compare nella sovrapposizione, e cosi' il pannello del V812 non si sposta
+    salva_sotto(ax[-1] if arg.v812 else ax[0], arg.solo_dati, xlabel)
 if arg.pmt_singoli:
     # Solo la carica di ciascun PMT: via lo spettro con entrambi i PMT sopra 3 sigma e quello
     # che riguarda quella selezione -- i confini della classe C, il riquadro del rumore nella
@@ -487,7 +493,7 @@ if arg.pmt_singoli:
     sel_dati.remove()
     for x in classe_c + [riquadro]:
         x.remove()
-    for a_ in ax[1:-1]:
+    for a_ in ax[2:]:
         a_.set_visible(False)
     ax[0].legend(fontsize=9, frameon=False, loc="upper right")
     ax[0].set_title("charge of each PMT in all triggered events, no selection;  0011 (%.1f h at offset 200) + 0013 "

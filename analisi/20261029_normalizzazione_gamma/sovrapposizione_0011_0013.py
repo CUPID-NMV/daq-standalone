@@ -146,7 +146,7 @@ K = mc["gamma"]["k"]
 def riga_soglia(a, label=False):
     if arg.soglia_pe:
         # sotto i punti dei dati e sotto il riquadro del rumore, che altrimenti attraversa
-        a.axvline(arg.soglia_pe * K, color="#d62728", lw=2.0, zorder=2.5,
+        a.axvline(arg.soglia_pe * K, color="#d62728", lw=3.0, zorder=2.5,
                   label=None if not label else
                   "threshold assumed for every veto PMT: %.1f PE (on the pulse amplitude; drawn at %.1f K = %.0f ADC·ns)"
                   % (arg.soglia_pe, arg.soglia_pe, arg.soglia_pe * K))

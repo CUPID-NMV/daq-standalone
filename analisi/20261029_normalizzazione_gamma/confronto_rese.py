@@ -136,7 +136,7 @@ a.legend(fontsize=9, frameon=False, loc="upper right")
 a.grid(alpha=0.25, which="both")
 K = mc[0]["k"]
 sec = a.secondary_xaxis("top", functions=(lambda x: x / K, lambda x: x * K))
-sec.set_xlabel("photoelectrons in the brighter PMT (charge / K)", fontsize=9)
+sec.set_xlabel("PMT photoelectrons (charge / K)", fontsize=9)
 
 # --- rapporto
 a = ax[1, 0]
@@ -156,7 +156,7 @@ a.set_xscale("log")
 a.set_yscale("log")
 a.set_ylim(0.2, 20)
 a.set_xlim(2000, 200000)
-a.set_xlabel("charge of the brighter PMT [ADC·ns]  (gate 240-500 ns, pedestal 0-150 ns)")
+a.set_xlabel("PMT charge [ADC·ns]  (gate 240-500 ns, pedestal 0-150 ns)")
 a.set_ylabel("DATA / MC")
 a.legend(fontsize=9, frameon=False, loc="upper left")
 a.grid(alpha=0.25, which="both")

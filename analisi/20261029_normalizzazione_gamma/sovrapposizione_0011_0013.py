@@ -368,7 +368,7 @@ if not arg.piedistallo:
     # con l'asse misto lineare/logaritmico l'asse secondario non segue la conversione e
     # segna valori sbagliati: in quel caso la scala in PE va nell'etichetta dell'asse
     sec = a.secondary_xaxis("top", functions=(lambda x: x / K, lambda x: x * K))
-    sec.set_xlabel("photoelectrons in the brighter PMT (charge / K)", fontsize=9)
+    sec.set_xlabel("PMT photoelectrons (charge / K)", fontsize=9)
 
 if arg.v812:
     # eventi di una run col trigger del V812: stessa selezione dei dati (entrambi i PMT
@@ -448,7 +448,7 @@ else:
 a.set_yscale("log")
 a.set_ylim(0.3, 30)
 # l'asse x condiviso si legge sul pannello in fondo, che col V812 non e' il rapporto
-ax[-1].set_xlabel("charge of the brighter PMT [ADC·ns]  (gate 240-500 ns, pedestal 0-150 ns%s)"
+ax[-1].set_xlabel("PMT charge [ADC·ns]  (gate 240-500 ns, pedestal 0-150 ns%s)"
                   % ("; 1 PE = %.0f ADC·ns" % K if arg.piedistallo else ""))
 a.set_ylabel("DATA / MC total" if not arg.un_pmt_scan else "DATA / model")
 a.set_title("data / MC (MC statistical error counts replicas as correlated)" if not arg.un_pmt_scan else
@@ -517,5 +517,5 @@ if arg.pmt_singoli:
                             + SOGLIE[RUN["0013"]]["soglia"] + [K]), fontsize=9.5, loc="left")
     fig.suptitle("LNGS background, runs 0011 + 0013: charge of each WC PMT in all triggered events "
                  "(data only, same axes as the comparison with the Monte Carlo)", fontsize=11)
-    salva_sotto(ax[0], arg.pmt_singoli, "charge of each PMT [ADC·ns]  (gate 240-500 ns, pedestal 0-150 ns; "
+    salva_sotto(ax[0], arg.pmt_singoli, "PMT charge [ADC·ns]  (gate 240-500 ns, pedestal 0-150 ns; "
                                         "1 PE = %.0f ADC·ns)" % K)

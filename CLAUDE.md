@@ -30,8 +30,9 @@ ad avere hardware e librerie CAEN.
   morto da un ping. Dal PC e dal Mac la rete non si vede uguale (il Mac via
   VPN vede .5 e .102, il PC no): le prove si fanno dal PC.
 - **Dal Gran Sasso la posta esce da `smtp.lngs.infn.it`**, porta 25, senza
-  login: dalla rete dei LNGS accetta la posta per le caselle LNF (2026-11-02:
-  ha accettato la mail di prova; che arrivi in casella lo conferma l'utente).
+  login: dalla rete dei LNGS accetta la posta per le caselle LNF e la
+  consegna (2026-11-02: la mail di prova, accettata subito alle 15:42, e'
+  arrivata nella Inbox dell'utente alle 15:49, non fra la posta indesiderata).
   pmg1/pmg2.lnf.infn.it da li' danno "No route to host": **dal 2026-10-23 al
   2026-11-02 sono andate perse tutte le 15 mail tentate** (9 riepiloghi, 4
   allarmi hardware, 2 run finite male) e nessuno se n'e' accorto.
@@ -565,6 +566,13 @@ guasti dell'**hardware**.
 - **Greylisting**: il primo invio a una coppia mittente/destinatario nuova
   prende "450 try later" e passa dopo ~5 minuti. `posta.invia` riprova da sola
   per un quarto d'ora. Una volta accettata, la posta arriva in pochi secondi.
+  **Dal Gran Sasso il server dei LNGS accetta subito e i tentativi li fa
+  lui**: la mail di prova del 2026-11-02 e' arrivata 7 minuti dopo,
+  compatibili col greylisting di pmg su una coppia nuova (non verificato: lo
+  direbbero le intestazioni `Received`). Quindi "consegnata" nello storico
+  vuol dire accettata dal server dei LNGS, e un rifiuto successivo
+  tornerebbe al mittente, `daq@lnf.infn.it`, non alla DAQ: che la posta
+  arrivi davvero lo dice il riepilogo serale.
 - **Una run finita male si riconosce dal log, non dal codice di uscita.** Se
   il collegamento col digitizer cade, il C++ scrive "giving up", chiude il
   file col riepilogo normale ed esce con 0. Le regole stanno in

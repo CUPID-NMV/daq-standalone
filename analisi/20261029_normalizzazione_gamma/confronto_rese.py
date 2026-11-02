@@ -180,7 +180,7 @@ for i, m in enumerate(mc):
                     (m["gq"][m["gr"] == "0013"].max(1) >= 10000).sum() // m["rep"]))
 a.set_xlabel("ln(Q20 / Q21)")
 a.set_ylabel("normalised")
-a.set_title("brighter PMT ≥ 10000 ADC·ns: light sharing between the two PMTs", fontsize=9.5, loc="left")
+a.set_title("PMT charge ≥ 10000 ADC·ns: light sharing between the two PMTs", fontsize=9.5, loc="left")
 a.legend(fontsize=8.5, frameon=False, loc="upper left")
 a.grid(alpha=0.25)
 

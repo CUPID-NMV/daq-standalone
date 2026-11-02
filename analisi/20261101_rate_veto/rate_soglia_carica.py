@@ -109,7 +109,7 @@ a.stairs(hs, bs, fill=True, color=BLU, alpha=0.18, lw=0,
          label="area right of the line = %.2f Hz: the rate with a %.1f PE threshold" % (R_uno, arg.soglia_pe))
 # i bin vuoti sotto la soglia (35 eventi in tutto) come buchi, non come righe fino al fondo
 a.stairs(np.where(hu > 0, hu, np.nan), b, baseline=None, color=BLU, lw=2.0,
-         label="brighter PMT (= at least one PMT), all %d events" % len(q13))
+         label="larger of the two PMT charges, all %d events" % len(q13))
 for j, ch, col, mk in ((0, 20, "#3c3c3c", "o"), (1, 21, "#8c8c8c", "s")):
     h = np.histogram(q13[:, j], b)[0]
     ok = h > 0
@@ -128,7 +128,7 @@ a.grid(alpha=0.25, which="both")
 
 a = ax[1]
 xg = np.concatenate([np.linspace(-1500, 2000, 351), np.logspace(np.log10(2000), np.log10(200000), 801)[1:]])
-for nome, v, col, lw, ls, lab in (("uno", voci["uno"], BLU, 2.4, "-", "at least one PMT above x (brighter PMT)"),
+for nome, v, col, lw, ls, lab in (("uno", voci["uno"], BLU, 2.4, "-", "at least one PMT above x"),
                                   ("ch20", voci["ch20"], "#3c3c3c", 1.3, "-", "PMT ch20 above x"),
                                   ("ch21", voci["ch21"], "#8c8c8c", 1.3, "--", "PMT ch21 above x")):
     vs = np.sort(v)

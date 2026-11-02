@@ -493,7 +493,7 @@ if arg.solo_dati or arg.pmt_singoli:
     ax[1].set_visible(False)
 if arg.solo_dati:
     ax[0].legend(fontsize=9, frameon=False, loc="upper right")
-    ax[0].set_title("both PMTs > 3σ, charge of the brighter PMT;  self-trigger edges %.0f/%.0f (0011) and %.0f/%.0f "
+    ax[0].set_title("both PMTs > 3σ, PMT charge;  self-trigger edges %.0f/%.0f (0011) and %.0f/%.0f "
                     "(0013) amplitude counts;  K = %.0f ADC·ns/PE"
                     % tuple(SOGLIE[RUN["0011"]]["soglia"] + SOGLIE[RUN["0013"]]["soglia"] + [K]),
                     fontsize=9.5, loc="left")

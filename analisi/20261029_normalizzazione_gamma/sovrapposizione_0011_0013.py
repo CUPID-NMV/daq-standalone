@@ -13,14 +13,16 @@ nucleo delle fibre) ed eventi con energia nelle fibre (scintillazione + Cherenko
 Per isotopo (K, U, Th) non si fa: lo spettro di CUPID sono canali di ~2.8 keV di uno
 spettro estratto, con le righe spostate o divise e voci che non sono righe note.
 --piedistallo: asse x lineare attorno a zero e logaritmico oltre 2000 ADC*ns, con la
-carica di ciascun PMT in tutti gli eventi (il picco a zero e' il rumore elettronico) e
-la stima di quanti eventi rumore e buio dei PMT portano nella selezione.
+carica di ciascun PMT in tutti gli eventi (il picco a zero e' il rumore elettronico);
+stampa a terminale la stima di quanti eventi rumore e buio dei PMT portano nella
+selezione. Dal 2026-11-02 non e' piu' scritta nel grafico, che va in presentazione: i
+numeri stanno nel testo della slide.
 --un-pmt-scan (con --piedistallo): accanto alla carica misurata di ciascun PMT, il
 modello per la stessa grandezza: il MC in tutti gli eventi col trigger, senza i suoi
 eventi con un PMT solo sopra 3 sigma, piu' quelli misurati nello scan del
 self-trigger del 2026-10-30 allo stesso offset della run (l'uscita di
 20261030_calibrazione_selftrigger/un_pmt_scan.py): sono gli impulsi propri dei PMT,
-che il MC non ha. Il buio dei PMT nel riquadro diventa quello misurato nello scan.
+che il MC non ha. Il buio dei PMT nella stima diventa quello misurato nello scan.
 --v812: le cariche (tools/carica_padme.py) di una run presa col trigger del
 V812, per esempio la run da 24 ore coi pannelli (carica_0000_54V_24h.npz): i
 suoi eventi con entrambi i PMT sopra 3 sigma vanno in un pannello a parte, in
@@ -32,8 +34,8 @@ rapporto, che senza MC non ha senso (col pannello del V812 al suo posto resta un
 vuoto). I pannelli che restano stanno sugli stessi pixel della sovrapposizione:
 alternando le due immagini i punti non si muovono.
 --pmt-singoli OUT_PMT.png (con --piedistallo): come --solo-dati, ma solo la carica di
-ciascun PMT in tutti gli eventi; via lo spettro con entrambi i PMT sopra 3 sigma e cio'
-che riguarda quella selezione (riquadro del rumore, pannello del V812).
+ciascun PMT in tutti gli eventi; via lo spettro con entrambi i PMT sopra 3 sigma e il
+pannello del V812, che chiede anche lui entrambi i PMT.
 --soglia-pe X: una riga verticale a X fotoelettroni (X * K) in tutti i pannelli, per far
 vedere dove cade sul fondo una soglia scelta per i PMT. La soglia vera del self-trigger e'
 in AMPIEZZA: in carica la riga e' indicativa, e gli impulsi del fondo, piu' larghi di un
@@ -145,7 +147,7 @@ K = mc["gamma"]["k"]
 
 def riga_soglia(a, label=False):
     if arg.soglia_pe:
-        # sotto i punti dei dati e sotto il riquadro del rumore, che altrimenti attraversa
+        # sotto i punti dei dati, che altrimenti attraversa
         a.axvline(arg.soglia_pe * K, color="#d62728", lw=3.0, zorder=2.5,
                   label=None if not label else
                   "threshold assumed for every veto PMT: %.1f PE (on the pulse amplitude; drawn at %.1f K = %.0f ADC·ns)"
@@ -336,14 +338,10 @@ if arg.piedistallo:
                        min(min(SOGLIE[RUN[r]]["sigma_q"]) for r in RUN), max(max(SOGLIE[RUN[r]]["sigma_q"]) for r in RUN)))
     a.axvline(K, color="k", ls="-.", lw=1.0, label="1 photoelectron, K = %.0f ADC·ns" % K)
     sel = cd["both > 3σ"]
-    testo = ("noise and dark counts in the selection (both PMTs > 3σ):\n"
-             "  electronic noise above 3σ (from the negative tail): %.1e Hz = %.2f%% of %.3f Hz\n"
-             "  PMT dark counts (%.0f / %.0f Hz above 3σ, %s): %.1e Hz = %.4f%%"
-             % (nrum / TT, 100 * nrum / TT / sel, sel, r_dc[20], r_dc[21], fonte_dc, ndc / TT, 100 * ndc / TT / sel))
-    riquadro = a.text(0.012, 0.025, testo, transform=a.transAxes, fontsize=8.5, va="bottom", ha="left",
-                      family="monospace", bbox=dict(facecolor="white", edgecolor="#bbb", alpha=0.92))
-    print("rumore: %.0f eventi su %.0f con un PMT solo -> %.2e Hz (%.2f%%); buio %.0f/%.0f Hz -> %.2e Hz (%.4f%%)"
-          % (nrum, nuno, nrum / TT, 100 * nrum / TT / sel, r_dc[20], r_dc[21], ndc / TT, 100 * ndc / TT / sel))
+    # solo a terminale: il riquadro che li scriveva nel grafico e' stato tolto il 2026-11-02
+    print("rumore: %.0f eventi su %.0f con un PMT solo -> %.2e Hz (%.2f%%); buio %.0f/%.0f Hz (%s) -> %.2e Hz (%.4f%%)"
+          % (nrum, nuno, nrum / TT, 100 * nrum / TT / sel, r_dc[20], r_dc[21], fonte_dc, ndc / TT,
+             100 * ndc / TT / sel))
     a.set_xscale("symlog", linthresh=2000, linscale=0.6)
     a.set_xlim(-1500, 200000)
 else:
@@ -503,11 +501,9 @@ if arg.solo_dati:
     # compare nella sovrapposizione, e cosi' il pannello del V812 non si sposta
     salva_sotto(ax[-1] if arg.v812 else ax[0], arg.solo_dati, xlabel)
 if arg.pmt_singoli:
-    # Solo la carica di ciascun PMT: via lo spettro con entrambi i PMT sopra 3 sigma e quello
-    # che riguarda quella selezione -- il riquadro del rumore nella selezione e il pannello
-    # del V812, che chiede anche lui entrambi i PMT.
+    # Solo la carica di ciascun PMT: via lo spettro con entrambi i PMT sopra 3 sigma e il
+    # pannello del V812, che chiede anche lui entrambi i PMT.
     sel_dati.remove()
-    riquadro.remove()
     for a_ in ax[2:]:
         a_.set_visible(False)
     ax[0].legend(fontsize=9, frameon=False, loc="upper right")

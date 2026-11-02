@@ -1,0 +1,39 @@
+{
+ "tau_s": 0.001,
+ "scenari": [
+  {
+   "scenario": "at least one PMT \u2265 1.8 PE, everything scaled with the water area",
+   "rate_hz": 392.01139993340803,
+   "morto_finestre_fuse": 0.3243035889773701,
+   "morto_gate": 0.28161507869271857,
+   "morto_finestra_doppia": 0.5434343601311371,
+   "R_per_tau": 0.39201139993340806
+  },
+  {
+   "scenario": "same, the PMTs' own pulses scaled with the number of PMTs",
+   "rate_hz": 257.7644026795234,
+   "morto_finestre_fuse": 0.22722272508301755,
+   "morto_gate": 0.20493854185281904,
+   "morto_finestra_doppia": 0.40281528337188244,
+   "R_per_tau": 0.25776440267952344
+  },
+  {
+   "scenario": "both PMTs of a module \u2265 1.8 PE (charge), scaled with the area",
+   "rate_hz": 40.76918559307444,
+   "morto_finestre_fuse": 0.039949302091267236,
+   "morto_gate": 0.03917216819773774,
+   "morto_finestra_doppia": 0.07830265744495513,
+   "R_per_tau": 0.04076918559307444
+  },
+  {
+   "scenario": "both PMTs of a module \u2265 3 PE (charge), scaled with the area",
+   "rate_hz": 24.422310215851322,
+   "morto_finestre_fuse": 0.024126498624879256,
+   "morto_gate": 0.023840080377305926,
+   "morto_finestra_doppia": 0.0476709093138622,
+   "R_per_tau": 0.024422310215851322
+  }
+ ],
+ "rate_per_1_percento_hz": 10.05033585350145,
+ "rate_per_5_percento_hz": 51.293294387550574
+}

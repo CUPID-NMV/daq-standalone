@@ -4,10 +4,20 @@ Spedizione delle mail della DAQ: riepilogo giornaliero, errori, allarmi.
 
     python3 tools/posta.py --prova luigi.benussi@lnf.infn.it
 
-La posta esce dai server di posta IN INGRESSO dei Laboratori, pmg1 e pmg2,
-porta 25, senza login: consegnano a qualunque casella @lnf.infn.it e
-rifiutano tutto il resto ("Relay access denied"). Quindi si scrive solo a
-indirizzi LNF; chi vuole le mail altrove se le inoltra dalla sua casella.
+Da Frascati la posta esce dai server di posta IN INGRESSO dei Laboratori,
+pmg1 e pmg2, porta 25, senza login: consegnano a qualunque casella
+@lnf.infn.it e rifiutano tutto il resto ("Relay access denied"). Quindi si
+scrive solo a indirizzi LNF; chi vuole le mail altrove se le inoltra dalla
+sua casella.
+
+Dal Gran Sasso pmg1 e pmg2 non si raggiungono ("No route to host"): dal
+2026-10-23 al 2026-11-02 non e' arrivata nessuna delle 15 mail tentate,
+allarmi hardware compresi, e la pagina lo diceva ma nessuno la guardava li'.
+Il server di posta dei LNGS, smtp.lngs.infn.it, porta 25, senza login,
+accetta invece dalla loro rete la posta per le caselle LNF (provato il
+2026-11-02 fino al destinatario). Si prova per primo; chi rifiuta un
+destinatario o non risponde passa la mano al server dopo, cosi' la stessa
+lista vale in tutte e due le sedi.
 
 E' una scelta, non un limite della rete: smtp.lnf.infn.it, il server di
 invio, dal PC DAQ risponde (25/587/465, login dopo STARTTLS, verificato il
@@ -28,7 +38,7 @@ import time
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 
-SERVER = ("pmg1.lnf.infn.it", "pmg2.lnf.infn.it")
+SERVER = ("smtp.lngs.infn.it", "pmg1.lnf.infn.it", "pmg2.lnf.infn.it")
 PORTA = 25
 MITTENTE = "DAQ V1742 <daq@lnf.infn.it>"
 DOMINI_RAGGIUNGIBILI = ("lnf.infn.it",)
@@ -69,10 +79,28 @@ def componi(oggetto, testo, destinatari, html=None, immagini=(), rispondi_a=None
     return m
 
 
+def _definitivo(r):
+    # "Relay access denied" arriva con 454, un codice da rifiuto temporaneo, ma
+    # non cambiera' mai: riprovare un quarto d'ora un indirizzo fuori da LNF
+    # sarebbe solo tempo perso (2026-10-14).
+    return r[0] >= 500 or b"relay access denied" in (
+        r[1] if isinstance(r[1], bytes) else str(r[1]).encode()).lower()
+
+
 def _un_tentativo(m, destinatari):
-    """Prova i server in fila. Ritorna (consegnati, rifiutati_temp, rifiutati_def, ultimo_errore)."""
-    ultimo = ""
+    """Prova i server in fila: a ciascuno chi non e' ancora stato consegnato.
+
+    Ritorna (consegnati, rifiutati_temp, rifiutati_def, ultimo_errore). Un
+    destinatario rifiutato da un server si prova sul successivo: da Frascati
+    il server dei LNGS puo' rifiutare quello che pmg1 consegna. Il rifiuto
+    temporaneo (greylisting) vince su quello definitivo: vuol dire che quel
+    server, fra qualche minuto, lo accetta.
+    """
+    ok, temp, defi, ultimo = [], {}, {}, ""
+    da_fare = list(destinatari)
     for host in SERVER:
+        if not da_fare:
+            break
         try:
             s = smtplib.SMTP(host, PORTA, timeout=30)
             s.ehlo()
@@ -80,7 +108,7 @@ def _un_tentativo(m, destinatari):
                 s.starttls()
                 s.ehlo()
             try:
-                rifiuti = s.send_message(m, to_addrs=destinatari)
+                rifiuti = s.send_message(m, to_addrs=da_fare)
             except smtplib.SMTPRecipientsRefused as e:
                 rifiuti = e.recipients
             finally:
@@ -88,19 +116,25 @@ def _un_tentativo(m, destinatari):
                     s.quit()
                 except smtplib.SMTPException:
                     pass
-            # "Relay access denied" arriva con 454, un codice da rifiuto
-            # temporaneo, ma non cambiera' mai: riprovare un quarto d'ora un
-            # indirizzo fuori da LNF sarebbe solo tempo perso (2026-10-14).
-            definitivo = lambda r: r[0] >= 500 or b"relay access denied" in (
-                r[1] if isinstance(r[1], bytes) else str(r[1]).encode()).lower()
-            temp = {a: r for a, r in rifiuti.items() if 400 <= r[0] < 500 and not definitivo(r)}
-            defi = {a: r for a, r in rifiuti.items() if definitivo(r)}
-            ok = [a for a in destinatari if a not in rifiuti]
-            return ok, temp, defi, ""
         except (OSError, smtplib.SMTPException) as e:
             # Un server che non risponde non e' un rifiuto: si passa all'altro.
             ultimo = "%s: %s" % (host, e)
-    return [], {a: (0, ultimo) for a in destinatari}, {}, ultimo
+            continue
+        for a in da_fare:
+            if a not in rifiuti:
+                ok.append(a)
+                temp.pop(a, None)
+                defi.pop(a, None)
+            elif not _definitivo(rifiuti[a]):
+                temp[a] = rifiuti[a]
+                defi.pop(a, None)
+            elif a not in temp:
+                defi[a] = rifiuti[a]
+        da_fare = [a for a in da_fare if a in rifiuti]
+    for a in da_fare:
+        if a not in temp and a not in defi:
+            temp[a] = (0, ultimo)          # nessun server ha risposto
+    return ok, temp, defi, ultimo
 
 
 def invia(m, destinatari, attese=ATTESE_S, log=print):

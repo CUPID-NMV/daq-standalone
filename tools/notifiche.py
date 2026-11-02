@@ -2,13 +2,16 @@
 Le notifiche via mail del controllore: chi le riceve, quando partono, e la
 diagnosi di come e' finita una run.
 
-Tre tipi, e ognuno ha la sua lista di persone:
+Cinque tipi, e ognuno ha la sua lista di persone:
 
     riepilogo   le run della giornata, una mail all'ora scelta
     sequenza    le run di una coda, quando la coda finisce (non gli scan)
     errori      una run finita male, con il motivo letto dal suo log
     hw          un guasto dell'hardware: alimentatori, VME, collegamento
                 col digitizer
+    cloud       una run di dati che non e' sul cloud mezz'ora dopo la fine,
+                qualunque sia il motivo; un promemoria ogni 3 ore finche'
+                dura, una mail quando e' risolto
 
 La lista e le impostazioni stanno in data/notifiche.json, che si cambia dalla
 pagina; quello che e' partito (o non e' partito) in data/notifiche-storico.jsonl.
@@ -26,9 +29,9 @@ import posta
 import riepilogo_giorno
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TIPI = ("riepilogo", "sequenza", "errori", "hw")
+TIPI = ("riepilogo", "sequenza", "errori", "hw", "cloud")
 NOMI_TIPI = {"riepilogo": "Daily summary", "sequenza": "Sequence end",
-             "errori": "Run error", "hw": "Hardware"}
+             "errori": "Run error", "hw": "Hardware", "cloud": "Cloud upload"}
 RE_INDIRIZZO = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 
 PREDEFINITO = {
@@ -37,6 +40,11 @@ PREDEFINITO = {
     "salta_vuoti": True,        # niente riepilogo nei giorni senza run
     "ripeti_hw_min": 30,        # lo stesso allarme hardware al piu' ogni N minuti
     "ultimo_riepilogo": "",     # giorno dell'ultimo riepilogo spedito
+    # Una run sul cloud ci arriva 3-4 minuti dopo la fine (2 di attesa, 18 s di
+    # compressione, 7 s di trasferimento), fino a ~12 se la fine la vede solo
+    # il giro dei 10 minuti. Mezz'ora sono almeno due tentativi falliti.
+    "cloud_ritardo_min": 30,
+    "cloud_ripeti_h": 3,        # promemoria finche' l'allarme dura
 }
 
 
@@ -60,6 +68,10 @@ class Notifiche:
     def __init__(self, config=None, cartelle_dati=None, porta=8766, log=print):
         self.config_path = config or os.path.join(ROOT, "data", "notifiche.json")
         self.storico_path = os.path.splitext(self.config_path)[0] + "-storico.jsonl"
+        # Accanto alla lista e non in data/: un controllore di prova con la sua
+        # lista ha anche il suo stato degli allarmi del cloud.
+        self.cloud_path = os.path.splitext(self.config_path)[0] + "-cloud.json"
+        self.cloud_ultimo = None       # l'ultima situazione letta da archivia.py
         # Le cartelle in cui cercare le run per il riepilogo: una funzione e
         # non una lista, perche' OutputDir si cambia dalla pagina a caldo.
         self.cartelle_dati = cartelle_dati or (lambda: [os.path.join(ROOT, "data")])
@@ -78,6 +90,11 @@ class Notifiche:
                 cfg.update(json.load(f))
         except (OSError, ValueError):
             pass
+        # Il tipo "cloud" e' nato il 2026-11-02, dopo la lista: chi riceve gli
+        # allarmi dell'hardware riceve anche questi, che sono dello stesso
+        # genere -- qualcosa si e' rotto e nessuno se ne accorgerebbe.
+        for d in cfg["destinatari"]:
+            d.setdefault("cloud", bool(d.get("hw")))
         return cfg
 
     def _salva(self):
@@ -95,9 +112,9 @@ class Notifiche:
         if not RE_INDIRIZZO.match(indirizzo):
             return False, "'%s' is not a mail address." % indirizzo
         if not posta.raggiungibile(indirizzo):
-            return False, ("Only @lnf.infn.it addresses can be used: the mail leaves through "
-                           "the LNF incoming servers, which deliver only to LNF mailboxes. "
-                           "To get it elsewhere, forward it from an LNF mailbox.")
+            return False, ("Only @lnf.infn.it addresses can be used: from Frascati the mail "
+                           "leaves through the LNF incoming servers, which deliver only to LNF "
+                           "mailboxes. To get it elsewhere, forward it from an LNF mailbox.")
         with self.lock:
             if any(d["indirizzo"].lower() == indirizzo.lower() for d in self.cfg["destinatari"]):
                 return False, "%s is already in the list." % indirizzo
@@ -239,8 +256,15 @@ class Notifiche:
         # Gli allarmi della giornata, dallo storico: chi legge solo il
         # riepilogo deve sapere che ce ne sono stati, anche se non li riceve.
         allarmi = [v for v in self.storico(500)
-                   if v.get("quando", "").startswith(giorno) and v.get("tipo") in ("errori", "hw")
+                   if v.get("quando", "").startswith(giorno) and v.get("tipo") in ("errori", "hw", "cloud")
                    and v.get("esito") in ("ok", "ko", "trattenuta", "nessuno")]
+        # Dove sono le run del giorno: fa anche da segnale di vita. Dal 23/10
+        # al 2/11 non e' partita nessuna mail e nessuno se n'e' accorto; un
+        # riepilogo che non arriva, con questa riga dentro, si nota.
+        nuvola = riepilogo_cloud(self.cloud_ultimo, giorno, 60 * self.cfg["cloud_ritardo_min"])
+        testo += "\n" + nuvola + "\n"
+        html_ = html_.replace("</body>", "<p>%s</p></body>" % "<br>".join(
+            riepilogo_giorno.html.escape(r) for r in nuvola.splitlines()))
         if allarmi:
             elenco = ["%s %s" % (v["quando"][11:16], v["oggetto"].replace("[DAQ V1742] ", ""))
                       for v in allarmi]
@@ -270,7 +294,7 @@ class Notifiche:
                 allarmi = []
                 da = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(inizio or 0))
                 for v in self.storico(500):
-                    if v.get("tipo") in ("errori", "hw") and v.get("quando", "") >= da:
+                    if v.get("tipo") in ("errori", "hw", "cloud") and v.get("quando", "") >= da:
                         allarmi.append("%s %s" % (v["quando"][11:16],
                                                   v["oggetto"].replace("[DAQ V1742] ", "")))
                 oggetto, testo, html_, png = riepilogo_giorno.componi_sequenza(
@@ -312,6 +336,141 @@ class Notifiche:
             except Exception as e:
                 self.log("notifiche: pianificatore: %s" % e)
             time.sleep(30)
+
+    # -- cloud ---------------------------------------------------------------
+    def controlla_cloud(self, st):
+        """Gli allarmi del cloud. `st` e' la situazione di tools/archivia.py
+        --stato --json, o {"errore": ...} se non si e' potuta leggere; la passa
+        il controllore ogni due minuti.
+
+        Una mail quando una run comincia a essere in ritardo, un promemoria
+        ogni cloud_ripeti_h ore finche' ce n'e' una, una quando sono arrivate;
+        le run che sul cloud non andranno (chiuse male) una volta sola. Lo
+        stato sta su file: un controllore riavviato non rimanda un allarme gia'
+        mandato, e uno rimasto spento lo manda appena riparte.
+        """
+        adesso = time.time()
+        self.cloud_ultimo = st
+        ritardo = 60 * self.cfg["cloud_ritardo_min"]
+        s = self._leggi_cloud()
+        prima = json.dumps(s, sort_keys=True)
+        s.setdefault("attivo_dal", adesso)
+        s.setdefault("avvisate", [])
+        problemi = []
+        if "errore" in st:
+            # Una situazione che non si legge e' un guasto anche lei: se dura,
+            # l'allarme che si aspetta non arriverebbe mai.
+            # Finche' e' breve non si decide niente, nemmeno che un allarme in
+            # corso sia finito: delle run, in quel momento, non si sa nulla.
+            s.setdefault("errore_dal", adesso)
+            if adesso - s["errore_dal"] <= ritardo:
+                return self._salva_cloud(s, prima)
+            problemi = [{"nome": STATO_ILLEGGIBILE, "fine": s["errore_dal"],
+                         "riga": "the upload status cannot be read since %s: %s"
+                                 % (_giorno_ora(s["errore_dal"]), st["errore"][-300:])}]
+        else:
+            s.pop("errore_dal", None)
+            if not st.get("cloud"):
+                # Upload spento per scelta nel TOML: lo dice la pagina, niente mail.
+                return self._salva_cloud(s, prima)
+            problemi = [{"nome": v["nome"], "fine": v["fine"], "riga": riga_cloud(v, adesso)}
+                        for v in st.get("run", [])
+                        if v["stato"] in DA_ARRIVARE and adesso - v["fine"] > ritardo]
+            # Solo quelle finite dopo l'attivazione di questo controllo: alla
+            # prima accensione non deve arrivare l'elenco di tutto il passato.
+            nuove = [v for v in st.get("run", []) if v["stato"] in SOLO_DISCO
+                     and v["nome"] not in s["avvisate"] and v["fine"] > s["attivo_dal"]]
+            if nuove:
+                s["avvisate"] = (s["avvisate"] + [v["nome"] for v in nuove])[-500:]
+                self.manda(("cloud",), "[DAQ V1742] CLOUD — %s only on the DAQ disk" % (
+                    "run %s stays" % nuove[0]["nome"] if len(nuove) == 1 else "%d runs stay" % len(nuove)),
+                    "These runs were closed badly -- the DAQ died before closing the file -- so\n"
+                    "archivia.py neither compresses nor sends them: such a file can only be read\n"
+                    "in live (SWMR) mode. They stay as .h5 on the DAQ disk.\n\n  - %s\n\n"
+                    "If one is needed on the cloud, on the DAQ PC:\n"
+                    "  python3 tools/archivia.py --aggiungi FILE\n\nController: %s\n"
+                    % ("\n  - ".join(riga_cloud(v, adesso) for v in nuove),
+                       indirizzo_pagina(self.porta)))
+
+        nomi = [p["nome"] for p in problemi]
+        if problemi and not s.get("allarme_dal"):
+            s.update(allarme_dal=adesso, ultima_mail=adesso, in_allarme=nomi)
+            self._mail_cloud(problemi, st, adesso, ancora=False)
+        elif problemi:
+            s["in_allarme"] = list(dict.fromkeys(s.get("in_allarme", []) + nomi))
+            if adesso - s.get("ultima_mail", 0) >= 3600 * self.cfg["cloud_ripeti_h"]:
+                s["ultima_mail"] = adesso
+                self._mail_cloud(problemi, st, adesso, ancora=True)
+        elif s.get("allarme_dal"):
+            per_nome = {v["nome"]: v for v in st.get("run", [])}
+            righe = []
+            for n in s.get("in_allarme", []):
+                v = per_nome.get(n)
+                if n == STATO_ILLEGGIBILE:
+                    righe.append("the upload status can be read again")
+                elif v and v["stato"] == "sul cloud":
+                    righe.append("%s: on the cloud since %s" % (n, _giorno_ora(v["quando"])))
+                elif v:
+                    righe.append("%s: %s" % (n, riga_cloud(v, adesso)))
+                else:
+                    righe.append("%s: no longer among the runs to send (moved or deleted?)" % n)
+            self.manda(("cloud",), "[DAQ V1742] CLOUD OK — %s" % (
+                "run %s is on the cloud" % s["in_allarme"][0] if len(s.get("in_allarme", [])) == 1
+                and s["in_allarme"][0] != STATO_ILLEGGIBILE else "the alarm is over"),
+                "The cloud alarm that started at %s is over, after %s.\n\n  - %s\n\nController: %s\n"
+                % (_giorno_ora(s["allarme_dal"]), _durata(adesso - s["allarme_dal"]),
+                   "\n  - ".join(righe), indirizzo_pagina(self.porta)))
+            s.pop("allarme_dal", None)
+            s.pop("in_allarme", None)
+        self._salva_cloud(s, prima)
+
+    def _mail_cloud(self, problemi, st, adesso, ancora):
+        n = len(problemi)
+        if n == 1 and problemi[0]["nome"] == STATO_ILLEGGIBILE:
+            oggetto = "the upload status cannot be read"
+        elif n == 1:
+            oggetto = "run %s not on the cloud for %s" % (problemi[0]["nome"],
+                                                        _durata(adesso - problemi[0]["fine"]))
+        else:
+            oggetto = "%d runs not on the cloud, the oldest for %s" % (
+                n, _durata(adesso - min(p["fine"] for p in problemi)))
+        ok, ko = st.get("ultimo_caricato"), st.get("ultimo_errore")
+        corpo = ("%s\n\n  - %s\n\n"
+                 "Nothing is lost: the files stay on the DAQ disk. A failed transfer is tried\n"
+                 "again after 5, 15 and 45 min, then every few hours, and all of them as soon\n"
+                 "as one transfer goes through; a name conflict or a file changed after\n"
+                 "sending needs someone.\n"
+                 "%s%s\n"
+                 "Details, on the DAQ PC:  python3 tools/archivia.py --stato\n"
+                 "A reminder follows every %d h while this lasts, and a mail when it is over.\n"
+                 "Controller: %s\n"
+                 % ("These runs should be on the cloud %d min after their end, and are not:"
+                    % self.cfg["cloud_ritardo_min"],
+                    "\n  - ".join(p["riga"] for p in problemi),
+                    "Last transfer that went through: %s, %s.\n" % (_giorno_ora(ok["quando"]), ok["chiave"])
+                    if ok else "",
+                    "Last transfer error: %s, %s: %s\n" % (_giorno_ora(ko["quando"]), ko["chiave"],
+                                                           breve_errore(ko["messaggio"])) if ko else "",
+                    self.cfg["cloud_ripeti_h"], indirizzo_pagina(self.porta)))
+        self.manda(("cloud",), "[DAQ V1742] CLOUD — %s%s" % ("still: " if ancora else "", oggetto), corpo)
+
+    def _leggi_cloud(self):
+        try:
+            with open(self.cloud_path) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def _salva_cloud(self, s, prima):
+        if json.dumps(s, sort_keys=True) == prima:
+            return
+        tmp = self.cloud_path + ".tmp"
+        try:
+            with open(tmp, "w") as f:
+                json.dump(s, f, indent=1)
+            os.replace(tmp, self.cloud_path)
+        except OSError as e:
+            self.log("notifiche: non riesco a salvare %s: %s" % (self.cloud_path, e))
 
 
 # ---------------------------------------------------------------------------
@@ -374,3 +533,153 @@ def esito_run(testo_log, console=(), fermata_a_mano=False, codice=None):
     return False, "errori", ("the DAQ process ended without the end-of-run summary and "
                              "without an error message: killed or crashed%s"
                              % ("" if codice is None else " (exit code %d)" % codice))
+
+
+# ---------------------------------------------------------------------------
+#  Le run sul cloud
+# ---------------------------------------------------------------------------
+#  Dove sono le run lo dice tools/archivia.py --stato --json; qui si decide
+#  cosa e' in ritardo e come dirlo. Si guarda alle RUN, non ai tentativi: una
+#  run che non c'e' e' un problema anche se nessuno ha provato a mandarla
+#  (controllore spento, compressione fallita), e un tentativo fallito da solo
+#  non lo e' -- il 2026-11-02 alle 09:54 il server dei token di CNAF non ha
+#  risposto una volta, e il tentativo dopo e' passato.
+
+# Una run in questi stati deve ancora arrivare: oltre il ritardo, allarme.
+DA_ARRIVARE = ("da comprimere", "compressione fallita", "da mandare", "in pausa",
+               "conflitto", "cambiato")
+# Queste sul cloud non andranno: si dice una volta sola.
+SOLO_DISCO = ("chiusa male", "non HDF5")
+STATO_ILLEGGIBILE = "(upload status)"
+RE_NUMERO_RUN = re.compile(r"_(\d{4})(?:_|$)")
+
+
+def _hm(t):
+    return time.strftime("%H:%M", time.localtime(t))
+
+
+def _giorno_ora(t):
+    return time.strftime("%d/%m %H:%M", time.localtime(t))
+
+
+def _durata(s):
+    s = max(0, int(s))
+    return "%d min" % (s // 60) if s < 5400 else "%d h %02d min" % (s // 3600, s % 3600 // 60)
+
+
+def breve_errore(msg, n=220):
+    """L'errore di cp_data in una riga che si legge: l'ultima riga del suo
+    stderr e' un'eccezione Python lunga 300 caratteri, con il motivo vero fra
+    apici in fondo ("Connection to iam-cygno.cloud.cnaf.infn.it timed out")."""
+    m = re.match(r"^\s*([\w.]+)\s*:", msg or "")
+    classe = m.group(1).rsplit(".", 1)[-1] if m else ""
+    if not any(k in classe for k in ("Error", "Timeout", "Exception")):
+        classe = ""
+    citati = re.findall(r"'([^']{12,})'", msg or "")
+    if classe and citati:
+        return ("%s: %s" % (classe, citati[-1]))[:n]
+    msg = (msg or "").strip()
+    return msg if len(msg) <= n else msg[:n // 2 - 2] + " \u2026 " + msg[-(n // 2 - 2):]
+
+
+def riga_cloud(v, adesso=None):
+    """Una run che non e' sul cloud, in una riga: dove e' rimasta e perche'."""
+    adesso = adesso or time.time()
+    st, n = v["stato"], v.get("tentativi", 0)
+    if st == "da comprimere":
+        perche = "not compressed yet"
+    elif st == "compressione fallita":
+        perche = "compression failed at %s: %s" % (_hm(v["quando_errore"]), breve_errore(v["errore"]))
+    elif st == "conflitto":
+        perche = ("NOT sent: a different file with the same name is already on the cloud (%s)"
+                  % v.get("altro", "?"))
+    elif st == "cambiato":
+        perche = "changed on disk after it was sent: not sent again by itself"
+    elif st == "chiusa male":
+        perche = "closed badly (the DAQ died before closing it): it stays only on the DAQ disk"
+    elif st == "non HDF5":
+        perche = "not an HDF5 file: neither compressed nor sent"
+    elif st == "in corso":
+        perche = "still running"
+    elif n:
+        perche = "transfer failed %d time%s, last at %s: %s" % (
+            n, "" if n == 1 else "s", _hm(v["quando_errore"]), breve_errore(v["errore"]))
+        perche += ("; next attempt after %s" % _hm(v["prossimo"]) if v.get("prossimo")
+                   else "; tried again at the next round")
+    else:
+        perche = "never tried: archivia.py has not run since (is the controller running?)"
+    return "%s, ended %s (%s ago): %s" % (v["nome"], _giorno_ora(v["fine"]),
+                                         _durata(adesso - v["fine"]), perche)
+
+
+def riepilogo_cloud(st, giorno, ritardo_s):
+    """Le righe del riepilogo serale: quante run del giorno sono sul cloud."""
+    if not st:
+        return "Cloud: not checked yet (the controller has just started)."
+    if "errore" in st:
+        return "Cloud: unknown, the upload status cannot be read: %s" % st["errore"][-300:]
+    if not st.get("cloud"):
+        return "Cloud: upload off (%s)." % st.get("motivo_spento", "")
+    adesso = st.get("adesso") or time.time()
+    giorno_di = lambda v: time.strftime("%Y-%m-%d", time.localtime(v["fine"]))
+    del_giorno = [v for v in st.get("run", []) if giorno_di(v) == giorno and v["stato"] != "in corso"]
+    sul = [v for v in del_giorno if v["stato"] == "sul cloud"]
+    if not del_giorno:
+        righe = ["Cloud: no runs of the day to send."]
+    else:
+        righe = ["Cloud: %d of %d runs of the day are on the cloud%s." % (
+            len(sul), len(del_giorno),
+            ", the last one sent at %s" % _hm(max(v["quando"] for v in sul)) if sul else "")]
+    fuori = [v for v in del_giorno if v["stato"] != "sul cloud"]
+    prima = [v for v in st.get("run", []) if giorno_di(v) < giorno and v["stato"] in DA_ARRIVARE]
+    if fuori or prima:
+        righe.append("Not on the cloud:")
+    for v in prima + fuori:
+        if v["stato"] in DA_ARRIVARE and adesso - v["fine"] < ritardo_s:
+            righe.append("  on its way: %s, ended %s" % (v["nome"], _hm(v["fine"])))
+        else:
+            righe.append("  " + riga_cloud(v, adesso))
+    return "\n".join(righe)
+
+
+def pagina_cloud(st, ritardo_s):
+    """Cosa dice la barra in alto della pagina di controllo: livello (bene,
+    attenzione, male, spento), testo breve, e le righe per chi ci passa sopra."""
+    if not st:
+        return {"livello": "spento", "testo": "CLOUD: NOT CHECKED YET", "righe": [], "problemi": []}
+    if "errore" in st:
+        return {"livello": "attenzione", "testo": "CLOUD: STATUS UNKNOWN",
+                "righe": ["the upload status cannot be read: " + st["errore"][-300:]], "problemi": []}
+    if not st.get("cloud"):
+        return {"livello": "spento", "testo": "CLOUD UPLOAD OFF",
+                "righe": [st.get("motivo_spento", "")], "problemi": []}
+    adesso = st.get("adesso") or time.time()
+    run = st.get("run", [])
+    tardi = [v for v in run if v["stato"] in DA_ARRIVARE and adesso - v["fine"] > ritardo_s]
+    in_viaggio = [v for v in run if v["stato"] in DA_ARRIVARE and v not in tardi]
+    solo_disco = [v for v in run if v["stato"] in SOLO_DISCO and adesso - v["fine"] < 86400]
+    righe = [riga_cloud(v, adesso) for v in tardi]
+    righe += ["on its way: %s (%s)" % (v["nome"], riga_cloud(v, adesso).split("ago): ", 1)[-1])
+              for v in in_viaggio]
+    righe += [riga_cloud(v, adesso) for v in solo_disco]
+    ok, ko = st.get("ultimo_caricato"), st.get("ultimo_errore")
+    if ok:
+        righe.append("last transfer: %s, %s" % (_giorno_ora(ok["quando"]), ok["chiave"]))
+    if ko:
+        righe.append("last transfer error: %s, %s: %s" % (_giorno_ora(ko["quando"]), ko["chiave"],
+                                                          breve_errore(ko["messaggio"])))
+    if tardi:
+        return {"livello": "male", "righe": righe, "problemi": [riga_cloud(v, adesso) for v in tardi],
+                "testo": "⚠ %s NOT ON THE CLOUD · FOR %s" % (
+                    "1 RUN" if len(tardi) == 1 else "%d RUNS" % len(tardi),
+                    _durata(adesso - tardi[0]["fine"]).upper())}
+    if any(v.get("tentativi") for v in in_viaggio):
+        return {"livello": "attenzione", "testo": "CLOUD: RETRYING", "righe": righe, "problemi": []}
+    sul = [v for v in run if v["stato"] == "sul cloud"]
+    if sul:
+        v = max(sul, key=lambda v: v["quando"])
+        m = RE_NUMERO_RUN.search(v["nome"])
+        testo = "CLOUD OK · %s at %s" % ("run " + m.group(1) if m else v["nome"], _hm(v["quando"]))
+    else:
+        testo = "CLOUD OK"
+    return {"livello": "bene", "testo": testo, "righe": righe, "problemi": []}

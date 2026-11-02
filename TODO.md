@@ -31,10 +31,15 @@ Finche' non e' fatto vale la procedura di CLAUDE.md ("Due macchine").
 
 La fase 1 (`tools/archivia.py`, `CompressAtEnd`, aggancio nel controllore) e'
 installata; il funzionamento sta in CLAUDE.md. Restano:
-- **riquadro nella pagina di controllo** con lo stato dei file (in attesa,
-  compresso, sul cloud, fallito con l'errore): dal Gran Sasso la posta non
-  parte, ed e' l'unico posto dove ci si accorge che i trasferimenti si sono
-  fermati. Prima un PNG da far vedere all'utente;
+- ~~riquadro nella pagina di controllo~~ — fatto il 2026-11-02 come badge
+  CLOUD nella barra in alto, con le run in ritardo elencate sotto, e mail
+  "Cloud" (la posta dal Gran Sasso ora parte, da smtp.lngs.infn.it). Una
+  tabella di tutti i file (in attesa, compresso, sul cloud) solo se serve;
+- **rileggere il file dal cloud dopo l'upload** (dimensione, ETag): senza
+  credenziali non si puo' (404 anonimo), e le credenziali stanno in
+  `/usr/bin/cp_data`. Il posto giusto e' `cp_data.py`, subito dopo
+  `upload_file`: `head_object` e confronto con la dimensione locale, uscita
+  con errore se non torna. E' di CYGNO: chiedere a chi lo mantiene;
 - **pulizia del disco** dei file gia' sul cloud: 439 GB liberi, ~18 GB al
   giorno al ritmo delle run 0041-0054, cioe' circa tre settimane. Prima il C++
   deve contare anche i `.log` nel numero di run, se no i nomi si ripetono;

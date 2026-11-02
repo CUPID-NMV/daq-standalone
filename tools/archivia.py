@@ -3,6 +3,7 @@
 
     python3 tools/archivia.py [CARTELLA ...]        un giro su quello che e' pronto
     python3 tools/archivia.py --stato               cosa e' fatto, cosa aspetta, cosa e' fallito
+    python3 tools/archivia.py --stato --json        dov'e' ogni run, per gli allarmi del controllore
     python3 tools/archivia.py --aggiungi FILE ...   manda sul cloud run gia' presenti
     python3 tools/archivia.py --comprimi FILE ...   comprime file di prima dell'attivazione
     python3 tools/archivia.py --senza-cloud         comprime soltanto
@@ -31,7 +32,12 @@ Per ogni run:
   3. con CloudUpload = true (sezione [archive] del TOML) manda con cp_data il
      .h5.gz, l'eventuale .mid.gz e per ultimo il .log: se sul cloud c'e' il
      .log, c'e' anche il resto. Se fallisce riprova dopo 5 minuti, poi 15,
-     45, poco piu' di due ore, poi ogni 6 ore.
+     45, poco piu' di due ore, poi ogni 6 ore; ma appena un trasferimento
+     riesce, quelli in pausa si riprovano subito: il cloud e' tornato.
+
+Chi deve sapere se le run sono arrivate e' il controllore: ogni due minuti
+legge --stato --json, e se una run di dati non e' sul cloud mezz'ora dopo la
+fine, per qualunque motivo, manda la mail "Cloud" (tools/notifiche.py).
 
 Cosa non tocca, di proposito:
   - i file CHIUSI MALE. Un HDF5 scritto in SWMR porta nel superblocco un flag
@@ -407,6 +413,26 @@ def gia_caricato(path, reg):
     return bool(reg.di("caricato", file=path, byte=st.st_size, mtime=st.st_mtime))
 
 
+def pausa(path, reg):
+    """(trasferimenti falliti di fila, istante dell'ultimo, istante prima del
+    quale non si riprova). Il terzo e' None se si puo' riprovare adesso."""
+    n, ultimo = reg.tentativi(path)
+    if not n:
+        return 0, None, None
+    # Un trasferimento riuscito dopo l'ultimo errore vuol dire che il cloud
+    # risponde di nuovo: si riprova subito. Se no, dopo un'interruzione lunga
+    # le run rimaste indietro aspetterebbero ciascuna la sua pausa, fino a 6
+    # ore, a cloud gia' tornato. Non per un errore arrivato dopo molti minuti:
+    # quello non e' un cloud irraggiungibile, e riprovarlo dopo ogni run
+    # riuscita terrebbe fermi i trasferimenti delle altre.
+    riusciti = reg.di("caricato")
+    errore = reg.di("errore_carica", file=path)[-1]
+    if riusciti and epoca(riusciti[-1]["t"]) > ultimo and errore.get("secondi", 0) < 600:
+        return n, ultimo, None
+    dopo = ultimo + RIPROVA_S[min(n, len(RIPROVA_S)) - 1]
+    return n, ultimo, (dopo if time.time() < dopo else None)
+
+
 def ostacolo(path, reg):
     """Perche' un file non si puo' mandare adesso: (motivo, spiegazione), oppure None."""
     chiave = os.path.basename(path)
@@ -415,12 +441,10 @@ def ostacolo(path, reg):
         return "conflitto", "col nome %s c'e' gia' sul cloud %s" % (chiave, altri[-1]["file"])
     if reg.di("caricato", file=path):
         return "cambiato", "e' cambiato dopo il trasferimento"
-    n, ultimo = reg.tentativi(path)
-    if n:
-        dopo = ultimo + RIPROVA_S[min(n, len(RIPROVA_S)) - 1]
-        if time.time() < dopo:
-            return "in pausa", "%s, il prossimo dopo le %s" % (
-                "1 tentativo fallito" if n == 1 else "%d tentativi falliti" % n, ora(dopo))
+    n, _, dopo = pausa(path, reg)
+    if dopo:
+        return "in pausa", "%s, il prossimo dopo le %s" % (
+            "1 tentativo fallito" if n == 1 else "%d tentativi falliti" % n, ora(dopo))
     return None
 
 
@@ -545,6 +569,68 @@ def mostra_stato(reg, cartelle, cloud, comando, attesa_s, occupati):
         print("  %s  %-19s %s" % (e["t"], e["evento"], e.get("file", "")))
 
 
+def situazione(cartelle, reg, cloud, motivo_spento, comando, attesa_s, ore=48):
+    """Dov'e' ogni run di dati, per il controllore che ne fa gli allarmi.
+
+    Le run che non sono sul cloud, qualunque sia il motivo e da quanto tempo,
+    piu' quelle finite nelle ultime `ore`. Gli scan restano fuori: sul cloud
+    non vanno per scelta. "fine" e' l'ultima scrittura dei file della run,
+    cioe' la sua fine: il .gz tiene la data del .h5.
+    """
+    adesso_s = time.time()
+    aperti, forzati = aperti_dalla_daq(), forzati_di(reg)
+    run = []
+    for h5 in h5_da_guardare(cartelle, forzati):
+        if "scan" in h5.split(os.sep)[:-1]:
+            continue
+        try:
+            etichetta, _ = classifica(h5, reg, aperti, forzati, attesa_s)
+        except OSError:
+            continue
+        # Un .gz "doppio" accanto al .h5 lo prende da_caricare come ogni .gz:
+        # per il cloud la run c'e' gia', sotto.
+        if etichetta in ("run di prova", "prima dell'attivazione", "avanzo", "doppio"):
+            continue
+        v = dict(nome=os.path.basename(base_run(h5)), file=h5,
+                 fine=max(data_di(h5), data_di(base_run(h5) + ".log")), stato=etichetta)
+        if etichetta in ("in attesa", "pronto"):
+            v["stato"] = "da comprimere"
+            errori = reg.di("errore_compressione", file=h5)
+            if errori:
+                v.update(stato="compressione fallita", errore=errori[-1]["messaggio"],
+                         quando_errore=epoca(errori[-1]["t"]))
+        run.append(v)
+    for parti in da_caricare(cartelle, reg):
+        fatti = [p for p in parti if gia_caricato(p, reg)]
+        v = dict(nome=os.path.basename(base_run(parti[0])), file=parti[0],
+                 fine=max(data_di(p) for p in parti))
+        if len(fatti) == len(parti):
+            if adesso_s - v["fine"] > ore * 3600:
+                continue
+            v.update(stato="sul cloud",
+                     quando=max(epoca(reg.di("caricato", file=p)[-1]["t"]) for p in parti))
+        else:
+            manca = [p for p in parti if p not in fatti][0]
+            perche = ostacolo(manca, reg)
+            n, _, dopo = pausa(manca, reg)
+            v.update(stato=perche[0] if perche else "da mandare", manca=manca, tentativi=n)
+            if perche and perche[0] == "conflitto":
+                v["altro"] = [e for e in reg.di("caricato", chiave=os.path.basename(manca))
+                              if e["file"] != manca][-1]["file"]
+            if n:
+                e = reg.di("errore_carica", file=manca)[-1]
+                v.update(errore=e["messaggio"], quando_errore=epoca(e["t"]))
+            if dopo:
+                v["prossimo"] = dopo
+        run.append(v)
+    run.sort(key=lambda v: v["fine"])
+    ok, ko = reg.di("caricato"), reg.di("errore_carica")
+    return dict(adesso=adesso_s, cloud=cloud, motivo_spento=motivo_spento, comando=comando,
+                attivo_dal=reg.attivato(), run=run,
+                ultimo_caricato=dict(ok[-1], quando=epoca(ok[-1]["t"])) if ok else None,
+                ultimo_errore=dict(ko[-1], quando=epoca(ko[-1]["t"])) if ko else None)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -554,6 +640,8 @@ def main():
     ap.add_argument("--registro", default=REGISTRO,
                     help="una prova deve usarne uno suo, se no agisce sui dati veri")
     ap.add_argument("--stato", action="store_true")
+    ap.add_argument("--json", action="store_true",
+                    help="con --stato: dov'e' ogni run, in JSON, per il controllore")
     ap.add_argument("--aggiungi", nargs="+", metavar="FILE", default=[],
                     help="file dei dati (.h5 o .h5.gz) da mandare sul cloud con il loro .log")
     ap.add_argument("--comprimi", nargs="+", metavar="FILE", default=[],
@@ -577,6 +665,15 @@ def main():
                 reg.aggiungi(evento, file=f)
     cartelle = cartelle_da_guardare(cfg, reg, a.cartelle)
 
+    if a.stato and a.json:
+        # Niente prova dei lucchetti: prenderli anche per un istante farebbe
+        # uscire a vuoto un esemplare lanciato in quel momento dal controllore.
+        motivo = ("" if cloud and os.access(comando, os.X_OK) else
+                  "%s non c'e' o non e' eseguibile" % comando if cloud else
+                  "CloudUpload = false nel TOML" if not a.senza_cloud else "--senza-cloud")
+        print(json.dumps(situazione(cartelle, reg, not motivo, motivo, comando, a.attesa),
+                         ensure_ascii=False))
+        return
     if a.stato:
         occupati = []
         for nome, quale in (("compressione", ".comprimo.lock"), ("trasferimento", ".cloud.lock")):

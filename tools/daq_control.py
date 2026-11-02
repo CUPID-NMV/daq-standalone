@@ -106,6 +106,10 @@ ELOG_LOG = "/tmp/elog_push.log"
 ARCHIVIA = os.path.join(ROOT, "tools", "archivia.py")
 ARCHIVIO_LOG = os.path.join(ROOT, "data", "archivio.log")
 ARCHIVIO_OGNI_S = 600
+# Ogni quanto si legge dove sono le run rispetto al cloud (archivia.py
+# --stato --json, un secondo di lavoro): per la barra della pagina e per gli
+# allarmi, che scattano mezz'ora dopo la fine di una run (tools/notifiche.py).
+CLOUD_OGNI_S = 120
 
 SCAN = {
     "v1742": {
@@ -1271,11 +1275,17 @@ class Controllo:
         self.figli = []
         self.uscite = {}          # pid -> codice d'uscita delle run figlie finite
         self._run_viva = None     # cosa si sa della run in corso, per quando finisce
+        self._console_prima = []  # la console della run prima, tenuta da _avvia
         self.notifiche = notifiche.Notifiche(notifiche_cfg, self._cartelle_dati, porta,
                                              log=lambda t: print(t, flush=True))
         self._daq_prima = trova_daq() is not None   # per vedere la FINE di una run
         self.archivio = archivio
         self._archivio_t = 0.0    # ultimo lancio di archivia.py: 0 = al primo giro
+        # Dove sono le run rispetto al cloud, letto da archivia.py ogni
+        # CLOUD_OGNI_S: per la barra della pagina e per gli allarmi. Anche con
+        # --senza-archivio, perche' leggerlo non tocca niente.
+        self.cloud = None
+        threading.Thread(target=self._guarda_cloud, daemon=True).start()
         # Un filo che guarda la fine delle run per conto suo. Non basta
         # accorgersene dentro stato(): quello gira solo quando qualcuno ha la
         # pagina aperta, e allora l'e-log si aggiornerebbe solo se c'e'
@@ -1528,27 +1538,67 @@ class Controllo:
             try:
                 pid = trova_daq()
                 vivo = pid is not None
+                info = self._run_viva
+                # In coda la run dopo parte entro mezzo secondo dalla fine di
+                # quella prima, meno di un giro di questo ciclo, e un istante
+                # senza DAQ non si vede mai: la fine la dice il processo
+                # cambiato. Fino al 2026-11-02 quelle run restavano senza la
+                # diagnosi di fine run e senza compressione subito (la 0112,
+                # finita alle 15:02:49, alle 15:09 era ancora .h5).
+                cambiata = vivo and info is not None and info["pid"] != pid
+                if (self._daq_prima and not vivo) or cambiata:
+                    self._run_viva = None
+                    self._dopo_la_run(info, console_sovrascritta=cambiata)
+                elif time.time() - self._archivio_t > ARCHIVIO_OGNI_S:
+                    self._archivia()
                 if vivo:
                     self._segui_run(pid)
                     try:
                         self._campiona_rate()
                     except Exception:
                         pass
-                if self._daq_prima and not vivo:
-                    self._versa_elog()
-                    info, self._run_viva = self._run_viva, None
-                    if info:
-                        try:
-                            self._fine_run(info)
-                        except Exception as e:
-                            print("notifiche: fine run: %s" % e, flush=True)
-                    self._archivia(os.path.dirname(info["log"]) if info and info["log"] else None)
-                elif time.time() - self._archivio_t > ARCHIVIO_OGNI_S:
-                    self._archivia()
                 self._daq_prima = vivo
             except Exception:
                 pass            # un errore qui non deve fermare il controllore
             time.sleep(2.0)
+
+    def _dopo_la_run(self, info, console_sovrascritta=False):
+        """Quello che si fa a ogni fine run: e-log, diagnosi, compressione."""
+        self._versa_elog()
+        if info:
+            try:
+                self._fine_run(info, console_sovrascritta)
+            except Exception as e:
+                print("notifiche: fine run: %s" % e, flush=True)
+        self._archivia(os.path.dirname(info["log"]) if info and info["log"] else None)
+
+    def _guarda_cloud(self):
+        """Ogni CLOUD_OGNI_S chiede ad archivia.py dove sono le run, e lo passa
+        alle notifiche, che decidono se e' il caso di un allarme.
+
+        In un processo a parte, come archivia.py stesso: e' il file sul disco
+        quello che conta, e un errore li' dentro non deve fermare il
+        controllore. Un errore nel leggerlo e' anche lui una notizia: se dura,
+        l'allarme che si aspetta non arriverebbe mai, e notifiche lo dice.
+        """
+        time.sleep(20)          # il primo giro dopo che il resto e' partito
+        while True:
+            try:
+                r = subprocess.run([sys.executable, ARCHIVIA, "--toml", self.toml, "--stato", "--json"],
+                                   capture_output=True, text=True, timeout=120, cwd=ROOT)
+                if r.returncode:
+                    righe = (r.stderr or r.stdout).strip().splitlines()
+                    st = {"errore": righe[-1] if righe else "archivia.py exited with %d" % r.returncode}
+                else:
+                    st = json.loads(r.stdout)
+            except Exception as e:
+                st = {"errore": "%s: %s" % (type(e).__name__, e)}
+            self.cloud = st
+            try:
+                self.notifiche.controlla_cloud(st)
+            except Exception as e:
+                print("notifiche: cloud: %s" % e, flush=True)
+            time.sleep(CLOUD_OGNI_S)
 
     def _segui_run(self, pid):
         """Annota, a run viva, dove scrive: quando sara' morta non si potra' piu'.
@@ -1683,8 +1733,13 @@ class Controllo:
                 cartelle.append(dove)
         return cartelle
 
-    def _fine_run(self, info):
-        """Una run e' appena finita: se e' finita male, lo si dice per mail."""
+    def _fine_run(self, info, console_sovrascritta=False):
+        """Una run e' appena finita: se e' finita male, lo si dice per mail.
+
+        console_sovrascritta: la run dopo e' gia' partita. Se l'ha lanciata
+        questo controllore ha riscritto la console, e le ultime righe di
+        questa run le ha tenute da parte _avvia prima di farlo.
+        """
         if info["scan"]:
             return
         if info["log"]:
@@ -1710,7 +1765,10 @@ class Controllo:
         # dopo, ed e' l'unico posto dove resta il motivo di una DAQ morta prima
         # di aprire il log della run (un VME che non risponde, per esempio).
         console = []
-        if info["console"]:
+        if (info["console"] and console_sovrascritta
+                and info["console"] == os.path.realpath(self.log_path)):
+            console = list(self._console_prima)
+        elif info["console"]:
             try:
                 with open(info["console"], "rb") as f:
                     f.seek(0, os.SEEK_END)
@@ -1866,6 +1924,7 @@ class Controllo:
              "psu": self.psu.stato() if self.psu else None,
              "psu_ampli": self.psu_ampli.stato() if self.psu_ampli else None,
              "notifiche": self.notifiche.stato(),
+             "cloud": notifiche.pagina_cloud(self.cloud, 60 * self.notifiche.cfg["cloud_ritardo_min"]),
              "versione": VERSIONE_PAGINA}
         if scan:
             s["scan"] = {
@@ -2420,6 +2479,17 @@ class Controllo:
         # si puo' piu', il nome la DAQ lo compone una volta sola.
         prefisso = self._scrivi_prefisso_hv()
 
+        # La console della run prima si riscrive qui sotto. In coda la sua fine
+        # la vede il controllore solo dopo, a run nuova gia' partita, e una
+        # DAQ morta prima di aprire il suo log ha il motivo solo li': le
+        # ultime righe si tengono da parte per _fine_run.
+        try:
+            with open(self.log_path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                f.seek(max(0, f.tell() - 20000))
+                self._console_prima = righe_terminale(f.read().decode("utf-8", "replace"))[-40:]
+        except OSError:
+            self._console_prima = []
         try:
             log = open(self.log_path, "wb")
         except OSError as e:
@@ -2575,6 +2645,7 @@ PAGINA = r"""<!doctype html>
  .alim.bene{background:#e7f3ec;color:#15603a;border:1px solid #bcddc9}
  .alim.male{background:#a8321f;color:#fff}
  .alim.spento{background:#ececea;color:#6b6a65;font-weight:500}
+ .alim.attenzione{background:#f6e7c8;color:#7a5410;border:1px solid #e6cf9f}
  .riga{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
  .box{background:#fff;border:1px solid #e2e2de;border-radius:8px;padding:10px 12px;flex:1 1 320px}
  /* Colonna di riquadri impilati dentro una .riga: serve per mettere i pannelli
@@ -2679,10 +2750,15 @@ PAGINA = r"""<!doctype html>
          e' la riga che si guarda per prima entrando, e una fascia a se' sopra
          al riquadro rubava spazio senza dire di piu'. -->
     <span id="alim" class="alim spento" style="display:none"></span>
+    <!-- Il cloud accanto all'alimentazione, per la stessa ragione: le run che
+         non arrivano sul cloud devono vedersi entrando, non in fondo alla pagina. -->
+    <span id="cloud" class="alim spento" style="display:none;cursor:help"></span>
     <label style="margin-left:auto;color:#6b6a65">who are you
       <input id="chi" placeholder="your name" style="width:140px">
     </label>
   </div>
+  <div id="cloudriga" style="display:none;margin-top:10px;padding:8px 12px;border-radius:6px;
+       background:#f8e0da;color:#8a2a18;font-size:12px;line-height:1.5"></div>
   <div id="msg" class="msg"></div>
 </div>
 
@@ -2899,13 +2975,15 @@ PAGINA = r"""<!doctype html>
   <table class="az" style="font-size:13px">
     <thead><tr><td class="k">Address</td><td class="k" style="text-align:center">Daily summary</td>
       <td class="k" style="text-align:center">Sequence end</td>
-      <td class="k" style="text-align:center">Run errors</td><td class="k" style="text-align:center">Hardware</td><td></td></tr></thead>
+      <td class="k" style="text-align:center">Run errors</td><td class="k" style="text-align:center">Hardware</td>
+      <td class="k" style="text-align:center">Cloud upload</td><td></td></tr></thead>
     <tbody id="n_dest"></tbody>
     <tbody><tr><td><input id="n_nuovo" placeholder="name@lnf.infn.it" style="width:220px"></td>
       <td style="text-align:center"><input type="checkbox" id="n_nriep" checked></td>
       <td style="text-align:center"><input type="checkbox" id="n_nseq" checked></td>
       <td style="text-align:center"><input type="checkbox" id="n_nerr" checked></td>
       <td style="text-align:center"><input type="checkbox" id="n_nhw" checked></td>
+      <td style="text-align:center"><input type="checkbox" id="n_ncloud" checked></td>
       <td><button id="n_agg" class="nb">add</button></td></tr></tbody>
   </table>
   <div class="sezh" style="margin-top:12px;cursor:default">Settings</div>
@@ -2919,8 +2997,9 @@ PAGINA = r"""<!doctype html>
   <div id="n_storico" class="az"></div>
   <div id="aiutonot" class="aiuto">
     Mails sent by this controller from the DAQ PC. <b>Only @lnf.infn.it addresses
-    can be used</b>: the mail leaves through the LNF incoming servers, which deliver
-    only to LNF mailboxes; to get it elsewhere, forward it from an LNF mailbox. The first mail
+    can be used</b>: from the Gran Sasso the mail leaves through the LNGS mail server,
+    from Frascati through the LNF incoming servers, which deliver only to LNF mailboxes;
+    to get it elsewhere, forward it from an LNF mailbox. The first mail
     to a new address can take a few minutes (the server makes unknown senders retry).<br><br>
     <b>Daily summary</b>: the runs of the day, with the rate plot, at the time set
     below. Scan runs are counted, not listed.<br>
@@ -2934,7 +3013,14 @@ PAGINA = r"""<!doctype html>
     <b>Hardware</b>: a supply whose output switches off with nobody pressing Output OFF
     here (a trip, the front panel, or another program), a trip in its event register,
     current limit, a supply not answering for a minute; and runs that fail on the VME
-    or on the digitizer link, which also go to Run errors.
+    or on the digitizer link, which also go to Run errors.<br>
+    <b>Cloud upload</b>: a data run (not a test run, not a scan) that is not on the cloud
+    30 min after its end, whatever the reason: transfer failing, compression failed, name
+    already used on the cloud, controller off. A single failed transfer that the next try
+    fixes sends nothing. A reminder every 3 h while it lasts, a mail when it is over, and
+    one mail for a run closed badly, which stays only on the DAQ disk. The same status is
+    the CLOUD badge at the top of this page; the daily summary says how many runs of the
+    day are on the cloud.
   </div>
 </div>
 
@@ -3074,7 +3160,7 @@ $("ferma").onclick = () => azione("ferma",
 
 // --- notifiche ---------------------------------------------------------------
 const NOMI_NOT = {riepilogo: "Daily summary", sequenza: "Sequence end", errori: "Run error",
-                  hw: "Hardware", prova: "Test"};
+                  hw: "Hardware", cloud: "Cloud upload", prova: "Test"};
 // Le virgolette come \x22 e non nude: tools/check_page.py, che toglie le
 // stringhe prima di cercare le chiamate, si confonde con una virgoletta dentro
 // un'espressione regolare e da li' in poi legge i testi come codice.
@@ -3112,11 +3198,11 @@ function disegnaNotifiche(n){
     notDisegnata = firma;
     $("n_dest").innerHTML = n.destinatari.map((d, i) =>
       `<tr><td>${escH(d.indirizzo)}</td>` +
-      ["riepilogo", "sequenza", "errori", "hw"].map(t =>
+      ["riepilogo", "sequenza", "errori", "hw", "cloud"].map(t =>
         `<td style="text-align:center"><input type="checkbox" data-i="${i}" data-t="${t}" ${d[t] ? "checked" : ""}></td>`
       ).join("") +
       `<td><button class="nb" data-rm="${i}">remove</button></td></tr>`
-    ).join("") || `<tr><td colspan="6" style="color:#9a9a94">nobody yet</td></tr>`;
+    ).join("") || `<tr><td colspan="7" style="color:#9a9a94">nobody yet</td></tr>`;
     $("n_dest").querySelectorAll("input[data-t]").forEach(c => c.onchange = () =>
       notAzione({azione: "imposta", indirizzo: n.destinatari[c.dataset.i].indirizzo,
                  tipo: c.dataset.t, valore: c.checked ? "1" : "0"}));
@@ -3146,7 +3232,8 @@ $("n_agg").onclick = async () => {
                               riepilogo: $("n_nriep").checked ? "1" : "0",
                               sequenza: $("n_nseq").checked ? "1" : "0",
                               errori: $("n_nerr").checked ? "1" : "0",
-                              hw: $("n_nhw").checked ? "1" : "0"});
+                              hw: $("n_nhw").checked ? "1" : "0",
+                              cloud: $("n_ncloud").checked ? "1" : "0"});
   if(ok) $("n_nuovo").value = "";
 };
 $("n_salva").onclick = async () => {
@@ -3179,6 +3266,7 @@ async function aggiorna(){
   aggiornaPsu(s.psu);
   aggiornaAmpli(s.psu_ampli);
   avvisoAlimentazione(s);
+  aggiornaCloud(s.cloud);
 
   // Riepiloghi nei titoli: chiuso, il pannello dice ancora la cosa per cui lo
   // si sarebbe aperto.
@@ -3863,6 +3951,21 @@ function aggiornaAmpli(p){
 // Una riga sola in cima: dice se il rivelatore sta alimentando, e grida
 // quando lo stato e' quello che l'ordine di accensione serve a evitare --
 // bias acceso con la scheda di amplificazione spenta.
+// Il cloud nella barra in alto. In allarme le run che mancano si leggono
+// sotto la barra, senza doverci passare sopra col mouse: il dettaglio di
+// ogni stato sta nel suggerimento.
+function aggiornaCloud(c){
+  const el = $("cloud"), riga = $("cloudriga");
+  if(!c){ el.style.display = "none"; riga.style.display = "none"; return; }
+  el.style.display = "";
+  el.className = "alim " + c.livello;
+  el.textContent = c.testo;
+  el.title = (c.righe || []).join("\n");
+  const p = c.problemi || [];
+  riga.style.display = p.length ? "block" : "none";
+  riga.innerHTML = p.length ? "<b>Not on the cloud:</b><br>" + p.map(escH).join("<br>") : "";
+}
+
 function avvisoAlimentazione(s){
   const b = s.psu && s.psu.lettura ? s.psu.lettura : null;
   const a = s.psu_ampli && s.psu_ampli.lettura ? s.psu_ampli.lettura : null;

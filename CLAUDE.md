@@ -29,9 +29,14 @@ ad avere hardware e librerie CAEN.
   `.105` non risponde al ping** ma risponde su 22/80 e al VME: non darlo per
   morto da un ping. Dal PC e dal Mac la rete non si vede uguale (il Mac via
   VPN vede .5 e .102, il PC no): le prove si fanno dal PC.
-- **Dal Gran Sasso la posta non parte**: pmg1/pmg2.lnf.infn.it porta 25
-  danno "No route to host" (2026-10-23). Nessuna mail di allarme finche' non
-  si trova un'altra strada.
+- **Dal Gran Sasso la posta esce da `smtp.lngs.infn.it`**, porta 25, senza
+  login: dalla rete dei LNGS accetta la posta per le caselle LNF (2026-11-02:
+  ha accettato la mail di prova; che arrivi in casella lo conferma l'utente).
+  pmg1/pmg2.lnf.infn.it da li' danno "No route to host": **dal 2026-10-23 al
+  2026-11-02 sono andate perse tutte le 15 mail tentate** (9 riepiloghi, 4
+  allarmi hardware, 2 run finite male) e nessuno se n'e' accorto.
+  `tools/posta.py` prova i server in fila, LNGS per primo, e chi viene
+  rifiutato da uno passa al successivo: la stessa lista vale nelle due sedi.
 - Bridge VME V4718: `192.168.99.105` (non è il PC DAQ). I digitizer stanno
   sul bus VME dietro di lui, distinti dall'indirizzo di base: vedi "Due V1742".
 - **Gli indirizzi sono assegnati da DHCP e cambiano.** Il PC DAQ è passato
@@ -483,6 +488,34 @@ Da sapere:
   si rileggono solo in SWMR, e daqio un `.gz` in SWMR non lo apre: la DAQ non
   li comprimeva nemmeno prima. Verificato sui quattro `.h5` rimasti sul
   disco, tutti a 5, e sui chiusi bene, a 0.
+- **Se una run non arriva sul cloud lo dice il controllore** (dal
+  2026-11-02). Ogni 2 minuti legge `archivia.py --stato --json` e guarda le
+  RUN, non i tentativi: una run di dati finita da piu' di 30 minuti senza dati
+  e `.log` sul cloud fa partire la mail **Cloud** col motivo, qualunque sia
+  (trasferimento fallito con l'errore di CNAF, compressione fallita, nome gia'
+  usato, controllore spento), poi un promemoria ogni 3 ore e una mail quando
+  e' risolto; una run chiusa male, che sul cloud non andra', una mail sola. Un
+  tentativo fallito da solo non manda niente: il 2026-11-02 alle 09:54 il
+  server dei token (`iam-cygno.cloud.cnaf.infn.it`) non ha risposto, e il
+  tentativo dopo e' passato. Nella barra in alto della pagina il badge CLOUD:
+  verde, arancione se sta riprovando, rosso in allarme con le run elencate
+  sotto. Nel riepilogo serale "N of M runs of the day are on the cloud", che
+  fa anche da segnale di vita della posta. Soglie in `data/notifiche.json`
+  (`cloud_ritardo_min`, `cloud_ripeti_h`), stato degli allarmi in
+  `data/notifiche-cloud.json`.
+- **Dopo un trasferimento riuscito i file in pausa si riprovano subito**: fino
+  al 2026-11-02, dopo un'interruzione lunga, ognuno aspettava la sua pausa
+  (fino a 6 ore) a cloud gia' tornato. Non per un errore arrivato dopo piu' di
+  10 minuti: quello non e' un cloud irraggiungibile.
+- **Il codice d'uscita di `cp_data` e' affidabile**: il programma di CYGNO non
+  cattura le eccezioni, ed esce con errore se non ottiene il token, non
+  raggiunge lo storage o non completa l'upload. Rileggere il file dal cloud
+  (dimensione, checksum) senza credenziali non si puo' (la richiesta anonima
+  da' 404): andrebbe fatto in `cp_data.py` dopo l'upload, che e' di CYGNO.
+  Rimandato, in `TODO.md`.
+- Il 2026-11-02 cinque trasferimenti (0103-0106, 0109) hanno impiegato
+  **esattamente** 64 s invece di 7: un'attesa fissa seguita da un nuovo
+  tentativo, non una linea lenta. Causa non cercata.
 - **Le run di prima dell'attivazione** (2026-10-31 17:05, prima riga del
   registro) non le tocca da solo: `--aggiungi FILE` le manda sul cloud,
   `--comprimi FILE` le comprime. Quelle di `data/LNGS` le aveva gia' mandate
@@ -516,9 +549,10 @@ per tipo, gestita dal riquadro *Notifications* della pagina e salvata in
 giornata col grafico del rate, all'ora scelta; le **run finite male**; i
 guasti dell'**hardware**.
 
-- **Si scrive solo a indirizzi @lnf.infn.it, per scelta.** La posta esce dai
-  server di posta in ingresso dei Laboratori, `pmg1`/`pmg2` porta 25, senza
-  login, che consegnano solo alle caselle LNF ("Relay access denied" per il
+- **Si scrive solo a indirizzi @lnf.infn.it, per scelta.** Da Frascati la
+  posta esce dai server di posta in ingresso dei Laboratori, `pmg1`/`pmg2`
+  porta 25, senza login (dal Gran Sasso da `smtp.lngs.infn.it`, vedi "Due
+  macchine"), che consegnano solo alle caselle LNF ("Relay access denied" per il
   resto, con un 454 che sembra temporaneo e non lo e'). Chi vuole le mail
   altrove se le inoltra con una regola della sua casella: l'utente fa cosi'.
 - **Il server di invio `smtp.lnf.infn.it` invece risponde** dal PC DAQ
@@ -563,6 +597,23 @@ guasti dell'**hardware**.
   `--notifiche /tmp/qualcosa.json`, se no manda le mail vere a tutta la lista,
   e con `--senza-archivio`, se no comprime e manda sul cloud i dati veri.
   Le sue azioni finiscono comunque in `data/azioni.jsonl`, che e' unico.
+- **Mai un controllore di prova dalla cartella vera con una coda attiva**:
+  all'avvio un controllore chiude la coda che trova "attiva" (la crede
+  interrotta da un suo riavvio) e rimette il TOML. Le prove della pagina si
+  fanno da una copia in `/tmp` con dati e registro finti (cosi' il
+  2026-11-02, `/tmp/prova-cloud`, con `--psu-host "" --psu-ampli-host ""` e
+  `ELOG_CRED=/nonexistent`): il controllore di una copia riconosce come DAQ
+  solo il proprio binario, e quella vera non la vede. Una DAQ finta si
+  compila li' (`gcc`). Le schermate: Chrome headless sul Mac, con un tunnel
+  SSH.
+- **In coda la fine di una run la dice il cambio di processo** (dal
+  2026-11-02): la run dopo parte entro mezzo secondo, meno di un giro del
+  controllore (2 s), e fino ad allora quelle run restavano senza diagnosi di
+  fine run (quindi senza la mail "run finita male") e senza compressione
+  subito: la 0112, finita alle 15:02:49, alle 15:09 era ancora `.h5`. La
+  console che la run nuova riscrive la tiene da parte `_avvia` prima di
+  riscriverla: e' l'unico posto col motivo di una DAQ morta prima di aprire
+  il suo log. Provato con un finto DAQ-WC in coda nella copia di prova.
 
 ## PMT e SiPM sulla stessa scheda
 
@@ -1233,7 +1284,7 @@ LNGS; solo correzione CAEN):
 | `tools/daqio.py` | I/O condiviso; `channels=` legge solo alcuni canali |
 | `tools/daq_control.py` | pagina di controllo (8766): configurazione, run, coda, scan |
 | `tools/psu_control.py` | alimentatore Aim-TTi PLH250-P via LAN (porta 9221): stato, rampa in tensione, limiti, log su CSV. IP da DHCP: `find` lo ritrova |
-| `tools/posta.py` | spedizione delle mail via pmg1/pmg2, con i tentativi per il greylisting; `--prova indirizzo` |
+| `tools/posta.py` | spedizione delle mail via smtp.lngs.infn.it (dal Gran Sasso) o pmg1/pmg2 (da Frascati), con i tentativi per il greylisting; `--prova indirizzo` |
 | `tools/riepilogo_giorno.py` | il riepilogo di un giorno dai .log delle run, col grafico del rate; `--png`, `--invia` |
 | `tools/notifiche.py` | lista delle persone, invio in sottofondo, storico, riepilogo all'ora fissata, diagnosi di fine run |
 | `tools/dcr_scala.py` | DCR dei SiPM contro soglia da una run a trigger software: scala a gradini, crosstalk, DCR a 0.5/1.5/2.5 p.e. (tre stime) |
@@ -1241,7 +1292,7 @@ LNGS; solo correzione CAEN):
 | `tools/carica_padme.py` | carica per canale (ADC·ns) con PADME; `--ped`, `--gate`, `--cancello CH DA A`, `--padme testbeam/piedistallo/nessuna`; scrive PNG, JSON e le cariche evento per evento in `.npz` |
 | `tools/padme.py` | tabella PADME per cella da una run a trigger software, e verifica del guadagno |
 | `tools/plot_majthr.py` | confronto delle due calibrazioni della somma del V812 |
-| `tools/archivia.py` | comprime le run finite e le manda sul cloud con `cp_data`, fuori dalla DAQ; lo lancia il controllore. `--stato`, `--aggiungi FILE`, `--comprimi FILE` |
+| `tools/archivia.py` | comprime le run finite e le manda sul cloud con `cp_data`, fuori dalla DAQ; lo lancia il controllore. `--stato`, `--stato --json` (per gli allarmi del controllore), `--aggiungi FILE`, `--comprimi FILE` |
 | `analisi/` | script delle singole analisi, con l'indice e i comandi in `analisi/README.md` |
 
 Le misure stanno in `measurements/*.json` con i dati grezzi, e gli script di

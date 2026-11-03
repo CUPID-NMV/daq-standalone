@@ -61,6 +61,17 @@ ad avere hardware e librerie CAEN.
   repository e prendono i file di dati come argomento. Sul Mac servono solo
   `numpy`, `h5py`, `matplotlib`. I JSON delle misure registrano i file col
   percorso del PC (`/home/daq/daq-standalone/data/...`).
+- **Sul Mac il bucket e' montato in `~/nmv-data`** (rclone, remoto
+  `cygno-ro`, config in `~/Testbeam2026_WC_unified/rclone.conf`,
+  `--vfs-cache-mode off`): le run del LNGS, coi `.log`, in
+  `~/nmv-data/WC/LNGS`. **Si legge a 1.4-4 MB/s per file, ~7 MB/s con tre
+  insieme** (2026-11-03): una run da 412 MB costa minuti, quindi chi legge dal
+  bucket scarica ogni run una volta sola e tiene i risultati in cache (cosi'
+  `tools/Distribuzioni_carica.ipynb`). Il kernel sul Mac e' `Python
+  (jupyter-global)` (`~/venvs/jupyter-global`), l'unico con `h5py`: il Python
+  di Homebrew non ha ne' `ipykernel` ne' `h5py`. Un kernel dal server del CNAF
+  (`ui.psge.cloud.infn.it`, cartella `~/Analysis/WC/TestBeam-2026`) non vede
+  ne' il repository ne' il disco del Mac.
 
 ## Compilare, e verificare di averlo fatto
 
@@ -542,6 +553,12 @@ Da sapere:
   si segnala (`conflitto`). Per mandare gli scan serve che `cp_data` accetti
   la cartella di destinazione: non e' nostro
   (`/home/daq/DAQ/online/source/cp_data.py`).
+- **Sul cloud ci sono quattro `.h5` non compressi che non sono run buone**,
+  mandati il 31/10 con `cp_data_all` (`~/bin` sul PC, elenco in
+  `data/LNGS/.cp_data_done`): 0054 e 0055 presi a run in corso, 0005 chiusa
+  male, `TEST_0000`. `cp_data` sa solo caricare: restano finche' qualcuno di
+  CYGNO non li toglie. Della 0054 c'e' anche il `.h5.gz` completo; **della
+  0055 no** (2026-11-03): va mandato con `archivia.py --aggiungi`.
 - **Prima di cancellare dati locali gia' sul cloud**: il C++ calcola il
   numero di run dai file di DATI presenti, non dai `.log`. Cancellandoli i
   numeri ripartono, e una run nuova prende il nome di una vecchia, sul disco
@@ -1310,7 +1327,7 @@ LNGS; solo correzione CAEN):
 | `tools/dcr_scala.py` | DCR dei SiPM contro soglia da una run a trigger software: scala a gradini, crosstalk, DCR a 0.5/1.5/2.5 p.e. (tre stime) |
 | `tools/WCFastCheck.ipynb` | analisi offline; legge i due formati e i `.gz` via `daqio` |
 | `tools/carica_padme.py` | carica per canale (ADC·ns) con PADME; `--ped`, `--gate`, `--cancello CH DA A`, `--padme testbeam/piedistallo/nessuna`; scrive PNG, JSON e le cariche evento per evento in `.npz` |
-| `tools/Distribuzioni_carica.ipynb` | distribuzioni di carica dei cinque canali da una run o da una lista (numeri col prefisso, nomi, glob), confronto fra le run in rate. Cancelli automatici misurati sulla prima run, oppure la ricetta della 0011/0013 (240-500 / 0-150, una riga pronta); piedistallo per evento e per blocco, tutti e due. Cariche in `data/carica/` (fuori da git), grafici e `.json` in `measurements/`, cache delle run lette in `data/carica/run/`. ~5 s per run sul PC; sul Mac col kernel `jupyter-global` |
+| `tools/Distribuzioni_carica.ipynb` | distribuzioni di carica dei cinque canali da una run o da una lista (numeri col prefisso, nomi, glob), confronto fra le run in rate. Cancelli automatici misurati sulla prima run, oppure la ricetta della 0011/0013 (240-500 / 0-150, una riga pronta); piedistallo per evento e per blocco, tutti e due. Cariche in `data/carica/` (fuori da git), grafici e `.json` in `measurements/`, cache delle run lette in `data/carica/run/`. Sul Mac legge dal bucket montato (`~/nmv-data/WC/LNGS`) col kernel `Python (jupyter-global)`, scaricando ogni run una volta sola, quattro in parallelo; sul PC da `data/LNGS`, ~5 s per run. Sul cloud salta i `.h5` non compressi |
 | `tools/padme.py` | tabella PADME per cella da una run a trigger software, e verifica del guadagno |
 | `tools/plot_majthr.py` | confronto delle due calibrazioni della somma del V812 |
 | `tools/archivia.py` | comprime le run finite e le manda sul cloud con `cp_data`, fuori dalla DAQ; lo lancia il controllore. `--stato`, `--stato --json` (per gli allarmi del controllore), `--aggiungi FILE`, `--comprimi FILE` |

@@ -132,6 +132,24 @@ def md5_file(path):
     return h.hexdigest()
 
 
+def ambiente_cp_data():
+    """L'ambiente per cp_data, senza l'ambiente virtuale (o conda) del terminale
+    da cui e' partito il controllore. cp_data chiama cp_data.py, che comincia
+    con "#!/usr/bin/env python3": con un ambiente attivo prende il suo python,
+    e boto3 sta solo con quello di sistema, in ~/.local. Il 2026-11-03 il
+    controllore riavviato da un terminale di VS Code, che jupyter_env lo
+    attiva da solo, ha fatto fallire tutti i trasferimenti dalla 0154 in poi
+    ("No module named 'boto3'")."""
+    env = dict(os.environ)
+    for chiave in ("VIRTUAL_ENV", "CONDA_PREFIX"):
+        amb = env.pop(chiave, None)
+        if amb:
+            env["PATH"] = os.pathsep.join(p for p in env.get("PATH", "").split(os.pathsep)
+                                          if p.rstrip(os.sep) != os.path.join(amb, "bin"))
+    env.pop("PYTHONHOME", None)
+    return env
+
+
 class Registro:
     """Il registro, in sola aggiunta. Si rilegge a ogni giro: quello che un
     altro esemplare (o un --aggiungi da terminale) scrive nel frattempo ci
@@ -467,7 +485,7 @@ def carica_run(parti, comando, reg):
         t0 = time.time()
         try:
             r = subprocess.run(NICE + [comando, p], capture_output=True, text=True,
-                               timeout=TIMEOUT_CARICA_S)
+                               timeout=TIMEOUT_CARICA_S, env=ambiente_cp_data())
             ok = r.returncode == 0
             righe = (r.stdout if ok else r.stderr or r.stdout).strip().splitlines()
             messaggio = righe[-1] if righe else "codice d'uscita %d" % r.returncode

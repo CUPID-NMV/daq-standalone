@@ -210,8 +210,21 @@ if git -C "$ROOT" rev-parse --git-dir > /dev/null 2>&1; then
     fi
 fi
 
+# Un ambiente virtuale (o conda) attivo nel terminale passerebbe al controllore
+# e a tutto quello che lancia: il 2026-11-03, riavviato da un terminale di VS
+# Code, che jupyter_env lo attiva da solo, cp_data ha preso il python di
+# jupyter_env, senza boto3, e nessuna run e' piu' arrivata sul cloud. Il
+# controllore gira col python di sistema, da qualunque terminale lo si avvii.
+for amb in "${VIRTUAL_ENV:-}" "${CONDA_PREFIX:-}"; do
+    [[ -z "$amb" ]] && continue
+    PATH=$(tr ':' '\n' <<< "$PATH" | grep -v -x -F "${amb%/}/bin" | paste -sd: -)
+    echo "ambiente $amb escluso: il controllore gira col python di sistema"
+done
+unset VIRTUAL_ENV CONDA_PREFIX PYTHONHOME
+export PATH
+
 mkdir -p "$(dirname "$LOG")"
-echo "avvio: python3 tools/daq_control.py -b $BIND -p $PORTA ${EXTRA[*]+${EXTRA[*]}}"
+echo "avvio: $(command -v python3) tools/daq_control.py -b $BIND -p $PORTA ${EXTRA[*]+${EXTRA[*]}}"
 if [[ -f "$LOCALE" ]]; then
     echo "alimentatori (da config/controllore-local.env, se non indicati dopo --):"
     echo "  bias SiPM ${PSU_HOST:-di serie}, amplificatore ${PSU_AMPLI_HOST:-di serie}"

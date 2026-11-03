@@ -514,6 +514,18 @@ Da sapere:
   (dimensione, checksum) senza credenziali non si puo' (la richiesta anonima
   da' 404): andrebbe fatto in `cp_data.py` dopo l'upload, che e' di CYGNO.
   Rimandato, in `TODO.md`.
+- **`cp_data` va col python di sistema**, l'unico che ha `boto3` (in
+  `~/.local`): `/usr/bin/cp_data` chiama `cp_data.py`, che comincia con
+  `#!/usr/bin/env python3` e prende il primo `python3` del PATH. Il
+  2026-11-03 il controllore riavviato alle 10:51 da un terminale di VS Code,
+  che attiva `jupyter_env` da solo, ha passato quell'ambiente ad
+  `archivia.py` e a `cp_data`: dalla 0154 nessuna run e' arrivata sul cloud
+  ("No module named 'boto3'"), finche' l'allarme Cloud non l'ha detto -- la
+  prima volta che scatta per un guasto vero. Ora `archivia.py` lancia
+  `cp_data` senza ambiente virtuale o conda, e `start_DAQ-controller.sh` lo
+  esclude all'avvio. **Un programma lanciato dal controllore eredita
+  l'ambiente del terminale da cui e' partito il controllore**: quando qualcosa
+  smette di funzionare dopo un riavvio, guardare `/proc/<pid>/environ`.
 - Il 2026-11-02 cinque trasferimenti (0103-0106, 0109) hanno impiegato
   **esattamente** 64 s invece di 7: un'attesa fissa seguita da un nuovo
   tentativo, non una linea lenta. Causa non cercata.
@@ -1311,7 +1323,9 @@ Le due pagine web girano sul PC DAQ e sopravvivono alla caduta della rete.
 radice del repository, mai con la riga nuda di `daq_control.py`. Lo script
 trova il controllore acceso dalla porta, controlla che non ci siano una run o
 una coda in corso prima di fermarlo, avvisa se la copia locale e' indietro
-rispetto a git, e aspetta che la pagina risponda. Il 2026-10-30 ho dato
+rispetto a git, esclude l'ambiente virtuale o conda attivo nel terminale (il
+controllore gira col python di sistema: vedi `cp_data` sopra), e aspetta che
+la pagina risponda. Il 2026-10-30 ho dato
 all'utente la riga nuda, e il riavvio e' finito in "porta gia' in uso".
 
 ```

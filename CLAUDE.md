@@ -1310,6 +1310,7 @@ LNGS; solo correzione CAEN):
 | `tools/dcr_scala.py` | DCR dei SiPM contro soglia da una run a trigger software: scala a gradini, crosstalk, DCR a 0.5/1.5/2.5 p.e. (tre stime) |
 | `tools/WCFastCheck.ipynb` | analisi offline; legge i due formati e i `.gz` via `daqio` |
 | `tools/carica_padme.py` | carica per canale (ADC·ns) con PADME; `--ped`, `--gate`, `--cancello CH DA A`, `--padme testbeam/piedistallo/nessuna`; scrive PNG, JSON e le cariche evento per evento in `.npz` |
+| `tools/Distribuzioni_carica.ipynb` | distribuzioni di carica dei cinque canali da una run o da una lista (numeri col prefisso, nomi, glob), confronto fra le run in rate. Cancelli automatici misurati sulla prima run, oppure la ricetta della 0011/0013 (240-500 / 0-150, una riga pronta); piedistallo per evento e per blocco, tutti e due. Cariche in `data/carica/` (fuori da git), grafici e `.json` in `measurements/`, cache delle run lette in `data/carica/run/`. ~5 s per run sul PC; sul Mac col kernel `jupyter-global` |
 | `tools/padme.py` | tabella PADME per cella da una run a trigger software, e verifica del guadagno |
 | `tools/plot_majthr.py` | confronto delle due calibrazioni della somma del V812 |
 | `tools/archivia.py` | comprime le run finite e le manda sul cloud con `cp_data`, fuori dalla DAQ; lo lancia il controllore. `--stato`, `--stato --json` (per gli allarmi del controllore), `--aggiungi FILE`, `--comprimi FILE` |

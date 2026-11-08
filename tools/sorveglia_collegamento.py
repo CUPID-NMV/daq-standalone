@@ -142,6 +142,18 @@ def arp_bridge():
     return None
 
 
+def viva(pid):
+    """Vera se il processo esiste e non e' uno zombie. Una DAQ finita resta zombie finche' il
+    controllore non ne raccoglie l'uscita, anche un paio di secondi, e intanto la run dopo e'
+    gia' partita: contandola, la fine della run risultava dopo l'inizio della successiva. Le
+    sue connessioni il kernel le ha gia' chiuse all'uscita."""
+    try:
+        with open("/proc/%d/stat" % pid) as f:
+            return f.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except (OSError, IndexError):
+        return False
+
+
 def processi():
     """PID delle DAQ accese e i processi di fine run che interessano (compressione, cloud)."""
     daq, altri = [], set()
@@ -151,7 +163,8 @@ def processi():
         try:
             comm = open("/proc/%s/comm" % d).read().strip()
             if comm == "DAQ-WC":
-                daq.append(int(d))
+                if viva(int(d)):
+                    daq.append(int(d))
             elif comm in ("pigz", "gzip", "cp_data", "cp_data.py"):
                 altri.add(comm)
             elif comm.startswith("python"):
@@ -241,11 +254,13 @@ def main():
         t = time.time()
         fatti = []
 
-        daq, altri_ora = processi() if t - t_altri >= 1.0 or not prec["daq"] else (None, None)
-        if daq is None:
-            daq = prec["daq"]
+        # Tutto /proc una volta al secondo (DAQ nuove, compressione, cloud); le DAQ gia' note a
+        # ogni campione, perche' l'istante in cui una run finisce conta quanto quello della caduta.
+        if t - t_altri >= 1.0:
+            daq, altri = processi()
+            t_altri = t
         else:
-            altri, t_altri = altri_ora, t
+            daq = [p for p in prec["daq"] if viva(p)]
 
         # DAQ accese e spente
         for pid in daq:

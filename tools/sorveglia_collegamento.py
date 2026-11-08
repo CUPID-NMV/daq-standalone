@@ -165,14 +165,16 @@ def processi():
 
 
 def log_della_daq(pid):
-    """Il .log della run, fra i file aperti dalla DAQ (come fa il controllore)."""
+    """Il .log della run, fra i file aperti dalla DAQ (come fa il controllore). La DAQ tiene
+    aperta anche data/daq-console.log, la sua uscita a video, che il controllore riscrive a
+    ogni run: quello giusto e' il .log col nome della run, accanto al file dei dati."""
     try:
         for fd in os.listdir("/proc/%d/fd" % pid):
             try:
                 p = os.readlink("/proc/%d/fd/%s" % (pid, fd))
             except OSError:
                 continue
-            if p.endswith(".log") and "/data" in p:
+            if p.endswith(".log") and "/data" in p and os.path.basename(p) != "daq-console.log":
                 return p
     except OSError:
         pass

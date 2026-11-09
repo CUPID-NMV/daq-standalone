@@ -63,10 +63,14 @@ ap.add_argument("--k", type=float, default=None, help="ADC*ns per fotoelettrone"
 ap.add_argument("--geo", default="single", help="geometria del MC (nome dei file): single, single_pan, ...")
 ap.add_argument("--rate", type=float, default=None,
                 help="Hz della sorgente (di serie: 13832 per i gamma, 0.0127 per i muoni)")
+ap.add_argument("--libreria", default=None,                                                     # libreria
+                help="libreria dei PMT al posto di quella della 0013, es. measurements/"       # libreria
+                     "libreria_digit_pmt_20261109.npz (1 PE con l'inverter, analisi/20261104_forma_1pe_pmt; "  # libreria
+                     "quella del 20261030 ha il ch21 sbagliato dalla diafonia del ch16)")       # libreria
 a = ap.parse_args()
 
 MIS = _os.path.join(ROOT, "measurements")
-LIB = np.load(_os.path.join(MIS, "libreria_digit_0013.npz"))
+LIB = np.load(a.libreria or _os.path.join(MIS, "libreria_digit_0013.npz"))                     # libreria
 DT = float(LIB["dt_ns"])
 NS = LIB["rumore_ch20"].shape[1]
 T = np.arange(NS) * DT
@@ -81,6 +85,8 @@ QE_WL = [200, 250, 300, 350, 380, 400, 420, 450, 500, 550, 600, 650, 700]
 QE = [0.18, 0.25, 0.30, 0.34, 0.35, 0.34, 0.32, 0.28, 0.18, 0.08, 0.03, 0.005, 0.0]
 SPE_RES = 0.40
 TTS_SIGMA = 0.3 / 2.355
+if a.k is None and "K_adcns_per_pe" in LIB.files:                                             # libreria
+    a.k = float(LIB["K_adcns_per_pe"])                                                          # libreria
 if a.k is None:
     a.k = json.load(open(_os.path.join(MIS, "mc_digit_K.json")))["K_adcns_per_pe"]
 if a.rate is None:
@@ -165,6 +171,7 @@ w = a.rate / n_gen / a.repliche
 np.savez_compressed(a.out, q=Q, amp=A, npe=np.array(NPE), trig=trig, trackl=np.array(TL),
                     edep_fibre=np.array(EF), edep_pannelli=np.array(EP), geo=a.geo, peso_hz=w,
                     n_gen=n_gen, rate_hz=a.rate, k=a.k, repliche=a.repliche, soglia=SOGLIA, t_trig=T_TRIG,
-                    file_mc=np.array([_os.path.basename(x) for x in files]))
+                    file_mc=np.array([_os.path.basename(x) for x in files]),
+                    **({"libreria": _os.path.basename(a.libreria)} if a.libreria else {}))                # libreria
 print("scritto %s: %d eventi generati, %d con PE, %d col trigger; K = %.0f ADC*ns/PE; "
       "rate col trigger %.4f Hz" % (a.out, n_gen, len(Q), trig.sum(), a.k, trig.sum() * w))

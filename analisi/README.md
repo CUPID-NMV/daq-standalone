@@ -126,7 +126,7 @@ due stime.
 
 | script | argomenti | cosa fa |
 |---|---|---|
-| `digit_mc.py` | MC_DIR NOME OUT.npz [REPLICHE] [--k] [--rate] | fotoni del MC -> QE del PMT H14600-103 (datasheet TPMO1097E05) -> PE con TTS e risoluzione -> forma dell'impulso misurata -> somma a tracce vere di piedistallo della 0013 -> stessa analisi e stesso trigger dei dati |
+| `digit_mc.py` | MC_DIR NOME OUT.npz [REPLICHE] [--k] [--rate] [--libreria L] | fotoni del MC -> QE del PMT H14600-103 (datasheet TPMO1097E05) -> PE con TTS e risoluzione -> forma dell'impulso misurata -> somma a tracce vere di piedistallo della 0013 -> stessa analisi e stesso trigger dei dati. Con `--libreria measurements/libreria_digit_pmt_20261030.npz` forma, rumore, K e bordo del trigger sono quelli di adesso, con l'inverter (`20261104_forma_1pe_pmt/`); senza, come prima |
 | `calibra_k.py` | MUONI_DIGIT.npz | scala ADC·ns per PE (PMT x scheda di amplificazione) dai muoni MC contro i muoni LNF; scrive `measurements/mc_digit_K.json` |
 | `confronto_0013.py` | OUT | fondo LNGS 0013 contro Compton (righe e NaI) e muoni MC digitalizzati, in rate |
 
@@ -221,3 +221,62 @@ python3 analisi/20261101_rate_veto/rate_veto.py
 | `rate_veto.py` | [--cad DIR] [--out PREFISSO] | area d'acqua per faccia (proiezione del soffitto delle cavita', coi fori veri) contro i 960 x 360 mm del prototipo; rate di trigger del prototipo diviso in impulsi propri dei PMT (eventi di un PMT solo meno quelli del MC) e luce; rate del veto con tutto in proporzione all'area, o con gli impulsi propri in proporzione al numero di PMT. Scrive `measurements/rate_veto_20261101.json`, `_area.png`, `_rate.png` |
 | `rate_soglia_carica.py` | [--soglia-pe X] [--out PREFISSO] | la rate con una soglia in carica, dove la riga della soglia incontra i dati: sulla sola 0013, spettri di carica (Hz per 100 ADC·ns, l'area a destra della riga) e rate integrale R(>= x) con almeno un PMT sopra x, con l'asse del veto completo (x rapporto delle aree). Nella figura della sovrapposizione l'altezza dei punti alla riga e' una densita', e divisa per la durata di 0011 + 0013: non e' la rate con la soglia. Va dopo `rate_veto.py`, di cui legge il JSON. Scrive `measurements/rate_veto_20261101_soglia.json` e `.png` |
 | `tempo_morto.py` | [--tau-ms T] [--out PREFISSO] | tempo morto di CUPID se ogni trigger del veto apre una finestra di T ms (di serie 1): 1 - exp(-R T) con le finestre che si fondono, R T / (1 + R T) per un gate che non si riarma; per i rate del veto di `rate_veto.py` e `rate_soglia_carica.py` (almeno un PMT, o entrambi i PMT di un modulo, sopra soglia). Scrive `measurements/tempo_morto_veto_20261102.json` e `.png` |
+
+## 20261104_forma_1pe_pmt/ -- il PMT di adesso (scheda + inverter) per digit_mc
+
+Libreria dei PMT dallo scan del self-trigger del 2026-10-30
+(`LNGS_scan_54-0V_0000_750Ms_55PT`, coi PMT invertiti), con le stesse chiavi di
+`libreria_digit_0013.npz`: per `digit_mc.py --libreria`. Forma del SINGOLO
+fotoelettrone (passi a offset 10-20 dello scan di ciascun PMT), rumore dalle
+tracce senza impulso (scritte come 4095 - traccia, la convenzione a impulsi
+negativi di digit_mc), bordo del trigger a offset 100 e K dal fotoelettrone. Gli
+eventi senza impulso (`VUOTI_DA`) vengono, per ch20, dallo scan dei SiPM, coi PMT
+parcheggiati; per ch21 dallo scan di ch20, coi SiPM parcheggiati. Dal bucket la
+run si legge in ~10 minuti; lo script accetta anche un .npz con i primi 40000
+eventi di ch20 e ch21.
+
+```
+M=measurements
+python3 analisi/20261104_forma_1pe_pmt/libreria_pmt.py ~/nmv-data/WC/LNGS/LNGS_scan_54-0V_0000_750Ms_55PT.h5.gz $M/noise_scan_20261030_155318_ch20.json $M/noise_scan_20261030_160639_ch21.json
+python3 analisi/20261030_digit_mc/digit_mc.py MC_DIR NOME OUT.npz --libreria $M/libreria_digit_pmt_20261109.npz
+```
+
+**Baco su ch21, corretto il 2026-11-09: `libreria_digit_pmt_20261030.npz` non
+va piu' usata.** Gli eventi senza impulso di tutti e due i PMT venivano dallo
+scan dei SiPM, e nei 40000 eventi letti c'e' solo quello di ch16 (eventi
+19118-39999): li' ch21 porta la diafonia di ch16 (CLAUDE.md, +1.6 conteggi a
+240-340 ns). Tolta dagli impulsi di ch21, che non ce l'hanno, diventava
+un'undershoot finta: coda dimezzata (a +40 ns dal picco 0.010 contro 0.022, e
+0.021 negli impulsi veri), PE sottostimato (gobba 1647 invece di 1712 ADC*ns), e
+le tracce di rumore portavano la diafonia (+1.3 conteggi nel cancello 240-500,
+~0.2 PE senza segnale; scritto qui come "rumore" fino al 2026-11-09). Nel MC gli
+impulsi di ch21 a 3-6 PE uscivano larghi 12.1 ns contro 15.3 nei dati. Trovato
+nella chat dei pannelli (diagnosi in
+`~/Testbeam2026_WC_pannelli/data/produzione_hallA/daq_24h/confronto_20261109/baco_forma_ch21.ipynb`);
+la libreria nuova e' identica bit per bit a quella fatta li'
+(`produzione_hallA/libreria_digit_pmt_20261109.npz`, ramo pannelli). Quella del
+30/10 resta per le produzioni gia' fatte.
+
+Risultati (ch20 / ch21), libreria del 2026-11-09: ~4000 impulsi da 1 PE per PMT;
+FWHM 10.1 / 9.7 ns contro 8.3 / 8.4 dei lampi della 0013 (l'inverter li allarga:
+un lampo di piu' PE non puo' essere piu' stretto di un PE); dopo ~200 ns la coda
+e' entro qualche millesimo del picco (in ch20 -0.1%, piatta: l'alternata). K =
+1725 / 1795 ADC*ns per PE (gobba in -10..+30 ns: 1726 / 1712, come
+spe_pmt_scan.py; nei dati 1719 / 1709), medio 1760 contro 1647 dei muoni; ch20
+ha piu' coda lenta, e nel cancello 240-500 un PE porta 1891 / 1919 ADC*ns. Bordo
+del trigger a offset 100: 281 / 285 conteggi contro 310 / 319 della 0013 (come
+la taratura del 30/10, ~277 / 283). Piedistallo: sigma della carica a vuoto 308
+/ 407 ADC*ns; le tracce senza impulso stanno nel cancello -0.15 / -0.25
+conteggi rispetto a 0-150 ns. Residuo noto: col MC fatto con questa libreria
+ch21 esce ~1 ns piu' largo dei dati (la coda a 50-150 ns sta ~0.005 del picco
+sopra gli impulsi delle run del LNGS); ch20 coincide. Se servira', la forma del
+singolo PE si prende dagli impulsi piccoli delle run del LNGS stesse.
+
+Effetto su digit_mc della libreria del 30/10, col baco su ch21 (gamma a righe,
+parte 1; muoni LNGS): col trigger 34 ->
+91 eventi (0.38 -> 1.0 Hz), un fattore 2 dalla soglia (gli eventi da 2 PE
+stanno a cavallo: 55-65 mV contro 69-78) e 1.5 dalla forma; carica per PE dei
+muoni +17% in ch20, +2% in ch21. Il trigger resta un gradino al bordo basso:
+per impulsi da 11 ns il comparatore scatta o no a seconda della fase (CLAUDE.md),
+e con 2 PE a cavallo della soglia la rate dei gamma dipende molto da questo.
+Senza --libreria l'uscita di digit_mc e' identica (verificato).

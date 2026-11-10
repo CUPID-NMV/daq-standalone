@@ -13,9 +13,15 @@ quando non si sa si TOGLIE invece di lasciare quella di prima.
 """
 import re
 
-# "_54-0V" oppure "_HVoff" in fondo al prefisso. Serve a toglierla prima di
-# rimetterla: se no a ogni run il prefisso cresce di un pezzo.
-RE_HV = re.compile(r"_(?:\d+-\dV|HVoff)$")
+# "_54-0V" oppure "_HVoff" come pezzo intero del prefisso, fra due "_" o in
+# fondo. Serve a toglierla prima di rimetterla: se no a ogni run il prefisso
+# cresce di un pezzo. Non solo in fondo: il prefisso resta scritto nel TOML con
+# l'etichetta della run prima, e chi ci aggiunge qualcosa a mano la lascia in
+# mezzo. Il 2026-11-10 "LNGS__54-0V" + "_PMTOnly_offset-10-10", con l'uscita
+# spenta, e' diventato "LNGS__54-0V_PMTOnly_offset-10-10_HVoff": 54 V e HV
+# spenta nello stesso nome. Un pezzo di testo dell'utente della forma "_12-5V"
+# verrebbe preso per un'etichetta: e' il prezzo, e i nomi non ne hanno.
+RE_HV = re.compile(r"_(?:\d+-\dV|HVoff)(?=_|$)")
 
 # Oltre questa eta' una lettura dell'alimentatore non dice piu' niente su
 # adesso. Tre periodi di lettura, come il riassunto nella pagina.
@@ -57,7 +63,17 @@ def prefisso(base, et):
     Si toglie sempre quella vecchia prima di mettere la nuova, cosi' la
     funzione si puo' riapplicare a un prefisso gia' etichettato -- per
     esempio dopo un riavvio del controllore a meta' sequenza -- senza
-    accumulare pezzi. Con et = None resta il prefisso nudo.
+    accumulare pezzi. La nuova va dove stava la vecchia (la prima, se per
+    errore ce n'e' piu' d'una), cosi' l'ordine scelto da chi ha scritto il
+    prefisso resta; senza una vecchia, in fondo. Con et = None resta il
+    prefisso nudo.
     """
-    base = RE_HV.sub("", str(base or "").strip())
-    return "%s_%s" % (base, et) if et and base else base
+    base = str(base or "").strip()
+    vecchia = RE_HV.search(base)
+    nudo = RE_HV.sub("", base)
+    if not et or not nudo:
+        return nudo
+    if vecchia is None:
+        return "%s_%s" % (nudo, et)
+    i = vecchia.start()                  # prima della prima etichetta nudo e base coincidono
+    return "%s_%s%s" % (nudo[:i], et, nudo[i:])

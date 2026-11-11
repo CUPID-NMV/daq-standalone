@@ -38,9 +38,25 @@ import time
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 
+# L'inizio dell'oggetto di ogni mail della DAQ, in un posto solo. Fino al
+# 2026-11-11 era "[DAQ V1742]", che con piu' schede (anche un VX2730B) non e'
+# piu' vero. Chi inoltra le mail con una regola sull'oggetto deve cercare
+# "[DAQ]": una regola su "[DAQ V1742]" non le vede piu'.
+PREFISSO_OGGETTO = "[DAQ]"
+PREFISSI_VECCHI = ("[DAQ V1742] ",)
+
+
+def senza_prefisso(oggetto):
+    """L'oggetto senza il prefisso, nuovo o vecchio: per gli elenchi nei riepiloghi."""
+    for p in (PREFISSO_OGGETTO + " ",) + PREFISSI_VECCHI:
+        if oggetto.startswith(p):
+            return oggetto[len(p):]
+    return oggetto
+
+
 SERVER = ("smtp.lngs.infn.it", "pmg1.lnf.infn.it", "pmg2.lnf.infn.it")
 PORTA = 25
-MITTENTE = "DAQ V1742 <daq@lnf.infn.it>"
+MITTENTE = "DAQ <daq@lnf.infn.it>"   # fino al 2026-11-11 "DAQ V1742"; l'indirizzo non cambia
 DOMINI_RAGGIUNGIBILI = ("lnf.infn.it",)
 
 # Il greylisting accetta dopo ~5 minuti (misurato: rifiuto alle 15:20, accettato
@@ -172,7 +188,7 @@ def main():
                     help="manda una mail di prova a questi indirizzi")
     a = ap.parse_args()
     ora = time.strftime("%Y-%m-%d %H:%M:%S %Z")
-    m = componi("[DAQ V1742] Test mail - sent %s" % ora,
+    m = componi(PREFISSO_OGGETTO + " Test mail - sent %s" % ora,
                 "Test mail from the DAQ PC (%s).\n\nSent at: %s\n" % (socket.gethostname(), ora),
                 a.prova)
     ok, ko = invia(m, a.prova)

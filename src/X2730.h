@@ -28,6 +28,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -78,6 +79,17 @@ private:
     uint32_t    fSelfMajority = 2;
     uint32_t    fFlushEvery = 1;
 
+    // --- soglie a run in corso ---
+    // Come per il V1742: un file di comando, una riga "<canale> <soglia>"
+    // (modulo, in conteggi dalla base), riletto quando cambia; lo stato
+    // corrente in live-status-<scheda>.json per controllore e monitor.
+    std::string fLiveThresholdPath;
+    std::string fStatusPath;
+    std::filesystem::file_time_type fLiveThresholdMtime{};
+    bool        fLiveThresholdFound = false;   // il file c'era (data valida)
+    uint32_t    fThresholdGen = 0;             // quante volte le soglie sono cambiate
+    uint64_t    fThresholdGenRow = 0;          // evento dell'ultimo cambio
+
     // --- scheda ---
     uint64_t    fDev = 0;
     uint64_t    fEp = 0;
@@ -115,6 +127,8 @@ private:
     std::vector<T> ScalarOrList(const std::string& key, T def, size_t n);
     std::vector<uint32_t> UIntList(const std::string& key, bool& present);
     void LogBoardStatus(const std::string& when);
+    void CheckLiveThresholds();
+    void WriteStatusFile();
     void Flush();
     void CloseOutputFile();
 };

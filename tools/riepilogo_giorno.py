@@ -25,6 +25,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import elog   # noqa: E402
 import efficienza   # noqa: E402
+import posta   # noqa: E402  (solo per l'inizio dell'oggetto: posta non importa niente del progetto)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SIGMA_N_EFF = efficienza.SIGMA_N
@@ -276,7 +277,7 @@ def componi_riepilogo(cartelle_dati, giorno):
     male = [r for r in righe if r["chiusa"] == "NO"]
     disco = shutil.disk_usage(cartelle_dati[0])
 
-    oggetto = "[DAQ V1742] Daily summary %s — %d runs, %s events" % (
+    oggetto = posta.PREFISSO_OGGETTO + " Daily summary %s — %d runs, %s events" % (
         giorno, len(righe), format(eventi, ",").replace(",", " "))
 
     intest, tab = _tabella(righe)
@@ -379,7 +380,7 @@ def componi_sequenza(log_run, come, inizio, chi="", allarmi=()):
             righe.append(r)
     adesso = time.strftime("%H:%M")
     if not righe:
-        oggetto = "[DAQ V1742] Sequence finished — no runs: %s" % come
+        oggetto = posta.PREFISSO_OGGETTO + " Sequence finished — no runs: %s" % come
         testo = "The run queue ended at %s without completing any run: %s\n" % (adesso, come)
         return oggetto, testo, None, None
     giorno = righe[0]["data"]
@@ -392,7 +393,7 @@ def componi_sequenza(log_run, come, inizio, chi="", allarmi=()):
     byte = sum(int(r["byte"]) for r in righe if r["byte"] != "")
     male = [r for r in righe if r["chiusa"] == "NO"]
     breve = come.rstrip(".").split(":")[0].lower()
-    oggetto = "[DAQ V1742] Sequence finished — %d runs, %s events, %s" % (
+    oggetto = posta.PREFISSO_OGGETTO + " Sequence finished — %d runs, %s events, %s" % (
         len(righe), format(eventi, ",").replace(",", " "), breve)
 
     p0 = righe[0]
@@ -443,7 +444,6 @@ def main():
         open(a.png, "wb").write(png)
         print("grafico in", a.png)
     if a.invia:
-        import posta
         m = posta.componi(oggetto, testo, a.invia, html=html_, immagini=[("rate", png)])
         print("spedisco alle %s" % time.strftime("%H:%M:%S %Z"))
         ok, ko = posta.invia(m, a.invia)

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <random>
 #include <sstream>
@@ -130,6 +131,12 @@ X2730::X2730(Config& cfg, const std::string& board) : fConfig(cfg), fBoard(board
     fGain         = ScalarOrList<double>("Gain", 0.0, fChannels.size());
     fIOLevel      = Val<std::string>("IOLevel", "NIM", false);
     fFlushEvery   = std::max<uint32_t>(1, static_cast<uint32_t>(Val<int64_t>("LiveFlushEvery", 1, false)));
+    // Col nome della scheda nel file: nella stessa cartella ci sono le altre
+    // schede del run, e un comando senza nome andrebbe a tutte.
+    fLiveThresholdPath = Val<std::string>("LiveThresholdFile", "", false);
+    if (fLiveThresholdPath.empty())
+        fLiveThresholdPath = fOutputDir + "/live-threshold-" + fBoard + ".txt";
+    fStatusPath = fOutputDir + "/live-status-" + fBoard + ".json";
 
     // Il verso dell'impulso decide insieme fronte e segno della soglia del
     // self-trigger. Sono una cosa sola anche qui: sbagliarne uno non da'
@@ -545,6 +552,112 @@ void X2730::Flush() {
 //  Acquisizione
 // ===========================================================================
 
+// ===========================================================================
+//  Soglie a run in corso
+// ===========================================================================
+
+void X2730::CheckLiveThresholds() {
+    // La data del file dice se c'e' un comando nuovo. Si confronta con quella
+    // dell'ultimo comando letto, al nanosecondo: due comandi nello stesso
+    // secondo (uno scan veloce) non si perdono, come succederebbe coi secondi.
+    std::error_code ec;
+    const auto mt = std::filesystem::last_write_time(fLiveThresholdPath, ec);
+    if (ec) return;                                   // nessun comando
+    if (fLiveThresholdFound && mt == fLiveThresholdMtime) return;   // gia' letto
+    fLiveThresholdMtime = mt;
+    fLiveThresholdFound = true;
+
+    std::ifstream in(fLiveThresholdPath);
+    if (!in) return;
+    const int segno = (fPolarity == "positive") ? 1 : -1;
+    bool cambiata = false;
+    std::string riga;
+    while (std::getline(in, riga)) {
+        if (riga.empty() || riga[0] == '#') continue;
+        std::istringstream ss(riga);
+        long ch = -1;
+        double thr = -1.0;
+        std::string resto;
+        if (!(ss >> ch >> thr) || (ss >> resto)) {
+            Log::OutWarning("Live threshold: cannot read \"" + riga + "\", line ignored.");
+            continue;
+        }
+        auto it = std::find(fSelfChannels.begin(), fSelfChannels.end(), static_cast<uint32_t>(ch));
+        if (ch < 0 || it == fSelfChannels.end()) {
+            Log::OutWarning("Live threshold: ch" + std::to_string(ch) +
+                            " does not take part in the self-trigger, ignored.");
+            continue;
+        }
+        // Si scrive il modulo, come SelfTriggerThreshold nel TOML: il segno
+        // lo mette la polarita'. Una soglia negativa nel file sarebbe un
+        // errore di battitura, non un cambio di fronte.
+        if (thr < 1.0 || thr != std::floor(thr)) {
+            Log::OutWarning("Live threshold: ch" + std::to_string(ch) + " = " + Num(thr) +
+                            ": it must be a whole number of ADC counts, at least 1. Ignored.");
+            continue;
+        }
+        const size_t k = static_cast<size_t>(it - fSelfChannels.begin());
+        const int32_t nuova = static_cast<int32_t>(thr);
+        if (nuova == fSelfThreshold[k]) {
+            Log::OutSummary("→ Live threshold: ch" + std::to_string(ch) + " = " + std::to_string(nuova) +
+                            " counts, already so.");
+            continue;
+        }
+        const std::string percorso = "/ch/" + std::to_string(ch) + "/par/TriggerThr";
+        const std::string valore = std::to_string(segno * nuova);
+        // Non fatale: un valore che la scheda rifiuta lascia la soglia di
+        // prima, e il run prosegue. Si rilegge quello che ha preso davvero.
+        if (CAEN_FELib_SetValue(fDev, percorso.c_str(), valore.c_str()) != CAEN_FELib_Success) {
+            Log::OutWarning("Live threshold: the board refused ch" + std::to_string(ch) + " = " + valore +
+                            " (" + LastError() + "): threshold left at " +
+                            std::to_string(segno * fSelfThreshold[k]) + ".");
+            continue;
+        }
+        const std::string letta = Get(percorso, false);
+        Log::OutSummary("→ Live threshold: ch" + std::to_string(ch) + " " +
+                        std::to_string(segno * fSelfThreshold[k]) + " -> " + valore +
+                        " counts (read back: " + (letta.empty() ? "?" : letta) + ") from event " +
+                        std::to_string(fRows));
+        fSelfThreshold[k] = nuova;
+        cambiata = true;
+    }
+    if (cambiata) {
+        ++fThresholdGen;
+        fThresholdGenRow = fRows;
+        WriteStatusFile();
+    }
+}
+
+void X2730::WriteStatusFile() {
+    // La stessa forma di quello del V1742 (live-status-<scheda>.json):
+    // "offset" e' la distanza della soglia dalla base, cioe' qui la soglia
+    // relativa stessa; "threshold" il valore scritto nella scheda, col segno.
+    // La base la scheda non la dichiara (la soglia e' relativa): null.
+    // Scritto in un temporaneo e rinominato: chi legge trova sempre un file intero.
+    const std::string tmp = fStatusPath + ".tmp";
+    std::ofstream out(tmp);
+    if (!out) return;
+    const int segno = (fPolarity == "positive") ? 1 : -1;
+    out << "{\n";
+    out << "  \"file\": \"" << std::filesystem::path(fOutputPath).filename().string() << "\",\n";
+    out << "  \"board\": \"" << fBoard << "\",\n";
+    out << "  \"model\": \"" << fModel << "\",\n";
+    out << "  \"threshold_mode\": \"relative\",\n";
+    out << "  \"generation\": " << fThresholdGen << ",\n";
+    out << "  \"changed_at_event\": " << fThresholdGenRow << ",\n";
+    out << "  \"polarity\": \"" << (fPolarity == "positive" ? "rising" : "falling") << "\",\n";
+    out << "  \"channels\": [\n";
+    for (size_t k = 0; k < fSelfChannels.size(); ++k)
+        out << "    {\"ch\": " << fSelfChannels[k] << ", \"offset\": " << fSelfThreshold[k]
+            << ", \"threshold\": " << segno * fSelfThreshold[k] << ", \"baseline\": null}"
+            << (k + 1 < fSelfChannels.size() ? "," : "") << "\n";
+    out << "  ]\n}\n";
+    out.close();
+    std::error_code ec;
+    std::filesystem::rename(tmp, fStatusPath, ec);
+    if (ec) Log::OutWarning("Cannot publish the status file: " + ec.message());
+}
+
 void X2730::Acquire() {
     // La FELib vuole un buffer per OGNI canale della scheda, anche spento
     // (per quelli WAVEFORM_SIZE torna 0).
@@ -553,6 +666,17 @@ void X2730::Acquire() {
     for (uint32_t c = 0; c < fNumCh; ++c) wave[c] = buf[c].data();
     std::vector<size_t> nsamp(fNumCh, 0);
     std::vector<int16_t> riga(fWidth);
+
+    // Un file di comando rimasto da un run precedente non si applica: se ne
+    // prende la data, e vale solo quello che si scrive da adesso.
+    if (fSelfTrigger) {
+        std::error_code ec;
+        fLiveThresholdMtime = std::filesystem::last_write_time(fLiveThresholdPath, ec);
+        fLiveThresholdFound = !ec;
+        WriteStatusFile();
+        Log::OutSummary("→ Live thresholds: write \"<channel> <threshold>\" lines (ADC counts from the "
+                        "baseline, without sign) into " + fLiveThresholdPath + " to change them while running.");
+    }
 
     if (CAEN_FELib_SendCommand(fDev, "/cmd/ArmAcquisition") != CAEN_FELib_Success) Fail("ArmAcquisition");
     if (CAEN_FELib_SendCommand(fDev, "/cmd/SwStartAcquisition") != CAEN_FELib_Success) Fail("SwStartAcquisition");
@@ -591,7 +715,7 @@ void X2730::Acquire() {
     }
 
     const auto t0 = std::chrono::steady_clock::now();
-    auto ultimaFlush = t0, ultimaStampa = t0;
+    auto ultimaFlush = t0, ultimaStampa = t0, ultimaSoglia = t0;
     uint64_t totale = 0, scartati = 0;
     int errori = 0;
     const int maxErrori = 20;
@@ -621,6 +745,10 @@ void X2730::Acquire() {
         if (fMaxTime > 0 && t >= fMaxTime) {
             Log::OutSummary("→ MaxTime reached (" + Num(fMaxTime) + " s).");
             break;
+        }
+        if (fSelfTrigger && ora - ultimaSoglia > std::chrono::milliseconds(250)) {
+            CheckLiveThresholds();
+            ultimaSoglia = ora;
         }
         if (ora - ultimaStampa > std::chrono::milliseconds(500)) {
             // Lo stesso formato del V1742, "Events decoded: N/M": e' la riga
@@ -743,6 +871,16 @@ void X2730::Acquire() {
     Log::OutSummary("→ Events written to file: " + std::to_string(fRows));
     if (scartati > 0)
         Log::OutWarning("→ Events skipped (unexpected size): " + std::to_string(scartati));
+    if (fThresholdGen > 0) {
+        // Nel file HDF5 restano le soglie della partenza: quelle della fine,
+        // e gli eventi dei cambi (righe "Live threshold" sopra), solo qui.
+        const int segno = (fPolarity == "positive") ? 1 : -1;
+        std::string thr;
+        for (size_t k = 0; k < fSelfChannels.size(); ++k)
+            thr += " ch" + std::to_string(fSelfChannels[k]) + "=" + std::to_string(segno * fSelfThreshold[k]);
+        Log::OutSummary("→ Self-trigger thresholds changed " + std::to_string(fThresholdGen) +
+                        " times during the run; at the end [ADC counts]:" + thr);
+    }
     if (persa)
         Log::OutWarning("→ Board at end: not readable (connection lost).");
     else

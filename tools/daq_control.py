@@ -1657,18 +1657,66 @@ class Controllo:
                 messaggio += "\n\nWorth a look:\n" + "\n".join("- " + a for a in avvisi)
             return True, messaggio, diff
 
-    def soglie_a_caldo(self, offsets):
+    def soglie_a_caldo(self, offsets, scheda=None):
         """Scrive il file di comando delle soglie del self-trigger.
 
         E' l'unica cosa che ha effetto sulla run IN CORSO. Non tocca il TOML:
         alla run successiva torna quello che c'e' scritto nel file, ed e'
         voluto -- uno scan non deve lasciare residui.
+
+        Con le schede ([settings] MultiBoard) il comando e' per UNA scheda,
+        nel suo file (live-threshold-<scheda>.txt): un file comune andrebbe a
+        tutte, e per un VX2730B i numeri sono soglie in conteggi dalla base,
+        per un V1742 offset sulla baseline in Transparent Mode. Il percorso lo
+        dice la DAQ stessa nel log ("... into <file> to change them while
+        running"): il TOML potrebbe essere cambiato dopo la partenza.
         """
-        if not trova_daq():
-            return False, "There is no run in progress to apply them to."
-        canali = self.config().get("self_canali") or []
+        try:
+            import tomllib
+            with open(self.toml, "rb") as f:
+                d = tomllib.load(f)
+        except Exception as e:
+            return False, "Cannot read the TOML: %s" % e
+        g = d.get("digitizer", {})
+        schede = self.schede(d)
+        vive = trova_daq_tutte()
+        cosa = "offsets"
+        if schede:
+            voce = next((x for x in schede if x["nome"] == scheda), None)
+            if voce is None:
+                return False, ("Which board? Open the tab of the board whose thresholds you "
+                               "want to change." if not scheda else "No board '%s' in the TOML." % scheda)
+            if scheda not in vive.values():
+                return False, "Board %s is not acquiring: there is no run to apply them to." % scheda
+            t = (d.get("boards") or {}).get(scheda) or {}
+            if voce["digitizer2"]:
+                fonti = [x.strip().lower() for x in str(t.get("TriggerSource", "Software")).split("|")]
+                if not ({"self", "itla"} & set(fonti)):
+                    return False, "Board %s does not run on self-trigger (TriggerSource = %s)." % (
+                        scheda, t.get("TriggerSource", "Software"))
+                canali = t.get("SelfTriggerChannels") or t.get("ChannelList") or list(range(16))
+                cosa = "thresholds"
+            else:
+                if not t.get("SelfTrigger", g.get("SelfTrigger")):
+                    return False, "Board %s does not run on self-trigger." % scheda
+                canali = t.get("SelfTriggerChannels", g.get("SelfTriggerChannels")) or []
+            cartella = t.get("OutputDir", g.get("OutputDir")) or os.path.dirname(self.log_path)
+            percorso = os.path.join(cartella, "live-threshold-%s.txt" % scheda)
+            console = self._console_di(scheda)
+        else:
+            if not vive:
+                return False, "There is no run in progress to apply them to."
+            canali = g.get("SelfTriggerChannels") or []
+            cartella = g.get("OutputDir") or os.path.dirname(self.log_path)
+            percorso = os.path.join(cartella, "live-threshold.txt")
+            console = self.log_path
+        # Il file che la DAQ in corso sta davvero guardando, se l'ha scritto.
+        for r in self.testa_log(400, console):
+            m = re.search(r"into (\S+) to change them while running", r)
+            if m:
+                percorso = m.group(1)
         if not canali:
-            return False, "The TOML does not declare SelfTriggerChannels."
+            return False, "The TOML does not declare the self-trigger channels."
         valori = [v for v in str(offsets).replace(",", " ").split() if v]
         if len(valori) == 1:
             valori = valori * len(canali)
@@ -1676,18 +1724,20 @@ class Controllo:
             return False, ("%d values are needed, one per channel %s (or a single "
                            "one for all)." % (len(canali), canali))
         try:
-            righe = "".join("%d %g\n" % (int(c), float(v)) for c, v in zip(canali, valori))
+            numeri = [float(v) for v in valori]
         except ValueError:
-            return False, "The offsets must be numbers."
-        percorso = os.path.join(os.path.dirname(self.log_path), "live-threshold.txt")
-        cfg = self.config().get("cartella_dati")
-        if cfg:
-            percorso = os.path.join(cfg, "live-threshold.txt")
+            return False, "The %s must be numbers." % cosa
+        if cosa == "thresholds" and any(x < 1 or x != int(x) for x in numeri):
+            return False, ("VX2730B thresholds are whole ADC counts from the baseline, "
+                           "without sign (the polarity gives it), at least 1.")
+        righe = "".join("%d %g\n" % (int(c), x) for c, x in zip(canali, numeri))
         try:
             io.open(percorso, "w", encoding="utf-8").write(righe)
         except OSError as e:
             return False, "Cannot write %s: %s" % (percorso, e)
-        return True, "Thresholds applied to the running acquisition: %s" % righe.replace("\n", "  ").strip()
+        return True, ("%s applied to the running acquisition%s: %s" % (
+            cosa.capitalize(), " of board " + scheda if schede else "",
+            righe.replace("\n", "  ").strip()))
 
     # -- log ---------------------------------------------------------------
     def coda_log(self, n=25, percorso=None):
@@ -2046,7 +2096,7 @@ class Controllo:
         # Un guasto dell'hardware che ha fatto cadere la run interessa a chi
         # segue le run E a chi segue l'hardware.
         tipi = ("hw", "errori") if tipo == "hw" else ("errori",)
-        self.notifiche.manda(tipi, "[DAQ V1742] %s \u2014 run %s: %s"
+        self.notifiche.manda(tipi, notifiche.PREFISSO + " %s \u2014 run %s: %s"
                              % (etichetta, nome, motivo[:90]), corpo)
 
     def _allarme_psu(self, alim, chiave, titolo, dettagli):
@@ -2064,7 +2114,7 @@ class Controllo:
                  % (titolo, time.strftime("%H:%M:%S"), alim.descrizione, alim.idn or "?",
                     alim.host, dettagli, run, self.notifiche.cfg["ripeti_hw_min"],
                     notifiche.indirizzo_pagina(self.notifiche.porta)))
-        self.notifiche.manda(("hw",), "[DAQ V1742] HARDWARE \u2014 " + titolo, corpo,
+        self.notifiche.manda(("hw",), notifiche.PREFISSO + " HARDWARE \u2014 " + titolo, corpo,
                              chiave="%s/%s" % (alim.nome, chiave))
 
     def _versa_elog(self):
@@ -2895,7 +2945,7 @@ class Controllo:
                  % (nome, numero, ", ".join(vive) or "none", console,
                     "\n  ".join(righe) or "(nothing)",
                     notifiche.indirizzo_pagina(self.notifiche.porta)))
-        self.notifiche.manda(("errori",), "[DAQ V1742] ERROR \u2014 board %s did not start (run %04d)"
+        self.notifiche.manda(("errori",), notifiche.PREFISSO + " ERROR \u2014 board %s did not start (run %04d)"
                              % (nome, numero), corpo)
 
     def cartella_uscita(self):
@@ -3196,7 +3246,7 @@ PAGINA = r"""<!doctype html>
       </span>
     </div>
     <div id="cfgcaldo" style="margin-top:12px;padding-top:10px;border-top:1px solid #eee">
-      <label style="font-size:12px;color:#6b6a65">self-trigger thresholds on the RUNNING acquisition
+      <label style="font-size:12px;color:#6b6a65"><span id="caldolab">self-trigger thresholds on the RUNNING acquisition</span>
         <input id="caldo" placeholder="e.g. 5  or  4 6" style="width:110px">
       </label>
       <button id="applica" style="background:#ececea;margin-left:6px">Apply now</button>
@@ -4120,7 +4170,18 @@ function mostraTab(t){
   for(const el of document.querySelectorAll("#cfgtabs span"))
     el.classList.toggle("sel", el.dataset.tab === t);
   $("cfgcomune").style.display = t === "comune" ? "" : "none";
-  $("cfgcaldo").style.display = t === "comune" ? "" : "none";
+  // Le soglie a caldo sono di una scheda: con le schede la riga sta nella
+  // linguetta della scheda, e il comando va a lei sola.
+  const sch = (CFG.schede || []).find(x => x.nome === t);
+  const conSchede = (CFG.schede || []).length > 0;
+  $("cfgcaldo").style.display = (conSchede ? !!sch : t === "comune") ? "" : "none";
+  $("cfgcaldo").dataset.scheda = sch ? sch.nome : "";
+  $("cfgcaldo").dataset.d2 = sch && sch.digitizer2 ? "1" : "";
+  $("caldolab").textContent = sch && sch.digitizer2
+    ? "self-trigger thresholds of " + sch.nome + " on the RUNNING acquisition [ADC counts from the baseline]"
+    : sch ? "self-trigger offsets of " + sch.nome + " on the RUNNING acquisition"
+          : "self-trigger thresholds on the RUNNING acquisition";
+  $("caldo").placeholder = sch && sch.digitizer2 ? "e.g. 60  or  60 80" : "e.g. 5  or  4 6";
   for(const el of document.querySelectorAll("#cfgschede > div"))
     el.style.display = el.dataset.scheda === t ? "" : "none";
 }
@@ -4329,11 +4390,14 @@ $("salva").onclick = async () => {
 
 $("applica").onclick = async () => {
   const v = $("caldo").value.trim();
-  if(!v){ msg("Enter the offsets to apply.", false); return; }
-  if(!confirm("Apply thresholds " + v + " to the RUNNING acquisition?\n\n" +
+  const scheda = $("cfgcaldo").dataset.scheda || "";
+  const d2 = $("cfgcaldo").dataset.d2 === "1";
+  if(!v){ msg(d2 ? "Enter the thresholds to apply." : "Enter the offsets to apply.", false); return; }
+  if(!confirm("Apply " + (d2 ? "thresholds " : "offsets ") + v +
+              (scheda ? " to board " + scheda : "") + " on the RUNNING acquisition?\n\n" +
               "The TOML is untouched: the next run goes back to the file values.")) return;
   try{
-    const q = new URLSearchParams({offsets: v, chi: $("chi").value, token: TOKEN});
+    const q = new URLSearchParams({offsets: v, scheda: scheda, chi: $("chi").value, token: TOKEN});
     const d = await (await fetch("/api/soglie?" + q, {method: "POST"})).json();
     msg(d.messaggio, d.esito);
   }catch(e){ msg("Request failed: " + e, false); }
@@ -5128,7 +5192,8 @@ def crea_handler(ctrl, token):
                 registra(chi, da, "psu/" + azione, messaggio)
 
             elif parti.path == "/api/soglie":
-                esito, messaggio = ctrl.soglie_a_caldo(qs.get("offsets", [""])[0])
+                esito, messaggio = ctrl.soglie_a_caldo(qs.get("offsets", [""])[0],
+                                                       qs.get("scheda", [""])[0] or None)
                 registra(chi, da, "soglie a caldo", messaggio)
 
             elif parti.path == "/api/notifiche":

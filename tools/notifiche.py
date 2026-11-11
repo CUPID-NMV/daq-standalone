@@ -28,6 +28,8 @@ import time
 import posta
 import riepilogo_giorno
 
+PREFISSO = posta.PREFISSO_OGGETTO      # l'inizio dell'oggetto delle mail: vedi posta.py
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TIPI = ("riepilogo", "sequenza", "errori", "hw", "cloud")
 NOMI_TIPI = {"riepilogo": "Daily summary", "sequenza": "Sequence end",
@@ -243,7 +245,7 @@ class Notifiche:
         if not a:
             return False, "No recipients to send a test to."
         ora = time.strftime("%Y-%m-%d %H:%M:%S %Z")
-        self.manda(("prova",), "[DAQ V1742] Test mail - sent %s" % ora,
+        self.manda(("prova",), PREFISSO + " Test mail - sent %s" % ora,
                    "Test mail from the DAQ controller.\n\nSent at: %s\nController: %s\n"
                    % (ora, indirizzo_pagina(self.porta)), a=a)
         return True, "Test mail queued for %s: the result appears under Last notifications." % ", ".join(a)
@@ -266,7 +268,7 @@ class Notifiche:
         html_ = html_.replace("</body>", "<p>%s</p></body>" % "<br>".join(
             riepilogo_giorno.html.escape(r) for r in nuvola.splitlines()))
         if allarmi:
-            elenco = ["%s %s" % (v["quando"][11:16], v["oggetto"].replace("[DAQ V1742] ", ""))
+            elenco = ["%s %s" % (v["quando"][11:16], posta.senza_prefisso(v["oggetto"]))
                       for v in allarmi]
             testo += "\nAlarms today: %d\n  %s\n" % (len(allarmi), "\n  ".join(elenco))
             html_ = html_.replace("</body>", "<p><b>Alarms today: %d</b><br>%s</p></body>" % (
@@ -296,7 +298,7 @@ class Notifiche:
                 for v in self.storico(500):
                     if v.get("tipo") in ("errori", "hw", "cloud") and v.get("quando", "") >= da:
                         allarmi.append("%s %s" % (v["quando"][11:16],
-                                                  v["oggetto"].replace("[DAQ V1742] ", "")))
+                                                  posta.senza_prefisso(v["oggetto"])))
                 oggetto, testo, html_, png = riepilogo_giorno.componi_sequenza(
                     log_run, come, inizio, chi, allarmi)
                 testo += "\nController: %s\n" % indirizzo_pagina(self.porta)
@@ -382,7 +384,7 @@ class Notifiche:
                      and v["nome"] not in s["avvisate"] and v["fine"] > s["attivo_dal"]]
             if nuove:
                 s["avvisate"] = (s["avvisate"] + [v["nome"] for v in nuove])[-500:]
-                self.manda(("cloud",), "[DAQ V1742] CLOUD — %s only on the DAQ disk" % (
+                self.manda(("cloud",), PREFISSO + " CLOUD — %s only on the DAQ disk" % (
                     "run %s stays" % nuove[0]["nome"] if len(nuove) == 1 else "%d runs stay" % len(nuove)),
                     "These runs were closed badly -- the DAQ died before closing the file -- so\n"
                     "archivia.py neither compresses nor sends them: such a file can only be read\n"
@@ -414,7 +416,7 @@ class Notifiche:
                     righe.append("%s: %s" % (n, riga_cloud(v, adesso)))
                 else:
                     righe.append("%s: no longer among the runs to send (moved or deleted?)" % n)
-            self.manda(("cloud",), "[DAQ V1742] CLOUD OK — %s" % (
+            self.manda(("cloud",), PREFISSO + " CLOUD OK — %s" % (
                 "run %s is on the cloud" % s["in_allarme"][0] if len(s.get("in_allarme", [])) == 1
                 and s["in_allarme"][0] != STATO_ILLEGGIBILE else "the alarm is over"),
                 "The cloud alarm that started at %s is over, after %s.\n\n  - %s\n\nController: %s\n"
@@ -452,7 +454,7 @@ class Notifiche:
                     "Last transfer error: %s, %s: %s\n" % (_giorno_ora(ko["quando"]), ko["chiave"],
                                                            breve_errore(ko["messaggio"])) if ko else "",
                     self.cfg["cloud_ripeti_h"], indirizzo_pagina(self.porta)))
-        self.manda(("cloud",), "[DAQ V1742] CLOUD — %s%s" % ("still: " if ancora else "", oggetto), corpo)
+        self.manda(("cloud",), PREFISSO + " CLOUD — %s%s" % ("still: " if ancora else "", oggetto), corpo)
 
     def _leggi_cloud(self):
         try:

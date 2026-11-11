@@ -34,6 +34,11 @@ Per ogni run:
      .log, c'e' anche il resto. Se fallisce riprova dopo 5 minuti, poi 15,
      45, poco piu' di due ore, poi ogni 6 ore; ma appena un trasferimento
      riesce, quelli in pausa si riprovano subito: il cloud e' tornato.
+     Prima di ogni file guarda sul cloud se c'e' gia' un file con quel nome
+     che il registro non conosce (vedi CLOUD_URL): se e' lo stesso file
+     (stessa lunghezza, stesso ETag) lo segna come mandato, se e' diverso NON
+     lo manda e lo segnala come conflitto; se il cloud non sa rispondere, il
+     file aspetta come dopo un trasferimento fallito.
 
 Chi deve sapere se le run sono arrivate e' il controllore: ogni due minuti
 legge --stato --json, e se una run di dati non e' sul cloud mezz'ora dopo la
@@ -54,7 +59,12 @@ Cosa non tocca, di proposito:
     sola cartella col solo nome del file, e S3 sovrascrive senza avvisare:
     sul disco lo stesso nome compare in piu' cartelle (43 nomi in data/, 3
     dentro data/LNGS, al 2026-10-31). Per la stessa ragione un nome gia'
-    mandato da un altro file non si rimanda: si segnala come conflitto.
+    mandato da un altro file non si rimanda: si segnala come conflitto. Il
+    registro pero' sa solo cosa ha mandato QUESTO PC: un nome mandato da un
+    altro (il PC che questo sostituisce, una installazione che ha ripreso la
+    numerazione da capo, un cp_data a mano) lo dice solo il cloud, e per
+    questo glielo si chiede prima di ogni file. Un conflitto si risolve
+    rinominando il file e il suo .log con un nome libero, e --aggiungi.
 
 Registro: data/archivio.jsonl, una riga per azione. E' la memoria dello
 script: cosa e' gia' sul cloud, quanti tentativi ha fatto un file, da quando
@@ -72,6 +82,9 @@ import shutil
 import struct
 import subprocess
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOML = os.path.join(ROOT, "config", "run-local.toml")
@@ -81,6 +94,22 @@ RIPROVA_S = (300, 900, 2700, 8100, 21600)
 # cp_data chiede credenziali che valgono un'ora: oltre, un trasferimento non
 # puo' piu' riuscire, e tenerlo vivo terrebbe solo occupato il lucchetto.
 TIMEOUT_CARICA_S = 3900
+# Dove cp_data mette i file: bucket cygno-data, prefisso NMV/WC/LNGS, piu' il
+# nome del file (/home/daq/DAQ/online/source/cp_data.py, che e' di CYGNO). Si
+# legge senza credenziali se davanti al bucket c'e' il tenant, "cygno:": una
+# HEAD risponde 200 se il file c'e' e 404 se no (provato il 2026-11-11 dal PC
+# DAQ, dal notebook che lo sostituira' e dal Mac). Senza il tenant risponde 404
+# a tutto, ed e' per questo che prima si credeva illeggibile in anonimo. Se
+# cp_data cambia prefisso va cambiato anche qui, o in [archive] CloudCheckURL
+# nel TOML: con l'indirizzo sbagliato il controllo direbbe "non c'e'" sempre,
+# e non proteggerebbe piu' niente. CloudCheckURL = "" lo spegne.
+CLOUD_URL = "https://s3.cr.cnaf.infn.it:7480/cygno:cygno-data/NMV/WC/LNGS"
+TIMEOUT_HEAD_S = 20
+# boto3, dentro cp_data, manda a pezzi da 8 MiB i file da 8 MiB in su, e per
+# un file a pezzi l'ETag di S3 e' l'md5 degli md5 dei pezzi seguito da
+# "-numero dei pezzi"; sotto, l'md5 del file. Verificato il 2026-11-11 sulla
+# 0362: 50 pezzi, ETag identico, e il .log con l'md5 semplice.
+PEZZO_S3 = 8 * 1024 * 1024
 FIRMA_HDF5 = b"\x89HDF\r\n\x1a\n"
 NICE = ["nice", "-n", "19", "ionice", "-c", "3"]
 # pigz scrive lo stesso formato di gzip: daqio e i notebook non vedono
@@ -130,6 +159,32 @@ def md5_file(path):
         for blocco in iter(lambda: f.read(1 << 22), b""):
             h.update(blocco)
     return h.hexdigest()
+
+
+def etag_locale(path):
+    """L'ETag che questo file ha sul cloud se lo ha mandato cp_data (vedi PEZZO_S3)."""
+    with open(path, "rb") as f:
+        if os.fstat(f.fileno()).st_size < PEZZO_S3:
+            return hashlib.md5(f.read()).hexdigest()
+        pezzi = [hashlib.md5(b).digest() for b in iter(lambda: f.read(PEZZO_S3), b"")]
+    return "%s-%d" % (hashlib.md5(b"".join(pezzi)).hexdigest(), len(pezzi))
+
+
+def sul_cloud(chiave, url):
+    """Cosa c'e' sul cloud con questo nome: None se niente, se no un dict con
+    byte, etag e data (Last-Modified). Solleva OSError se il cloud non da' una
+    risposta chiara: in quel caso non si sa, e non si manda."""
+    req = urllib.request.Request("%s/%s" % (url.rstrip("/"), urllib.parse.quote(chiave)),
+                                 method="HEAD")
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT_HEAD_S) as r:
+            return dict(byte=int(r.headers.get("Content-Length", -1)),
+                        etag=(r.headers.get("ETag") or "").strip('"'),
+                        data=r.headers.get("Last-Modified", ""))
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise OSError("il cloud risponde %d %s" % (e.code, e.reason)) from None
 
 
 def ambiente_cp_data():
@@ -451,12 +506,22 @@ def pausa(path, reg):
     return n, ultimo, (dopo if time.time() < dopo else None)
 
 
+def descrivi_remoto(e):
+    """Il file trovato sul cloud al posto di questo: grandezza e data, che si
+    leggono uguali nel registro e nella mail (in inglese)."""
+    return "%s, %s" % (mb(e.get("remoto_byte", 0)), e.get("remoto_data") or "?")
+
+
 def ostacolo(path, reg):
     """Perche' un file non si puo' mandare adesso: (motivo, spiegazione), oppure None."""
     chiave = os.path.basename(path)
     altri = [e for e in reg.di("caricato", chiave=chiave) if e["file"] != path]
     if altri:
         return "conflitto", "col nome %s c'e' gia' sul cloud %s" % (chiave, altri[-1]["file"])
+    remoti = reg.di("conflitto_cloud", file=path)
+    if remoti:
+        return "conflitto", "col nome %s c'e' gia' sul cloud un file diverso, %s" % (
+            chiave, descrivi_remoto(remoti[-1]))
     if reg.di("caricato", file=path):
         return "cambiato", "e' cambiato dopo il trasferimento"
     n, _, dopo = pausa(path, reg)
@@ -466,7 +531,39 @@ def ostacolo(path, reg):
     return None
 
 
-def carica_run(parti, comando, reg):
+def guarda_sul_cloud(p, st, md5, url, reg):
+    """Prima di mandare p: c'e' gia' sul cloud un file con questo nome che il
+    registro non conosce? S3 sovrascriverebbe senza avvisare. Torna "manda",
+    "fatto" (c'e' gia', ed e' proprio questo file) o "fermo" (conflitto, o il
+    cloud non sa rispondere: in tutti e due i casi non si manda)."""
+    chiave = os.path.basename(p)
+    try:
+        remoto = sul_cloud(chiave, url)
+    except OSError as e:
+        # Come un trasferimento fallito: stessa pausa, stessi allarmi. Meglio
+        # una run che arriva in ritardo che una run sovrascritta.
+        reg.aggiungi("errore_carica", file=p, chiave=chiave, secondi=0.0,
+                     messaggio="non so se sul cloud c'e' gia' %s: %s" % (chiave, e))
+        scrivi("NON lo mando, non so se sul cloud c'e' gia' (tentativo %d): %s: %s"
+               % (reg.tentativi(p)[0], p, e))
+        return "fermo"
+    if remoto is None:
+        return "manda"
+    if remoto["byte"] == st.st_size and remoto["etag"] == etag_locale(p):
+        # E' questo stesso file, mandato senza che il registro lo sapesse: un
+        # cp_data uscito con errore a trasferimento finito, o un registro perso.
+        reg.aggiungi("caricato", file=p, chiave=chiave, byte=st.st_size, mtime=st.st_mtime,
+                     md5=md5, secondi=0.0, mb_s=0.0,
+                     uscita="gia' sul cloud, identico (ETag %s)" % remoto["etag"])
+        scrivi("gia' sul cloud, identico: %s" % chiave)
+        return "fatto"
+    campi = {"remoto_" + k: v for k, v in remoto.items()}
+    reg.una_volta("conflitto_cloud", p, "NON lo mando: sul cloud c'e' gia' un file %s diverso "
+                  "(%s): %s" % (chiave, descrivi_remoto(campi), p), chiave=chiave, **campi)
+    return "fermo"
+
+
+def carica_run(parti, comando, reg, url=CLOUD_URL):
     """Manda i file di una run nell'ordine, fermandosi al primo che non passa.
     Torna True se ha provato almeno un trasferimento."""
     provato = False
@@ -475,11 +572,18 @@ def carica_run(parti, comando, reg):
             continue
         perche = ostacolo(p, reg)
         if perche:
-            if perche[0] in ("conflitto", "cambiato"):
+            # Un conflitto trovato sul cloud l'ha gia' scritto guarda_sul_cloud.
+            if perche[0] in ("conflitto", "cambiato") and not reg.di("conflitto_cloud", file=p):
                 reg.una_volta(perche[0], p, "NON lo mando, %s: %s" % (perche[1], p))
             return provato
         st = os.stat(p)
         md5 = md5_file(p)
+        if url:
+            esito = guarda_sul_cloud(p, st, md5, url, reg)
+            if esito == "fatto":
+                continue
+            if esito == "fermo":
+                return provato
         scrivi("mando sul cloud %s (%s)" % (p, mb(st.st_size)))
         provato = True
         t0 = time.time()
@@ -532,12 +636,12 @@ def giro_compressione(cartelle, reg, attesa_s):
         time.sleep(min(aspetta, attesa_s) + 1)
 
 
-def giro_cloud(cartelle, reg, comando):
+def giro_cloud(cartelle, reg, comando, url=CLOUD_URL):
     while True:
         reg.rileggi()
         provato = False
         for parti in da_caricare(cartelle, reg):
-            provato |= carica_run(parti, comando, reg)
+            provato |= carica_run(parti, comando, reg, url)
         if not provato:
             return
 
@@ -633,8 +737,14 @@ def situazione(cartelle, reg, cloud, motivo_spento, comando, attesa_s, ore=48):
             n, _, dopo = pausa(manca, reg)
             v.update(stato=perche[0] if perche else "da mandare", manca=manca, tentativi=n)
             if perche and perche[0] == "conflitto":
-                v["altro"] = [e for e in reg.di("caricato", chiave=os.path.basename(manca))
-                              if e["file"] != manca][-1]["file"]
+                altri = [e for e in reg.di("caricato", chiave=os.path.basename(manca))
+                         if e["file"] != manca]
+                remoti = reg.di("conflitto_cloud", file=manca)
+                # Va nella mail (in inglese): il file locale che c'e' gia'
+                # andato col suo nome, o com'e' quello trovato sul cloud.
+                v["altro"] = (altri[-1]["file"] if altri else
+                              "found on the cloud: %s, not sent from this PC"
+                              % descrivi_remoto(remoti[-1]) if remoti else "?")
             if n:
                 e = reg.di("errore_carica", file=manca)[-1]
                 v.update(errore=e["messaggio"], quando_errore=epoca(e["t"]))
@@ -672,6 +782,7 @@ def main():
     arch = cfg.get("archive", {})
     cloud = bool(arch.get("CloudUpload", False)) and not a.senza_cloud
     comando = str(arch.get("CloudCommand", "/usr/bin/cp_data"))
+    url = str(arch.get("CloudCheckURL", CLOUD_URL))
     reg = Registro(os.path.abspath(a.registro))
     for opzione, evento, suff in ((a.aggiungi, "aggiunto", (".h5", ".h5.gz")),
                                   (a.comprimi, "da_comprimere", (".h5",))):
@@ -719,7 +830,7 @@ def main():
         f = lucchetto(reg.path + ".cloud.lock")
         if f is not None:
             try:
-                giro_cloud(cartelle, reg, comando)
+                giro_cloud(cartelle, reg, comando, url)
             finally:
                 f.close()
 

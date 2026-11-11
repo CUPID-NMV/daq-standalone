@@ -40,6 +40,44 @@ ad avere hardware e librerie CAEN.
   rifiutato da uno passa al successivo: la stessa lista vale nelle due sedi.
 - Bridge VME V4718: `192.168.99.105` (non è il PC DAQ). I digitizer stanno
   sul bus VME dietro di lui, distinti dall'indirizzo di base: vedi "Due V1742".
+- **Il notebook che sostituira' il PC DAQ** (installato il 2026-11-11, oggi a
+  Frascati): Lenovo `CUORE-muons`, `193.206.87.134`
+  (`dyninside134.lnf.infn.it`, DHCP), utente **`daq`** (nel gruppo sudo),
+  repo in `/home/daq/daq-standalone`. Stesso utente e stessi percorsi del PC
+  DAQ, apposta: `/home/daq/daq-standalone` e' scritto in `OutputDir` di
+  `run-local.toml`, in `tools/elog_sync.sh` e nei JSON delle misure.
+  - **Va tenuto allineato al PC DAQ** (decisione dell'utente del
+    2026-11-11): ogni `git pull` fatto sul PC DAQ si fa anche sul notebook, e
+    se cambia il C++ si ricompilano `build/` e `build-swmr/` (verificando il
+    binario come sotto). Vale anche per i pacchetti e le librerie installati
+    su uno dei due.
+  - E' un notebook gia' in uso per il veto dei muoni di CUORE: l'utente
+    `cuore_muons` ha i suoi dati, ROOT, il DT5202 e una copia vecchia della DAQ
+    in `~/daq/daq-standalone` (aprile 2026), da non usare. La DAQ sta tutta
+    sotto `daq`.
+  - Ubuntu 26.04.1, kernel 7.0, Python 3.14, HDF5 1.14.6, g++ 15, cmake 4.2;
+    CAENVMELib 4.0.2, CAENComm 1.7.0, CAENDigitizer 2.18.0 come sul PC DAQ
+    (installatori in `~/DAQ/CAEN`, copiati dal PC). La DAQ compila senza
+    modifiche (un solo avvertimento, `-Wreorder`); gli strumenti Python
+    compilano e si importano, ma controllore e monitor col 3.14 non hanno
+    ancora girato davvero. Nessun driver del kernel: il V4718 si raggiunge in
+    Ethernet. Ethernet su adattatore USB a 1 Gb/s; sospensione gia'
+    disattivata (`sleep.target` mascherato, quindi anche col coperchio chiuso).
+  - **Disco: 165 GB liberi**, ~9 giorni di run compresse a ~18 GB al giorno.
+    I 155 GB di `data/LNGS` del PC non ci stanno.
+  - Copiati dal PC il 2026-11-11 alle ~14: `run-local.toml`,
+    `controllore-local.env` e `data/` senza i file delle run (485 `.log`,
+    registri, lista delle mail, impostazioni del monitor). Il PC continua a
+    scriverci: al cambio vanno ricopiati. Cosa resta da fare (credenziali,
+    numerazione delle run, cambio) sta in `TODO.md`.
+  - **Da Frascati sull'hardware non si prova**: il bridge e' al Gran Sasso.
+    **Dal PC DAQ al notebook SSH non passa** (firewall dei LNF; il ping si'): i
+    file si passano attraverso il Mac, che vede tutti e due
+    (`ssh daq-pc 'tar cf - ... | pigz' | ssh notebook 'pigz -d | tar xf -'`),
+    ma la VPN verso il Gran Sasso va a ~0.1 MB/s: comprimere sempre.
+  - Si entra con la password di `daq`: la chiave del Mac non e' installata
+    (installarla lo puo' fare solo l'utente, con `ssh-copy-id`). Le password
+    non vanno scritte qui: il repository e' pubblico.
 - **Gli indirizzi sono assegnati da DHCP e cambiano.** Il PC DAQ è passato
   da `.108` a `.104` dopo un riavvio, il 2026-10-05. Se `daq-pc` non
   risponde, prima di dare per rotto qualcosa si cerca dove è finito:
@@ -530,10 +568,32 @@ Da sapere:
   10 minuti: quello non e' un cloud irraggiungibile.
 - **Il codice d'uscita di `cp_data` e' affidabile**: il programma di CYGNO non
   cattura le eccezioni, ed esce con errore se non ottiene il token, non
-  raggiunge lo storage o non completa l'upload. Rileggere il file dal cloud
-  (dimensione, checksum) senza credenziali non si puo' (la richiesta anonima
-  da' 404): andrebbe fatto in `cp_data.py` dopo l'upload, che e' di CYGNO.
-  Rimandato, in `TODO.md`.
+  raggiunge lo storage o non completa l'upload.
+- **Il cloud si legge senza credenziali, se davanti al bucket c'e' il
+  tenant**: una HEAD anonima su
+  `https://s3.cr.cnaf.infn.it:7480/cygno:cygno-data/NMV/WC/LNGS/<nome>`
+  risponde 200 (con lunghezza ed ETag) o 404, verificato il 2026-11-11 dal PC
+  DAQ, dal notebook e dal Mac (e' lo stesso accesso anonimo di `rclone` sul
+  Mac). Senza `cygno:` risponde 404 a tutto: e' da li' che veniva il "senza
+  credenziali non si legge" scritto qui fino al 2026-11-11. **L'ETag di un file
+  mandato da `cp_data` si ricalcola dal file locale**: md5 degli md5 dei pezzi
+  da 8 MiB seguito da `-N` (il pezzo di boto3), sotto gli 8 MiB l'md5 semplice;
+  provato sulla 0362, 50 pezzi. Rileggere ogni file appena mandato si puo'
+  quindi fare da `archivia.py`, senza toccare `cp_data`: in `TODO.md`.
+- **Prima di ogni file `archivia.py` chiede al cloud se quel nome c'e' gia'**
+  (dal 2026-11-11, `CLOUD_URL`, sovrascrivibile con `[archive]
+  CloudCheckURL`): il registro sa solo cosa ha mandato QUEL PC, e un nome
+  mandato da un altro (il PC che il notebook sostituisce, una numerazione
+  ripartita da capo, un `cp_data` a mano) S3 lo sovrascriverebbe in silenzio.
+  Stesso file (lunghezza ed ETag uguali): segnato come mandato, non rimandato.
+  File diverso: NON mandato, stato `conflitto`, mail Cloud con "found on the
+  cloud: 412 MB, <data>, not sent from this PC"; si risolve rinominando file e
+  `.log` con un nome libero e `--aggiungi`. Cloud che non risponde: non
+  mandato, si riprova come dopo un trasferimento fallito. Con un
+  `CloudCheckURL` sbagliato la risposta sarebbe sempre "non c'e'" e il
+  controllo non proteggerebbe piu' niente: se `cp_data` cambia bucket o
+  prefisso, va cambiato anche quello. Provato sul Mac contro il cloud vero, con
+  un `cp_data` finto, sui quattro casi.
 - **`cp_data` va col python di sistema**, l'unico che ha `boto3` (in
   `~/.local`): `/usr/bin/cp_data` chiama `cp_data.py`, che comincia con
   `#!/usr/bin/env python3` e prende il primo `python3` del PATH. Il
@@ -553,7 +613,8 @@ Da sapere:
   registro) non le tocca da solo: `--aggiungi FILE` le manda sul cloud,
   `--comprimi FILE` le comprime. Quelle di `data/LNGS` le aveva gia' mandate
   l'utente a mano con `cp_data`, dati e `.log`, non gli scan: il registro non
-  lo sa, e un `--aggiungi` le rimanderebbe identiche. Sul cloud i tre nomi
+  lo sa, ma dal 2026-11-11 un `--aggiungi` le trova sul cloud identiche e non
+  le rimanda (vedi sopra). Sul cloud i tre nomi
   doppi `test__54-0V_000[0-2]_750Ms_50PT` sono quindi quelli di `data/LNGS`.
 - **Sul cloud un file e' il suo nome, senza cartella**, e S3 sovrascrive
   senza avvisare. Sul disco 43 nomi di run compaiono in piu' cartelle (3
@@ -1339,7 +1400,7 @@ LNGS; solo correzione CAEN):
 | `tools/Distribuzioni_carica.ipynb` | distribuzioni di carica dei cinque canali da una run o da una lista (numeri col prefisso, nomi, glob), confronto fra le run in rate. Tutti i parametri nella prima cella, CONFIGURAZIONE (richiesta dell'utente del 2026-11-03: in testa solo parametri, anche quelli da prova). Cancelli automatici misurati sulla prima run, sulla forma media degli eventi sopra `SOGLIA_FORMA` (PMT mezzo PE = 73 conteggi, SiPM 100: col 20% piu' alto, sui PMT 6 eventi su 10 erano solo rumore), con la regola per rivelatore in `CANCELLO_AUTO` (soglia, `prima_ns`, `dopo_ns`, `fine_traccia`; sui SiPM 60 ns prima della soglia e fino in fondo alla traccia meno 20 campioni, scelta dell'utente: la regola del 10% li chiudeva a ~680 ns), piedistallo in `PIEDISTALLO`, oppure la ricetta della 0011/0013 (240-500 / 0-150, una riga pronta); piedistallo per evento e per blocco, tutti e due. Selezione degli eventi (data card, `CONDIZIONI` con nome e `SELEZIONE`): espressioni sulle grandezze di ogni evento -- A16 ampiezza nel cancello in mV, Q20 carica in PE (`PE_ADCNS`: 1719 / 1709 per i PMT, SiPM non misurati), C carica in ADC·ns, T istante del massimo, S saturo -- con confronti, and/or/not, aritmetica e `almeno`/`al_piu`/`esattamente(n, ...)`; si applica dopo la lettura (cambiarla non rilegge le run), il `.npz` tiene tutti gli eventi e la colonna `selezionato`. Cariche in `data/carica/` (fuori da git), grafici e `.json` in `measurements/`, cache delle run lette in `data/carica/run/`. Sul Mac legge dal bucket montato (`~/nmv-data/WC/LNGS`) col kernel `Python (jupyter-global)`, scaricando ogni run una volta sola, quattro in parallelo, nella copia locale `~/nmv-copia/WC/LNGS` (`COPIA_LOCALE`; tenuta solo a copia finita, riscaricata se sul bucket cambia dimensione o se non si decomprime, non tenuta sotto `SPAZIO_LIBERO_MIN_GB`); rileggere una run con cancelli nuovi costa ~5 s invece di minuti (0158: notebook intero 25 s contro 94); le run date per numero o per nome che sono nella copia si prendono da li' senza interrogare il bucket, un glob si cerca sul bucket; col bucket non montato le run si cercano nella copia; sul PC da `data/LNGS`, ~5 s per run, senza copia. Sul cloud salta i `.h5` non compressi |
 | `tools/padme.py` | tabella PADME per cella da una run a trigger software, e verifica del guadagno |
 | `tools/plot_majthr.py` | confronto delle due calibrazioni della somma del V812 |
-| `tools/archivia.py` | comprime le run finite e le manda sul cloud con `cp_data`, fuori dalla DAQ; lo lancia il controllore. `--stato`, `--stato --json` (per gli allarmi del controllore), `--aggiungi FILE`, `--comprimi FILE` |
+| `tools/archivia.py` | comprime le run finite e le manda sul cloud con `cp_data`, fuori dalla DAQ; lo lancia il controllore. Prima di ogni file chiede al cloud, senza credenziali, se quel nome c'e' gia'. `--stato`, `--stato --json` (per gli allarmi del controllore), `--aggiungi FILE`, `--comprimi FILE` |
 | `analisi/` | script delle singole analisi, con l'indice e i comandi in `analisi/README.md` |
 
 Le misure stanno in `measurements/*.json` con i dati grezzi, e gli script di

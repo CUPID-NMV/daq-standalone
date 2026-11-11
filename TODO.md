@@ -35,18 +35,52 @@ installata; il funzionamento sta in CLAUDE.md. Restano:
   CLOUD nella barra in alto, con le run in ritardo elencate sotto, e mail
   "Cloud" (la posta dal Gran Sasso ora parte, da smtp.lngs.infn.it). Una
   tabella di tutti i file (in attesa, compresso, sul cloud) solo se serve;
-- **rileggere il file dal cloud dopo l'upload** (dimensione, ETag): senza
-  credenziali non si puo' (404 anonimo), e le credenziali stanno in
-  `/usr/bin/cp_data`. Il posto giusto e' `cp_data.py`, subito dopo
-  `upload_file`: `head_object` e confronto con la dimensione locale, uscita
-  con errore se non torna. E' di CYGNO: chiedere a chi lo mantiene;
-- **pulizia del disco** dei file gia' sul cloud: 439 GB liberi, ~18 GB al
-  giorno al ritmo delle run 0041-0054, cioe' circa tre settimane. Prima il C++
-  deve contare anche i `.log` nel numero di run, se no i nomi si ripetono;
+- **rileggere il file dal cloud dopo l'upload** (lunghezza ed ETag), deciso
+  dall'utente il 2026-11-11. Ora si puo' fare da `archivia.py`, senza toccare
+  `cp_data` di CYGNO: il cloud risponde in anonimo col tenant davanti al
+  bucket, e l'ETag si ricalcola dal file locale (CLAUDE.md, "Compressione e
+  cloud"). In `carica_run`, dopo un `cp_data` uscito con 0: `sul_cloud()` sul
+  nome e confronto con `st_size` ed `etag_locale()`; se non torna,
+  `errore_carica` col motivo (si riprova da solo, e dopo 30 minuti parte la
+  mail Cloud). Un 404 subito dopo l'upload va riprovato una volta prima di
+  dichiararlo fallito, nel caso lo storage non lo mostri ancora;
+- **pulizia del disco** dei file gia' sul cloud: 439 GB liberi sul PC, ~18 GB
+  al giorno al ritmo delle run 0041-0054, cioe' circa tre settimane; **sul
+  notebook 165 GB, cioe' ~9 giorni**. Prima il C++ deve contare anche i
+  `.log` nel numero di run, se no i nomi si ripetono (il controllo sul cloud
+  del 2026-11-11 impedisce che si sovrascrivano, ma non che si ripetano);
 - **gli scan sul cloud**: serve che `cp_data` accetti la cartella di
   destinazione (chiedere a chi lo gestisce), poi si tolgono le esclusioni;
 - **misurare** se compressione e trasferimento (stessa scheda di rete del
   bridge VME) abbassano il rate massimo della DAQ, vicino alla saturazione.
+
+## Notebook che sostituira' il PC DAQ (installato il 2026-11-11)
+
+Com'e' fatto e la regola dell'allineamento stanno in CLAUDE.md ("Due
+macchine"). Restano:
+- **la numerazione delle run**, da allineare quando il notebook va al Gran
+  Sasso (decisione dell'utente del 2026-11-11: non prima). Sul notebook ci
+  sono i `.log` ma non i file di dati, e la DAQ conta solo questi: ripartirebbe
+  da `LNGS__54-0V_0000`. Il controllo sul cloud di `archivia.py` impedisce che
+  una run sovrascriva una vecchia, ma ogni nome ripetuto darebbe un allarme.
+  Due strade: far contare alla DAQ anche i `.log` (serve comunque per la
+  pulizia del disco), oppure imporre il numero;
+- **le credenziali, le mette l'utente**: `/usr/bin/cp_data` (contiene quelle
+  IAM: non copiarle altrove) con accanto
+  `/home/daq/DAQ/online/source/cp_data.py`; per l'e-log
+  `~/.config/daq-elog/credentials.json` (permessi 600) e
+  `python3 -m venv ~/.venv-elog && ~/.venv-elog/bin/pip install gspread google-auth`;
+- **il cambio, al Gran Sasso**, sulla rete del bridge: fermare il controllore
+  del PC (`./start_DAQ-controller.sh --ferma`; mai due controllori accesi
+  insieme: si contenderebbero alimentatori, mail e archivio), ricopiare `data/`
+  senza i file delle run e `config/run-local.toml`, avviare quello del
+  notebook, una run di prova (`SaveData = false`) di 30 s, poi una vera e
+  `archivia.py --stato`. Rilanciare `tools/sorveglia_collegamento.py`.
+  Aggiornare CLAUDE.md (macchina, indirizzo) e l'alias `daq-pc` sul Mac;
+- **rimisurare il rate massimo** (~880 Hz sul PC) col notebook e il suo
+  adattatore Ethernet USB;
+- controllore e monitor non hanno mai girato col Python 3.14 del notebook:
+  guardarli alla prima accensione.
 
 ## Calibrazione: il punto a 20 ns — da fare lunedi 2026-10-12
 

@@ -182,7 +182,7 @@ CAMPI = [
 # tutti i canali o una lista parallela (a ChannelList i primi due, a
 # SelfTriggerChannels la soglia), e la pagina li mostra in una tabella.
 CAMPI_DIG2 = [
-    ("URL",                 "link (USB: dig2://caen.internal/usb/<serial number>)", "testo", None),
+    ("URL",                 "link (via USB: dig2://caen.internal/usb/ followed by the serial number)", "testo", None),
     ("BoardSerial",         "serial number check (0 = none)", "intero", (0, 10**8)),
     ("RecordLength",        "samples per event (2 ns each)", "intero", (4, 8388608)),
     ("PreTrigger",          "pre-trigger [samples]", "intero", (0, 8168)),
@@ -4220,14 +4220,17 @@ function daTabellaDig2(nome){
   for(let ch = 0; ch < n; ch++){
     const r = $(idD2(nome, "reg", ch));
     if(!r) break;
+    // Una casella vuota su un canale spuntato prende il valore di serie della
+    // DAQ (X2730.cpp): lasciata vuota, la lista resterebbe piu' corta dei
+    // canali e la DAQ darebbe a quel canale l'ultimo valore, senza dirlo.
     if(r.checked){
       reg.push(ch);
-      dco.push($(idD2(nome, "dco", ch)).value.trim());
-      gain.push($(idD2(nome, "gain", ch)).value.trim());
+      dco.push($(idD2(nome, "dco", ch)).value.trim() || "50");
+      gain.push($(idD2(nome, "gain", ch)).value.trim() || "0");
     }
     if($(idD2(nome, "self", ch)).checked){
       self.push(ch);
-      thr.push($(idD2(nome, "thr", ch)).value.trim());
+      thr.push($(idD2(nome, "thr", ch)).value.trim() || "100");
     }
   }
   const lista = (chiave, canali) => {

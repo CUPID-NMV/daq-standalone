@@ -72,15 +72,18 @@ Restano:
   evento puo' fermarsi prima. Poi la soppressione degli zeri della scheda
   (`EnChSuppr`), per i ~200 canali;
 - ~~controllore (fase 2)~~ fatto il 2026-11-11 sul ramo `schede-2730` (CLAUDE.md,
-  "VX2730B sul notebook"). Restano: le soglie del 2730 a run in corso
-  ("Apply now" e' del V1742, e la scheda accetta un cliente alla volta: la
-  DAQ dovrebbe leggere un file di comando come `live-threshold.txt`); gli scan
-  in soglia per il 2730 (oggi solo V1742 e V812); l'oggetto delle mail dice
-  ancora "[DAQ V1742]"; riepilogo serale ed e-log coi file per scheda da
-  guardare; la scelta su come finisce un run a piu' schede (oggi con l'ultima);
-- **monitor ed efficienza (fase 3)**: leggono gia' l'HDF5, ma il verso degli
-  impulsi lo prendono dal DCOffset esadecimale del V1742 nel `.log`; per il
-  VX2730B c'e' l'attributo `Polarity`;
+  "VX2730B sul notebook"). Fatte lo stesso giorno le soglie del 2730 a run in
+  corso (`live-threshold-<scheda>.txt`, "Apply now" nella linguetta della
+  scheda) e l'oggetto delle mail ("[DAQ]"). Restano: gli scan in soglia per il
+  2730 (oggi solo V1742 e V812: `noise_scan.py` legge `live-status.json`
+  senza scheda e una base in conteggi che il 2730 non ha, la soglia e'
+  relativa); riepilogo serale ed e-log coi file per scheda da guardare; la
+  scelta su come finisce un run a piu' schede (oggi con l'ultima);
+- **monitor ed efficienza (fase 3)**: proposta `proposta-monitor-schede.png`
+  (2026-11-11), da approvare. Leggono gia' l'HDF5, ma il verso degli impulsi lo
+  prendono dal DCOffset esadecimale del V1742 nel `.log` (per il VX2730B c'e'
+  l'attributo `Polarity`), e lo stato delle soglie da `live-status.json` senza
+  scheda (il 2730 scrive `live-status-<scheda>.json`, con `baseline` null);
 - la password di `admin` dell'interfaccia web, dal manuale (si scarica col
   numero di serie da caen.it/get-your-doc);
 - piu' avanti, se serve: il firmware DPP-PSD (eventi per canale, carica

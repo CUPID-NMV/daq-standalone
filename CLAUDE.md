@@ -649,6 +649,10 @@ per tipo, gestita dal riquadro *Notifications* della pagina e salvata in
 giornata col grafico del rate, all'ora scelta; le **run finite male**; i
 guasti dell'**hardware**.
 
+- **L'oggetto comincia con "[DAQ]"** (dal 2026-11-11, ramo `schede-2730`;
+  prima "[DAQ V1742]", e il mittente "DAQ V1742"): una costante sola,
+  `posta.PREFISSO_OGGETTO`. Chi filtra o inoltra le mail con una regola
+  sull'oggetto la deve cambiare.
 - **Si scrive solo a indirizzi @lnf.infn.it, per scelta.** Da Frascati la
   posta esce dai server di posta in ingresso dei Laboratori, `pmg1`/`pmg2`
   porta 25, senza login (dal Gran Sasso da `smtp.lngs.infn.it`, vedi "Due
@@ -1016,6 +1020,19 @@ Gran Sasso: a Frascati non c'e'.
   calibrazione dell'offset (`EnOffsetCalibration`) corregge i dati ma non il
   percorso del trigger. **Da misurare con un impulsatore, canale per canale,
   prima di dare una soglia in mV** (in `TODO.md`).
+- **Soglie a run in corso** (2026-11-11): come per il V1742, un file di
+  comando, `<OutputDir>/live-threshold-<scheda>.txt`, una riga `<canale>
+  <soglia>` col MODULO in conteggi dalla base (il segno lo da' `Polarity`),
+  che la DAQ rilegge ogni 250 ms (data al nanosecondo: due comandi nello
+  stesso secondo non si perdono). La scheda prende `TriggerThr` a run in
+  corso; nel log "Live threshold: ch1 40 -> 14 counts (read back: 14) from
+  event N", e a fine run le soglie finali (nell'HDF5 restano quelle della
+  partenza). Un valore fuori scala (max 16383) la scheda lo rifiuta e il run
+  prosegue con la soglia di prima. Stato in `live-status-<scheda>.json`,
+  forma del V1742 con `baseline` null (la soglia e' relativa). Nella pagina
+  "Apply now" sta nella linguetta della scheda e scrive il file che la DAQ
+  ha dichiarato nel log. Provato sul rumore a ingressi aperti: a 40 conteggi
+  zero eventi, ch1 a 14 1416 eventi in 6 s, di nuovo a 40 zero.
 - **Formato**: lo stesso HDF5 v3 del V1742 (canali concatenati in
   `/events/waveforms`; `daqio` lo legge senza modifiche), piu'
   `/events/timestamp` a 64 bit in unita' di 8 ns (attributo `UnitNs`) e in

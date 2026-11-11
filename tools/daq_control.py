@@ -176,6 +176,41 @@ CAMPI = [
     ("settings", "verbosity", "on-screen verbosity", "intero", (0, 4)),
 ]
 
+# Le chiavi di una scheda 2.0 ([boards.<nome>] con Model = "VX2730B"...): quelle
+# che legge src/X2730.cpp. Come le altre, si cambiano dalla pagina solo se sono
+# gia' nel file. DCOffset, Gain e SelfTriggerThreshold sono uno scalare per
+# tutti i canali o una lista parallela (a ChannelList i primi due, a
+# SelfTriggerChannels la soglia), e la pagina li mostra in una tabella.
+CAMPI_DIG2 = [
+    ("URL",                 "link (USB: dig2://caen.internal/usb/<serial number>)", "testo", None),
+    ("BoardSerial",         "serial number check (0 = none)", "intero", (0, 10**8)),
+    ("RecordLength",        "samples per event (2 ns each)", "intero", (4, 8388608)),
+    ("PreTrigger",          "pre-trigger [samples]", "intero", (0, 8168)),
+    ("TriggerSource",       "trigger source: Software, External, Self (several with |)", "testo", None),
+    ("SWTriggerRate",       "software trigger mean rate [Hz]", "reale", (0.1, 10000)),
+    ("Polarity",            "pulse polarity (sets the self-trigger edge and the threshold sign)",
+                            "scelta", ["positive", "negative"]),
+    ("SelfTriggerLogic",    "self-trigger logic", "scelta", ["OR", "AND", "Majority"]),
+    ("SelfTriggerMajority", "self-trigger majority level [channels]", "intero", (1, 64)),
+    ("IOLevel",             "front panel level", "scelta", ["NIM", "TTL"]),
+    ("MaxTime",             "maximum run duration [s] (0 = no limit)", "reale", (0, 10**7)),
+    ("ChannelList",         "recorded channels", "lista", (0, 63)),
+    ("SelfTriggerChannels", "self-trigger channels", "lista", (0, 63)),
+    ("SelfTriggerThreshold", "self-trigger threshold [counts from the baseline]", "lista_o_scalare", (0, 16383)),
+    ("DCOffset",            "DC offset [%]", "lista_o_scalare", (0, 100)),
+    ("Gain",                "gain [dB]", "lista_o_scalare", (0, 29)),
+]
+TABELLA_DIG2 = {"ChannelList", "SelfTriggerChannels", "SelfTriggerThreshold", "DCOffset", "Gain"}
+
+# Un V1742 in [boards.<nome>] scavalca le chiavi di [digitizer] che scrive nella
+# sua sezione (DAQ-WC --board le fonde). La pagina mostra solo quelle: tutto il
+# resto e' la linguetta comune. Le chiavi della run (eventi, prefisso, cartella,
+# run di prova) restano comuni a tutte le schede.
+CAMPI_V1742_SCHEDA = [("VMEBaseAddress", "VME base address", "intero", (0, 0xFFFFFFFF)),
+                      ("BoardSerial", "serial number check", "intero", (0, 10**8))] + [
+    (c, e, t, d) for s, c, e, t, d in CAMPI
+    if s == "digitizer" and c not in ("NEvents", "OutputFile", "OutputDir", "SaveData")]
+
 # Chiavi che valgono SUBITO, senza riavviare la run. Sono le uniche: tutto il
 # resto la DAQ lo legge una volta sola all'avvio, e dirlo nella pagina evita
 # la domanda "ho cambiato il campionamento e non succede niente".
@@ -204,7 +239,7 @@ def _ui_da_toml(tipo, grezzo):
     g = grezzo.strip()
     if tipo in ("scelta", "testo"):
         return g[1:-1] if len(g) >= 2 and g[0] in "\"'" and g[-1] == g[0] else g
-    if tipo in ("lista", "lista_hex"):
+    if tipo in ("lista", "lista_hex", "lista_o_scalare"):
         return g[1:-1].strip() if g.startswith("[") else g
     return g
 
@@ -257,6 +292,32 @@ def _toml_da_ui(tipo, valore, dettagli, etichetta):
         if len(set(uscita)) == 1:
             return uscita[0]
         return "[" + ", ".join(uscita) + "]"
+    if tipo == "reale":
+        try:
+            x = float(v)
+        except ValueError:
+            raise ValueError("%s: a number is required" % etichetta)
+        lo, hi = dettagli
+        if not lo <= x <= hi:
+            raise ValueError("%s: out of range, allowed from %g to %g" % (etichetta, lo, hi))
+        return v
+    if tipo == "lista_o_scalare":
+        # Uno scalare se tutti uguali, come lo scriverebbe chiunque a mano;
+        # se no la lista. La DAQ del VX2730B accetta tutte e due.
+        pezzi = [p for p in v.replace(",", " ").split() if p]
+        if not pezzi:
+            raise ValueError("%s: no value" % etichetta)
+        lo, hi = dettagli
+        for p in pezzi:
+            try:
+                x = float(p)
+            except ValueError:
+                raise ValueError("%s: '%s' is not a number" % (etichetta, p))
+            if not lo <= x <= hi:
+                raise ValueError("%s: %s out of range, allowed from %g to %g" % (etichetta, p, lo, hi))
+        if len(set(float(p) for p in pezzi)) == 1:
+            return pezzi[0]
+        return "[" + ", ".join(pezzi) + "]"
     if tipo == "lista":
         pezzi = [p for p in v.replace(",", " ").split() if p]
         if not pezzi:
@@ -1467,17 +1528,41 @@ class Controllo:
 
         presenti = tomledit.chiavi(testo)
         fuori = []
-        for sezione, chiave, etichetta, tipo, dettagli in CAMPI:
+        for sezione, chiave, etichetta, tipo, dettagli, extra in self._campi_spec():
             grezzo = presenti.get((sezione, chiave))
-            fuori.append({
+            # Un V1742 in [boards] mostra solo le chiavi che scavalca: quelle
+            # che mancano non sono "da aggiungere", vengono da [digitizer].
+            if grezzo is None and extra.get("solo_presenti"):
+                continue
+            fuori.append(dict({
                 "sezione": sezione, "chiave": chiave, "etichetta": etichetta,
                 "tipo": tipo, "dettagli": dettagli,
                 "presente": grezzo is not None,
                 "valore": _ui_da_toml(tipo, grezzo) if grezzo is not None else "",
                 "a_caldo": (sezione, chiave) in A_CALDO,
                 "tabella": TABELLA.get((sezione, chiave)),
-            })
-        return {"file": self.toml, "mtime": mtime, "campi": fuori}
+            }, **{k: v for k, v in extra.items() if k != "solo_presenti"}))
+        schede = [{k: sc[k] for k in ("nome", "modello", "digitizer2", "attiva")}
+                  for sc in self.schede()]
+        return {"file": self.toml, "mtime": mtime, "campi": fuori, "schede": schede}
+
+    def _campi_spec(self):
+        """Tutte le chiavi modificabili dalla pagina, comprese quelle delle
+        schede: (sezione, chiave, etichetta, tipo, dettagli, extra)."""
+        out = [(s, c, e, t, d, {}) for s, c, e, t, d in CAMPI]
+        for sc in self.schede():
+            sez = "boards." + sc["nome"]
+            # Enabled lo scrive la casella "in run" del riquadro Boards.
+            out.append((sez, "Enabled", "in run (%s)" % sc["nome"], "booleano", None,
+                        {"scheda": sc["nome"], "nascosto": True}))
+            for c, e, t, d in (CAMPI_DIG2 if sc["digitizer2"] else CAMPI_V1742_SCHEDA):
+                extra = {"scheda": sc["nome"]}
+                if sc["digitizer2"] and c in TABELLA_DIG2:
+                    extra["tabella"] = "dig2"
+                if not sc["digitizer2"]:
+                    extra["solo_presenti"] = True
+                out.append((sez, c, e, t, d, extra))
+        return out
 
     def scrivi_config(self, modifiche, mtime_atteso):
         """Applica le modifiche al TOML. Torna (esito, messaggio, diff).
@@ -1495,9 +1580,7 @@ class Controllo:
                 return False, ("The file changed since you opened the page. "
                                "Reload and redo your changes: I will not overwrite it."), []
 
-            spec = {(s, c): (e, t, d) for s, c, e, t, d in CAMPI}
-            for sc in self.schede():
-                spec[("boards." + sc["nome"], "Enabled")] = ("in run (%s)" % sc["nome"], "booleano", None)
+            spec = {(s, c): (e, t, d) for s, c, e, t, d, _ in self._campi_spec()}
             richieste = []
             for sezione, chiave, valore in modifiche:
                 if (sezione, chiave) not in spec:
@@ -1799,7 +1882,7 @@ class Controllo:
         except OSError:
             pass
 
-    def piedistalli(self):
+    def piedistalli(self, scheda=None):
         """Dove sta il piedistallo di ogni canale nell'ultima run, in conteggi.
 
         Serve accanto al DCOffset nella tabella dei canali: il DCOffset dice
@@ -1816,6 +1899,10 @@ class Controllo:
                 for f in files:
                     if f.endswith(".log") and not f.startswith(
                             ("daq-console", "controllore", "monitor-console", "scan-console")):
+                        # Con le schede, l'ultimo run di QUELLA scheda: il nome
+                        # porta la scheda dopo il numero.
+                        if scheda and ("_%s_" % scheda) not in f:
+                            continue
                         logs.append(os.path.join(radice, f))
         if not logs:
             return {"errore": "no runs found"}
@@ -2999,6 +3086,11 @@ PAGINA = r"""<!doctype html>
  .p-off{background:#ececea;color:#8a8a84}
  .p-idle{background:#f3f3f0;color:#52514e}
  .p-ko{background:#f8e0da;color:#8a2a18}
+ .tabs{display:flex;gap:4px;margin:2px 0 10px;flex-wrap:wrap}
+ .tabs span{padding:4px 12px;border-radius:6px 6px 0 0;border:1px solid #e2e2de;border-bottom:none;
+            font-size:12px;background:#f3f3f0;color:#52514e;cursor:pointer;user-select:none}
+ .tabs span.sel{background:#1a1a19;color:#fff;border-color:#1a1a19}
+ .mv{color:#8a8a84;white-space:nowrap;font-variant-numeric:tabular-nums}
 </style></head><body>
 <h1>DAQ Control</h1>
 
@@ -3064,6 +3156,13 @@ PAGINA = r"""<!doctype html>
 <div class="riga">
   <div class="box" id="b_cfg" style="flex:2 1 560px"><h2>Configuration<span class="riass"></span></h2>
     <div id="cfgfile" style="font-size:12px;color:#6b6a65;margin-bottom:8px"></div>
+    <!-- Una linguetta per scheda quando il TOML ha [boards.*]: "run (common)"
+         e' il riquadro di sempre ([digitizer], [cfd], [settings]). Le linguette
+         si disegnano tutte e se ne mostra una: passando dall'una all'altra le
+         modifiche non salvate restano, e Save le scrive tutte. -->
+    <div id="cfgtabs" class="tabs" style="display:none"></div>
+    <div id="cfgschede"></div>
+    <div id="cfgcomune">
     <div id="cfg"></div>
     <div id="tabdig" style="margin-top:14px"></div>
     <div style="margin-top:6px;font-size:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
@@ -3073,13 +3172,14 @@ PAGINA = r"""<!doctype html>
       <span id="dcorun" style="color:#9a9a94;margin-left:8px"></span></div>
     <div id="dcoavvisi" class="msg ko" style="font-size:12px"></div>
     <div id="tabcfd" style="margin-top:14px"></div>
+    </div>
     <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button id="ricarica" style="background:#ececea">Reload file</button>
       <span style="font-size:12px;color:#6b6a65">
         applies from the next run, except entries marked <b>live</b>
       </span>
     </div>
-    <div style="margin-top:12px;padding-top:10px;border-top:1px solid #eee">
+    <div id="cfgcaldo" style="margin-top:12px;padding-top:10px;border-top:1px solid #eee">
       <label style="font-size:12px;color:#6b6a65">self-trigger thresholds on the RUNNING acquisition
         <input id="caldo" placeholder="e.g. 5  or  4 6" style="width:110px">
       </label>
@@ -3964,7 +4064,7 @@ async function caricaConfig(){
   if(CFG.errore){ $("cfg").textContent = CFG.errore; return; }
   $("cfgfile").textContent = CFG.file;
   let html = "", sez = null;
-  for(const c of CFG.campi){
+  for(const c of CFG.campi.filter(c => !c.scheda)){
     if(c.sezione !== sez){
       if(sez !== null) html += "</table>";
       html += `<div style="margin:10px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b6a65">[${c.sezione}]</div><table>`;
@@ -3974,6 +4074,7 @@ async function caricaConfig(){
   }
   $("cfg").innerHTML = html + "</table>";
   disegnaTabelle();
+  disegnaSchedeConfig();
   // Delega: le caselle vengono ricreate a ogni ricarica del modulo, quindi
   // si ascolta sui contenitori e non sui singoli campi.
   for(const id of ["cfg", "tabdig", "tabcfd"]){
@@ -3981,6 +4082,171 @@ async function caricaConfig(){
     $(id).onchange = aggiornaStatoSalva;
   }
   aggiornaStatoSalva();
+}
+
+// --- configurazione per scheda ----------------------------------------------
+function campoScheda(nome, chiave){
+  for(const c of CFG.campi) if(c.scheda === nome && c.chiave === chiave) return c;
+  return null;
+}
+// Canali per modello: VX2730B 16, VX2730 32, 2740/2745 64.
+function nCanaliModello(m){
+  m = (m || "").toUpperCase();
+  if(/2730B|2751/.test(m)) return 16;
+  if(/2730/.test(m)) return 32;
+  if(/274[05]/.test(m)) return 64;
+  return 16;
+}
+function idD2(nome, k, ch){ return "d2_" + nome + "_" + k + "_" + ch; }
+
+function mostraTab(t){
+  try{ localStorage.setItem("cfg.tab", t); }catch(e){}
+  for(const el of document.querySelectorAll("#cfgtabs span"))
+    el.classList.toggle("sel", el.dataset.tab === t);
+  $("cfgcomune").style.display = t === "comune" ? "" : "none";
+  $("cfgcaldo").style.display = t === "comune" ? "" : "none";
+  for(const el of document.querySelectorAll("#cfgschede > div"))
+    el.style.display = el.dataset.scheda === t ? "" : "none";
+}
+
+function disegnaSchedeConfig(){
+  const schede = CFG.schede || [];
+  $("cfgtabs").style.display = schede.length ? "flex" : "none";
+  $("cfgtabs").innerHTML = schede.length
+    ? '<span data-tab="comune">run (common)</span>' +
+      schede.map(x => `<span data-tab="${x.nome}">${x.nome} &middot; ${x.modello}</span>`).join("")
+    : "";
+  $("cfgtabs").onclick = ev => { const t = ev.target.closest("span"); if(t) mostraTab(t.dataset.tab); };
+  let h = "";
+  for(const x of schede){
+    const campi = CFG.campi.filter(c => c.scheda === x.nome && !c.nascosto && !c.tabella);
+    h += `<div data-scheda="${x.nome}" style="display:none">` +
+         `<div style="margin:2px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b6a65">[boards.${x.nome}]</div>` +
+         `<table>${campi.map(campoHtml).join("")}</table>` +
+         (x.digitizer2 ? `<div id="tabd2_${x.nome}"></div>`
+           : `<div style="font-size:12px;color:#6b6a65;margin-top:8px">Only the keys written in
+              [boards.${x.nome}] are shown: everything else comes from the "run (common)" tab
+              ([digitizer]).</div>`) + "</div>";
+  }
+  $("cfgschede").innerHTML = h;
+  for(const x of schede) if(x.digitizer2) tabellaDig2(x.nome, x.modello);
+  // "#cfg=<scheda>" nell'indirizzo apre quella linguetta: un link si puo'
+  // mandare a un collega, e serve alle schermate fatte senza browser.
+  let t = "comune";
+  try{ t = localStorage.getItem("cfg.tab") || "comune"; }catch(e){}
+  const m = /cfg=([\w.-]+)/.exec(location.hash || "");
+  if(m) t = m[1];
+  if(t !== "comune" && !schede.some(x => x.nome === t)) t = "comune";
+  mostraTab(schede.length ? t : "comune");
+  $("cfgschede").oninput = $("cfgschede").onchange = () => {
+    for(const x of schede) if(x.digitizer2) aggiornaMvDig2(x.nome, nCanaliModello(x.modello));
+    aggiornaStatoSalva();
+  };
+}
+
+// La tabella dei canali di una scheda 2.0. ChannelList e SelfTriggerChannels
+// come caselle; DCOffset e Gain paralleli ai canali registrati, la soglia ai
+// canali del self-trigger, come li legge src/X2730.cpp.
+function tabellaDig2(nome, modello){
+  const n = nCanaliModello(modello);
+  const val = k => { const c = campoScheda(nome, k); return c && c.presente ? c.valore : ""; };
+  const reg = numeri(val("ChannelList")), self = numeri(val("SelfTriggerChannels"));
+  const thr = srotola(self, numeri(val("SelfTriggerThreshold")));
+  const dco = srotola(reg, numeri(val("DCOffset"))), gain = srotola(reg, numeri(val("Gain")));
+  const mancano = ["ChannelList", "SelfTriggerChannels", "SelfTriggerThreshold", "DCOffset", "Gain"]
+                    .filter(k => !(campoScheda(nome, k) || {}).presente);
+  const v = x => (x === undefined || x === null) ? "" : x;
+  let h = `<div style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b6a65">${modello} channels
+           <span id="d2ped_${nome}" style="text-transform:none;letter-spacing:0;margin-left:8px"></span></div>`;
+  if(mancano.length)
+    h += `<div style="color:#a8321f;font-size:12px;margin-bottom:4px">not in [boards.${nome}], add them by hand
+          to edit them here: ${mancano.join(", ")}</div>`;
+  h += '<div class="cantab"><table><thead><tr><td>ch</td><td>record</td><td>self-trigger</td>' +
+       '<td>threshold [counts]</td><td></td><td>DC offset [%]</td><td>gain [dB]</td>' +
+       '<td>mV / count</td><td>pedestal (last run)</td></tr></thead><tbody>';
+  for(let ch = 0; ch < n; ch++){
+    h += `<tr><td style="color:#6b6a65">${ch}</td>` +
+      `<td><input type="checkbox" id="${idD2(nome, "reg", ch)}"${reg.includes(ch) ? " checked" : ""}></td>` +
+      `<td><input type="checkbox" id="${idD2(nome, "self", ch)}"${self.includes(ch) ? " checked" : ""}></td>` +
+      `<td><input type="text" id="${idD2(nome, "thr", ch)}" value="${v(thr[ch])}"></td>` +
+      `<td id="${idD2(nome, "mv", ch)}" class="mv"></td>` +
+      `<td><input type="text" id="${idD2(nome, "dco", ch)}" value="${v(dco[ch])}"></td>` +
+      `<td><input type="text" id="${idD2(nome, "gain", ch)}" value="${v(gain[ch])}"></td>` +
+      `<td id="${idD2(nome, "vpc", ch)}" class="mv"></td>` +
+      `<td id="${idD2(nome, "ped", ch)}" style="font-variant-numeric:tabular-nums"></td></tr>`;
+  }
+  h += "</tbody></table></div>" +
+       `<div style="font-size:12px;color:#6b6a65;margin-top:6px">mV are nominal (4 Vpp over 14 bit, divided
+        by the gain). The self-trigger fires a few counts away from the written threshold, differently on
+        each channel (measured on 2026-11-11): close to the noise (2.3 counts rms) it matters.</div>`;
+  $("tabd2_" + nome).innerHTML = h;
+  aggiornaMvDig2(nome, n);
+  piedistalliDig2(nome, n);
+}
+
+function aggiornaMvDig2(nome, n){
+  for(let ch = 0; ch < n; ch++){
+    const r = $(idD2(nome, "reg", ch)), sf = $(idD2(nome, "self", ch));
+    if(!r) return;
+    const g = parseFloat($(idD2(nome, "gain", ch)).value), t = parseFloat($(idD2(nome, "thr", ch)).value);
+    const vpc = 4000 / 16384 / Math.pow(10, (isNaN(g) ? 0 : g) / 20);
+    $(idD2(nome, "vpc", ch)).textContent = (r.checked || sf.checked) ? vpc.toFixed(3) : "";
+    $(idD2(nome, "mv", ch)).textContent = (sf.checked && !isNaN(t))
+      ? "\u2248 " + (t * vpc).toFixed(1) + " mV" : "";
+  }
+}
+
+async function piedistalliDig2(nome, n){
+  let p;
+  try{ p = await (await fetch("/api/piedistalli?scheda=" + encodeURIComponent(nome) +
+                              "&token=" + TOKEN)).json(); }
+  catch(e){ return; }
+  const e = $("d2ped_" + nome);
+  if(e) e.textContent = p.run ? "pedestal from " + p.run + (p.da ? " (" + p.da + ")" : "")
+                              : (p.errore || "");
+  for(let ch = 0; ch < n; ch++){
+    const c = $(idD2(nome, "ped", ch));
+    if(c) c.textContent = (p.canali && p.canali[ch] !== undefined) ? p.canali[ch] : "";
+  }
+}
+
+// Dalla tabella ai valori da scrivere. Se i numeri sono quelli del file si
+// rimanda il testo del file: uno scalare e una lista di valori uguali dicono
+// la stessa cosa, e non devono comparire come modifica.
+function daTabellaDig2(nome){
+  const sc = (CFG.schede || []).find(x => x.nome === nome);
+  const n = nCanaliModello(sc ? sc.modello : "");
+  const reg = [], self = [], thr = [], dco = [], gain = [];
+  for(let ch = 0; ch < n; ch++){
+    const r = $(idD2(nome, "reg", ch));
+    if(!r) break;
+    if(r.checked){
+      reg.push(ch);
+      dco.push($(idD2(nome, "dco", ch)).value.trim());
+      gain.push($(idD2(nome, "gain", ch)).value.trim());
+    }
+    if($(idD2(nome, "self", ch)).checked){
+      self.push(ch);
+      thr.push($(idD2(nome, "thr", ch)).value.trim());
+    }
+  }
+  const lista = (chiave, canali) => {
+    const c = campoScheda(nome, chiave);
+    const f = numeri(c ? c.valore : "");
+    return (f.length === canali.length && f.every((x, i) => x === canali[i]))
+           ? c.valore : canali.join(", ");
+  };
+  const perCanale = (chiave, canali, valori) => {
+    const c = campoScheda(nome, chiave);
+    const orig = srotola(canali, numeri(c ? c.valore : ""));
+    if(c && numeri(c.valore).length && canali.length &&
+       canali.every((ch, i) => valori[i] !== "" && Number(orig[ch]) === Number(valori[i])))
+      return c.valore;
+    return new Set(valori.map(Number)).size <= 1 ? (valori[0] || "") : valori.join(", ");
+  };
+  return {ChannelList: lista("ChannelList", reg), SelfTriggerChannels: lista("SelfTriggerChannels", self),
+          SelfTriggerThreshold: perCanale("SelfTriggerThreshold", self, thr),
+          DCOffset: perCanale("DCOffset", reg, dco), Gain: perCanale("Gain", reg, gain)};
 }
 
 // Le modifiche restano nel browser finche' non si preme Salva, e il pulsante
@@ -4005,10 +4271,14 @@ function valoreCampo(c){
 // cosi' una voce di coda e' "questa configurazione" senza doverla ridescrivere.
 function modificheCorrenti(){
   if(!CFG) return [];
-  const mod = [], tab = dalleTabelle();
+  const mod = [], tab = dalleTabelle(), tab2 = {};
   for(const c of CFG.campi){
-    if(!c.presente) continue;
-    const v = c.tabella ? tab[c.chiave] : valoreCampo(c);
+    if(!c.presente || c.nascosto) continue;
+    let v;
+    if(c.tabella === "dig2"){
+      if(!(c.scheda in tab2)) tab2[c.scheda] = daTabellaDig2(c.scheda);
+      v = tab2[c.scheda][c.chiave];
+    }else v = c.tabella ? tab[c.chiave] : valoreCampo(c);
     if(v !== null && v !== undefined && v !== c.valore)
       mod.push([c.sezione, c.chiave, v]);
   }
@@ -4021,7 +4291,8 @@ $("salva").onclick = async () => {
   if(!CFG) return;
   const mod = modificheCorrenti();
   if(!mod.length){ msg("No changes to save.", true); return; }
-  const elenco = mod.map(m => "  " + m[1] + "  ->  " + m[2]).join("\n");
+  const elenco = mod.map(m => "  " + (m[0].startsWith("boards.") ? "[" + m[0] + "] " : "") +
+                             m[1] + "  ->  " + m[2]).join("\n");
   if(!confirm("Write to the TOML?\n\n" + elenco +
               "\n\nApplies from the next run. A backup is made.")) return;
   $("salva").disabled = true;
@@ -4711,7 +4982,7 @@ def crea_handler(ctrl, token):
             if parti.path == "/api/piedistalli":
                 if not self._autorizzato(qs):
                     return self._json({"errore": "token mancante o sbagliato"}, 403)
-                return self._json(ctrl.piedistalli())
+                return self._json(ctrl.piedistalli(qs.get("scheda", [None])[0]))
             if parti.path in ("/api/stato", "/api/config"):
                 if not self._autorizzato(qs):
                     return self._json({"errore": "token mancante o sbagliato"}, 403)

@@ -496,7 +496,11 @@ void X2730::PrepareOutput() {
         AttrI("FormatVersion", kFormatVersion);
         AttrU("TailCut", 0);
         AttrU("SamplesPerChannel", fRecordLength);
-        AttrD("SamplingTime", fSamplingNs);
+        // In SECONDI, come il V1742 (0.2e-9 a 5 GS/s): tutti gli strumenti lo
+        // moltiplicano per 1e9. Scritto in ns (2.0) fino al 2026-11-11, la
+        // stima d'efficienza di fine run ne ricavava fs = 0.5 e il filtro a
+        // 50 MHz falliva; il monitor avrebbe avuto campioni da 2 s.
+        AttrD("SamplingTime", fSamplingNs * 1e-9);
         AttrS("SamplingRate", std::to_string(msps) + "MHz");
         AttrS("Link", fUrl);
         AttrS("OutputFormat", "HDF5");

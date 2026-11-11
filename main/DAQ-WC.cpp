@@ -7,6 +7,50 @@
 #include "Bridge.h"
 #include "CFD.h"
 #include "Digitizer.h"
+#ifdef DAQ_HAVE_FELIB
+#include "X2730.h"
+#endif
+
+#include <algorithm>
+#include <cctype>
+
+namespace {
+
+// I digitizer 2.0 di CAEN (VX2730B, e le famiglie 2740, 2745, 2751 che
+// condividono FELib e parametri): li legge la classe X2730 con la FELib. Si
+// riconoscono dal Model scritto in [boards.<nome>]; senza Model la scheda e'
+// un V1742, come sempre.
+bool Digitizer2(const std::string& model)
+{
+    std::string m = model;
+    std::transform(m.begin(), m.end(), m.begin(), [](unsigned char c) { return std::tolower(c); });
+    for (const char* fam : {"2730", "2740", "2745", "2751"})
+        if (m.find(fam) != std::string::npos) return true;
+    return false;
+}
+
+int AcquisisciDigitizer2(Config& cfg, const std::string& board)
+{
+#ifdef DAQ_HAVE_FELIB
+    cfg.SelectBoardOnly(board);
+    X2730 scheda(cfg, board);
+    scheda.Open();
+    scheda.Configure();
+    scheda.PrepareOutput();
+    scheda.Acquire();
+    scheda.Close();
+    Log::CloseFile();
+    return 0;
+#else
+    // Il PC del Gran Sasso non ha la FELib: la DAQ si compila senza, e una
+    // scheda 2.0 qui si rifiuta per nome invece di cadere chissa' dove.
+    Log::OutError("La scheda '" + board + "' e' un " + cfg.BoardModel(board) +
+                  " (digitizer 2.0): questo DAQ-WC e' compilato senza la CAEN FELib.");
+    return 1;
+#endif
+}
+
+}  // namespace
 
 int main(int argc, char** argv)
 {
@@ -42,7 +86,14 @@ int main(int argc, char** argv)
     // --- Config ---
     Config& theConfig = Config::GetInstance();
     theConfig.Read(const_cast<char*>(configFile));
-    if (!board.empty())
+    const std::string model = board.empty() ? std::string() : theConfig.BoardModel(board);
+    const bool digitizer2 = Digitizer2(model);
+    if (!model.empty() && !digitizer2 && model.find("1742") == std::string::npos) {
+        Log::OutError("[boards." + board + "] Model = '" + model + "': la DAQ conosce il V1742 "
+                      "(Model assente o \"V1742\") e i digitizer 2.0 (\"VX2730B\"...).");
+        return 1;
+    }
+    if (!board.empty() && !digitizer2)
         theConfig.SelectBoard(board);
     theConfig.SetRunNumber(runNumber);
 
@@ -54,6 +105,10 @@ int main(int argc, char** argv)
     Log::OutSummary("*                           *");
     Log::OutSummary("* * * * * * * * * * * * * * *");
     Log::OutSummary();
+
+    // --- Digitizer 2.0 (VX2730B): codice suo, file e log nello stesso formato ---
+    if (digitizer2)
+        return AcquisisciDigitizer2(theConfig, board);
 
     // --- Digitizer V1742 ---
     // La connessione va aperta PRIMA del bridge: con "Connection = auto" e'

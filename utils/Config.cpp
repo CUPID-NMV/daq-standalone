@@ -64,3 +64,32 @@ void Config::SelectBoard( const std::string& name )
     fBoard = name;
     Log::OutSummary( "Scheda: " + name + " (sezione [boards." + name + "] sopra [digitizer])" );
 }
+
+std::string Config::BoardModel( const std::string& name )
+{
+    toml::table* boards = fTbl["boards"].as_table();
+    toml::table* scheda = boards ? (*boards)[name].as_table() : nullptr;
+    if( scheda == nullptr )
+	return "";
+    return (*scheda)["Model"].value_or( std::string() );
+}
+
+void Config::SelectBoardOnly( const std::string& name )
+{
+    toml::table* boards = fTbl["boards"].as_table();
+    toml::table* scheda = boards ? (*boards)[name].as_table() : nullptr;
+    if( scheda == nullptr )
+	{
+	    Log::OutError( "Scheda '" + name + "' non trovata: manca la sezione [boards." + name +
+			   "] nel TOML." );
+	    exit(1);
+	}
+    if( !(*scheda)["Enabled"].value_or(true) )
+	{
+	    Log::OutError( "Scheda '" + name + "' disabilitata ([boards." + name +
+			   "] Enabled = false): non parte." );
+	    exit(1);
+	}
+    fBoard = name;
+    Log::OutSummary( "Scheda: " + name + " (sezione [boards." + name + "], senza [digitizer])" );
+}

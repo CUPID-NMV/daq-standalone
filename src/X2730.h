@@ -18,9 +18,12 @@
 //  del V1742 conta a 17 ns su 31 bit, e chi lo rilegge ne darebbe per
 //  scontate le unita'.
 //
-//  La configurazione sta nella sezione [vx2730] del TOML: le chiavi del V1742
-//  in [digitizer] qui non valgono (i DCOffset, per esempio, sono percentuali
-//  e non conteggi di un DAC).
+//  E' una scheda della stessa DAQ: DAQ-WC run.toml --board <nome> --run N,
+//  con la sezione [boards.<nome>] che dice Model = "VX2730B". Quella sezione
+//  NON viene fusa in [digitizer] come per i V1742: le chiavi del V1742 qui
+//  hanno un altro significato (i DCOffset, per esempio, sono percentuali e
+//  non conteggi di un DAC). Da [digitizer] si prendono solo le chiavi della
+//  run, comuni a tutte le schede: OutputDir, OutputFile, NEvents, SaveData.
 // ---------------------------------------------------------------------------
 
 #include <atomic>
@@ -34,7 +37,7 @@
 
 class X2730 {
 public:
-    explicit X2730(Config& cfg);
+    X2730(Config& cfg, const std::string& board);
     ~X2730();
 
     void Open();            // collegamento e informazioni sulla scheda
@@ -45,10 +48,13 @@ public:
 
 private:
     Config& fConfig;
+    std::string fBoard;             // nome della scheda: sezione [boards.<nome>] e nome del file
+    toml::table* fTab = nullptr;    // la sezione [boards.<nome>]
 
     // --- configurazione ---
     std::string fUrl;
-    std::string fBoard;
+    std::string fModelConfig;       // Model scritto nel TOML
+    uint32_t    fExpectedSerial = 0;  // BoardSerial nel TOML, 0 = non controllato
     std::string fOutputDir;
     std::string fOutputFile;
     bool        fSaveData = true;
@@ -102,9 +108,12 @@ private:
     std::string LastError() const;
     void        Fail(const std::string& what) const;
 
-    // --- aiuti ---
+    // --- aiuti per leggere [boards.<nome>] ---
+    template <typename T>
+    T Val(const std::string& key, T def, bool warn = true);
     template <typename T>
     std::vector<T> ScalarOrList(const std::string& key, T def, size_t n);
+    std::vector<uint32_t> UIntList(const std::string& key, bool& present);
     void LogBoardStatus(const std::string& when);
     void Flush();
     void CloseOutputFile();

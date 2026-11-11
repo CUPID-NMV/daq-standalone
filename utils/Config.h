@@ -38,6 +38,15 @@ public:
     // configurazione allegata al log e' quella effettivamente usata.
     // Una scheda con Enabled = false si rifiuta di partire.
     void SelectBoard( const std::string& name );
+    // Per le schede che NON sono V1742 (digitizer 2.0, Model = "VX2730B"...):
+    // stessi controlli di SelectBoard (la sezione esiste, Enabled), ma la
+    // sezione non viene fusa in [digitizer]. Le chiavi del V1742 hanno un
+    // altro significato -- DCOffset 0xB000 letto come percentuale, il
+    // RecordLength del DRS4 -- e passerebbero in silenzio. La scheda legge la
+    // sua sezione per conto suo, e da [digitizer] solo le chiavi della run.
+    void SelectBoardOnly( const std::string& name );
+    // Il modello scritto in [boards.<nome>] Model, o "" se non c'e' (V1742).
+    std::string BoardModel( const std::string& name );
     const std::string& Board() const { return fBoard; }
 
     // Numero di run imposto da fuori (dal controllore, uguale per tutte le

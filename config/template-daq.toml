@@ -418,6 +418,34 @@ IPAddress = "192.168.99.105"
 # SamplingRate     = "2.5GHz"
 # PostTriggerSize  = 60
 # TriggerPolarity  = 1
+#
+# Un digitizer 2.0 (VX2730B: 16 canali, 14 bit, 500 MS/s, firmware Scope) e'
+# una scheda come le altre, ma la riconosce Model: la sua sezione NON viene
+# fusa in [digitizer], perche' le chiavi del V1742 qui hanno un altro
+# significato. Da [digitizer] prende solo OutputDir, OutputFile, NEvents e
+# SaveData, che la sezione puo' scavalcare. Lo legge la CAEN FELib: un DAQ-WC
+# compilato dove la FELib non c'e' rifiuta la scheda con un messaggio.
+#   DAQ-WC run.toml --board vx2730 --run 201   ->   test_0201_vx2730_500Ms_75PT.h5
+#
+# [boards.vx2730]
+# Enabled       = true
+# Model         = "VX2730B"
+# URL           = "dig2://caen.internal/usb/71709"  # USB: caen.internal/usb/<serie>; Ethernet: dig2://<IP>
+# BoardSerial   = 71709
+# ChannelList   = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+# RecordLength  = 1024        # campioni da 2 ns
+# PreTrigger    = 256         # campioni prima del trigger (passi di 4)
+# DCOffset      = 50.0        # PERCENTO della dinamica, scalare o lista: 50 = base a ~8192
+# Gain          = 0           # dB, 0-29: a 0 dB 4 Vpp, 0.244 mV per conteggio
+# Polarity      = "positive"  # "positive" o "negative": fronte e segno della soglia del self-trigger
+# TriggerSource = "Software"  # Software, External (TRG-IN), Self (ITLA), anche insieme con "|"
+# SWTriggerRate = 100.0       # Hz, intervalli esponenziali
+# IOLevel       = "NIM"       # LEMO del pannello: NIM o TTL
+# SelfTriggerChannels  = [0, 1]
+# SelfTriggerThreshold = 50   # conteggi dalla base, in modulo (il segno lo da' Polarity)
+# SelfTriggerLogic     = "OR" # OR, AND, Majority
+# SelfTriggerMajority  = 2
+# MaxTime       = 0           # secondi, 0 = nessun limite
 
 [settings]
 # Quanto la DAQ stampa A SCHERMO. Il file di log accanto ai dati riceve
@@ -446,46 +474,3 @@ CloudCommand = "/usr/bin/cp_data"
 # gia' prima di mandarlo (S3 sovrascrive senza avvisare). Deve puntare allo
 # stesso bucket e prefisso di cp_data; "" spegne il controllo.
 # CloudCheckURL = "https://s3.cr.cnaf.infn.it:7480/cygno:cygno-data/NMV/WC/LNGS"
-
-[vx2730]
-# VX2730B (digitizer 2.0: 16 canali, 14 bit, 500 MS/s, firmware Scope), letto
-# da build/main/DAQ-X2730 con la CAEN FELib/Dig2. Le chiavi di [digitizer]
-# sono del V1742 e qui non valgono.
-#
-# Via USB l'indirizzo e' il numero di serie: dig2://caen.internal/usb/<serie>
-# (la scheda si presenta come una rete IPv6 e Dig2 ne ricava l'indirizzo). Via
-# Ethernet: dig2://<indirizzo IP>.
-URL          = "dig2://caen.internal/usb/71709"
-Board        = "vx2730"          # nel nome del file, dopo il numero di run
-# OutputDir e OutputFile: se mancano, quelli di [digitizer].
-# OutputDir  = "/home/daq/daq-standalone/data"
-# OutputFile = "test"
-NEvents      = 1000              # 0 = nessun limite
-MaxTime      = 0                 # secondi; 0 = nessun limite
-SaveData     = true              # false = run di prova TEST_, file cancellato a fine run
-ChannelList  = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-RecordLength = 1024              # campioni da 2 ns
-PreTrigger   = 256               # campioni prima del trigger (passi di 4)
-# DCOffset in PERCENTO della dinamica, uno scalare per tutti o una lista
-# parallela a ChannelList. 50 = linea di base a meta' scala (~8192 conteggi,
-# misurato il 2026-11-11 a ingressi aperti).
-DCOffset     = 50.0
-# Guadagno dell'amplificatore d'ingresso, 0-29 dB, scalare o lista. A 0 dB la
-# dinamica e' 4 Vpp (0.244 mV per conteggio, rumore ~2.3 conteggi rms a
-# ingressi aperti).
-Gain         = 0
-# Verso degli impulsi: decide fronte e segno della soglia del self-trigger.
-Polarity     = "positive"        # "positive" o "negative"
-# Sorgenti del trigger, anche insieme separate da "|": Software (a intervalli
-# esponenziali, SWTriggerRate), External (TRG-IN), Self (self-trigger dei
-# canali, ITLA della scheda).
-TriggerSource = "Software"
-SWTriggerRate = 100.0            # Hz
-IOLevel       = "NIM"            # LEMO del pannello: NIM o TTL
-# Self-trigger: canali, soglia in conteggi ADC dalla linea di base (il modulo:
-# il segno lo da' Polarity), combinazione dei canali: OR, AND o Majority.
-# SelfTriggerChannels  = [0, 1]
-# SelfTriggerThreshold = 50
-# SelfTriggerLogic     = "OR"
-# SelfTriggerMajority  = 2
-LiveFlushEvery = 1

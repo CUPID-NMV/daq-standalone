@@ -19,7 +19,6 @@ extern "C" {
 
 namespace {
 
-constexpr const char* kSection = "vx2730";
 constexpr int kFormatVersion = 3;          // lo stesso del V1742: daqio lo legge uguale
 constexpr hsize_t kChunkEvents = 8;
 constexpr long kFlushMaxDelayMs = 300;     // come il V1742: il monitor vede i dati entro 0.3 s
@@ -48,69 +47,104 @@ std::string Join(const std::vector<std::string>& v, const std::string& sep) {
 // ===========================================================================
 
 template <typename T>
-std::vector<T> X2730::ScalarOrList(const std::string& key, T def, size_t n) {
-    // Uno scalare vale per tutti i canali, una lista e' parallela a
-    // ChannelList: lo stesso uso del DCOffset per canale del V1742.
-    auto node = fConfig.GetTbl()[kSection][key];
-    if (node.is_array())
-        return fConfig.GetEntryList<T>(kSection, key, def, n);
-    T v = node.value_or(def);
-    if (!node) fConfig.WarnMissing(kSection, key);
-    return std::vector<T>(n, v);
+T X2730::Val(const std::string& key, T def, bool warn) {
+    auto node = (*fTab)[key];
+    if (!node) {
+        if (warn)
+            Log::OutWarning("[boards." + fBoard + "][" + key +
+                            "] not in the config file: using the built-in default");
+        return def;
+    }
+    return node.value_or(def);
 }
 
-X2730::X2730(Config& cfg) : fConfig(cfg) {
-    auto tbl = fConfig.GetTbl()[kSection];
-    if (!tbl.as_table()) {
-        Log::OutError("Manca la sezione [vx2730] nel TOML: e' li' che sta la configurazione "
-                      "del VX2730B (vedi config/template-daq.toml).");
+template <typename T>
+std::vector<T> X2730::ScalarOrList(const std::string& key, T def, size_t n) {
+    // Uno scalare vale per tutti i canali, una lista e' parallela a
+    // ChannelList: lo stesso uso del DCOffset per canale del V1742. Una lista
+    // corta si allunga ripetendo l'ultimo valore, come fa Config per il V1742.
+    if (auto arr = (*fTab)[key].as_array()) {
+        std::vector<T> v;
+        for (size_t i = 0; i < arr->size(); ++i) v.push_back((*arr)[i].value_or(def));
+        if (v.empty()) v.push_back(def);
+        while (v.size() < n) v.push_back(v.back());
+        v.resize(n);
+        return v;
+    }
+    return std::vector<T>(n, Val<T>(key, def));
+}
+
+std::vector<uint32_t> X2730::UIntList(const std::string& key, bool& present) {
+    std::vector<uint32_t> v;
+    auto arr = (*fTab)[key].as_array();
+    present = arr != nullptr;
+    if (arr)
+        for (size_t i = 0; i < arr->size(); ++i) {
+            const int64_t x = (*arr)[i].value_or(int64_t{-1});
+            if (x < 0) {
+                Log::OutError("[boards." + fBoard + "] " + key + ": elemento non valido.");
+                exit(1);
+            }
+            v.push_back(static_cast<uint32_t>(x));
+        }
+    return v;
+}
+
+X2730::X2730(Config& cfg, const std::string& board) : fConfig(cfg), fBoard(board) {
+    toml::table* boards = fConfig.GetTbl()["boards"].as_table();
+    fTab = boards ? (*boards)[board].as_table() : nullptr;
+    if (fTab == nullptr) {
+        Log::OutError("Manca la sezione [boards." + board + "] nel TOML.");
         exit(1);
     }
-    fUrl        = fConfig.GetEntry<std::string>(kSection, "URL", "dig2://caen.internal/usb/71709");
-    fBoard      = fConfig.GetEntry<std::string>(kSection, "Board", "vx2730");
-    // OutputDir e OutputFile, se non dati qui, sono quelli del V1742: con piu'
-    // schede la stessa cartella e lo stesso prefisso tengono i file di una run
-    // vicini, distinti dal nome della scheda dopo il numero.
-    std::string od = fConfig.GetTbl()["digitizer"]["OutputDir"].value_or(std::string("."));
-    std::string of = fConfig.GetTbl()["digitizer"]["OutputFile"].value_or(std::string("test"));
-    fOutputDir  = tbl["OutputDir"].value_or(od);
-    fOutputFile = tbl["OutputFile"].value_or(of);
-    fSaveData   = tbl["SaveData"].value_or(true);
-    fNEvents    = fConfig.GetEntry<uint32_t>(kSection, "NEvents", 1000);
-    fMaxTime    = tbl["MaxTime"].value_or(0.0);
+    fModelConfig    = Val<std::string>("Model", "");
+    fUrl            = Val<std::string>("URL", "dig2://caen.internal/usb/71709");
+    fExpectedSerial = static_cast<uint32_t>(Val<int64_t>("BoardSerial", 0, false));
 
-    if (auto arr = tbl["ChannelList"].as_array()) {
-        for (size_t i = 0; i < arr->size(); ++i)
-            fChannels.push_back(static_cast<uint32_t>((*arr)[i].value_or(-1)));
-    } else {
-        fConfig.WarnMissing(kSection, "ChannelList");
-        for (uint32_t c = 0; c < 16; ++c) fChannels.push_back(c);
+    // Le chiavi della run, comuni a tutte le schede, da [digitizer] (la
+    // sezione della scheda puo' scavalcarle): la stessa cartella e lo stesso
+    // prefisso tengono vicini i file di una run, distinti dal nome della
+    // scheda dopo il numero; SaveData e' l'interruttore della run di prova
+    // nella pagina, che vale per tutta la run.
+    auto dig = fConfig.GetTbl()["digitizer"];
+    fOutputDir  = (*fTab)["OutputDir"].value_or(dig["OutputDir"].value_or(std::string(".")));
+    fOutputFile = (*fTab)["OutputFile"].value_or(dig["OutputFile"].value_or(std::string("test")));
+    fSaveData   = (*fTab)["SaveData"].value_or(dig["SaveData"].value_or(true));
+    fNEvents    = static_cast<uint32_t>((*fTab)["NEvents"].value_or(dig["NEvents"].value_or(int64_t{1000})));
+    fMaxTime    = Val<double>("MaxTime", 0.0, false);
+
+    bool c = false;
+    fChannels = UIntList("ChannelList", c);
+    if (!c) {
+        Log::OutWarning("[boards." + fBoard + "][ChannelList] not in the config file: all 16 channels");
+        for (uint32_t ch = 0; ch < 16; ++ch) fChannels.push_back(ch);
     }
     if (fChannels.empty()) {
-        Log::OutError("[vx2730] ChannelList e' vuota: nessun canale da acquisire.");
+        Log::OutError("[boards." + fBoard + "] ChannelList e' vuota: nessun canale da acquisire.");
         exit(1);
     }
 
-    fRecordLength = fConfig.GetEntry<uint32_t>(kSection, "RecordLength", 1024);
-    fPreTrigger   = fConfig.GetEntry<uint32_t>(kSection, "PreTrigger", 256);
+    fRecordLength = static_cast<uint32_t>(Val<int64_t>("RecordLength", 1024));
+    fPreTrigger   = static_cast<uint32_t>(Val<int64_t>("PreTrigger", 256));
     fDCOffset     = ScalarOrList<double>("DCOffset", 50.0, fChannels.size());
     fGain         = ScalarOrList<double>("Gain", 0.0, fChannels.size());
-    fIOLevel      = tbl["IOLevel"].value_or(std::string("NIM"));
-    fFlushEvery   = std::max<uint32_t>(1, tbl["LiveFlushEvery"].value_or(1u));
+    fIOLevel      = Val<std::string>("IOLevel", "NIM", false);
+    fFlushEvery   = std::max<uint32_t>(1, static_cast<uint32_t>(Val<int64_t>("LiveFlushEvery", 1, false)));
 
     // Il verso dell'impulso decide insieme fronte e segno della soglia del
     // self-trigger. Sono una cosa sola anche qui: sbagliarne uno non da'
     // errori, la soglia si posa dove il segnale non va mai e la run resta a
     // zero eventi (successo col V1742 passando dai PMT ai SiPM).
-    fPolarity = Lower(fConfig.GetEntry<std::string>(kSection, "Polarity", "positive"));
+    fPolarity = Lower(Val<std::string>("Polarity", "positive"));
     if (fPolarity != "positive" && fPolarity != "negative") {
-        Log::OutError("[vx2730] Polarity = '" + fPolarity + "': vale \"positive\" o \"negative\".");
+        Log::OutError("[boards." + fBoard + "] Polarity = '" + fPolarity +
+                      "': vale \"positive\" o \"negative\".");
         exit(1);
     }
 
     // Sorgenti del trigger, coi nomi del V1742 dove ci sono: Software,
     // External, Self. Il resto passa com'e' alla FELib (TestPulse, LVDS...).
-    std::string src = fConfig.GetEntry<std::string>(kSection, "TriggerSource", "Software");
+    std::string src = Val<std::string>("TriggerSource", "Software");
     std::vector<std::string> felib, modo;
     std::string tok;
     std::stringstream ss(src);
@@ -124,24 +158,21 @@ X2730::X2730(Config& cfg) : fConfig(cfg) {
         else                                      { felib.push_back(tok);     modo.push_back(tok); }
     }
     if (felib.empty()) {
-        Log::OutError("[vx2730] TriggerSource vuoto.");
+        Log::OutError("[boards." + fBoard + "] TriggerSource vuoto.");
         exit(1);
     }
     fTriggerSourceFelib = Join(felib, "|");
     fTriggerMode = Join(modo, "+");
-    fSWTriggerRate = tbl["SWTriggerRate"].value_or(100.0);
+    fSWTriggerRate = Val<double>("SWTriggerRate", 100.0, fSoftwareTrigger);
 
     if (fSelfTrigger) {
-        if (auto arr = tbl["SelfTriggerChannels"].as_array()) {
-            for (size_t i = 0; i < arr->size(); ++i)
-                fSelfChannels.push_back(static_cast<uint32_t>((*arr)[i].value_or(-1)));
-        } else {
-            fSelfChannels = fChannels;
-        }
+        bool p = false;
+        fSelfChannels = UIntList("SelfTriggerChannels", p);
+        if (!p) fSelfChannels = fChannels;
         fSelfThreshold = ScalarOrList<int32_t>("SelfTriggerThreshold", 100, fSelfChannels.size());
         for (auto& t : fSelfThreshold) t = std::abs(t);
-        fSelfLogic = tbl["SelfTriggerLogic"].value_or(std::string("OR"));
-        fSelfMajority = tbl["SelfTriggerMajority"].value_or(2u);
+        fSelfLogic = Val<std::string>("SelfTriggerLogic", "OR");
+        fSelfMajority = static_cast<uint32_t>(Val<int64_t>("SelfTriggerMajority", 2, fSelfLogic == "Majority"));
     }
 }
 
@@ -205,15 +236,26 @@ void X2730::Open() {
                     " " + fFpgaFw + ", " + std::to_string(fNumCh) + " channels, " +
                     std::to_string(fAdcBits) + " bit, " + Num(msps) + " MS/s (Dig2 " + ver + ")");
 
+    // Come per i V1742: con BoardSerial nel TOML, un'altra scheda a quel
+    // collegamento non parte (una scheda scambiata, un cavo spostato).
+    if (fExpectedSerial != 0 && fExpectedSerial != fSerial) {
+        Log::OutError("[boards." + fBoard + "] BoardSerial = " + std::to_string(fExpectedSerial) +
+                      ", ma a " + fUrl + " risponde la s/n " + std::to_string(fSerial) + ". Abort.");
+        exit(1);
+    }
+    if (!fModelConfig.empty() && Lower(fModelConfig) != Lower(fModel))
+        Log::OutWarning("[boards." + fBoard + "] Model = " + fModelConfig + ", ma la scheda e' un " +
+                        fModel + ".");
+
     // Il programma sa leggere solo il firmware Scope: con un DPP gli eventi
     // sono per canale e il formato dei dati e' un altro.
     if (fFwType != "Scope") {
-        Log::OutError("Firmware " + fFwType + ": DAQ-X2730 legge solo il firmware Scope.");
+        Log::OutError("Firmware " + fFwType + ": la DAQ legge solo il firmware Scope.");
         exit(1);
     }
     for (auto c : fChannels)
         if (c >= fNumCh) {
-            Log::OutError("[vx2730] ChannelList: il canale " + std::to_string(c) +
+            Log::OutError("[boards." + fBoard + "] ChannelList: il canale " + std::to_string(c) +
                           " non esiste (la scheda ne ha " + std::to_string(fNumCh) + ").");
             exit(1);
         }
@@ -277,7 +319,7 @@ void X2730::Configure() {
         for (size_t k = 0; k < fSelfChannels.size(); ++k) {
             const uint32_t c = fSelfChannels[k];
             if (c >= fNumCh) {
-                Log::OutError("[vx2730] SelfTriggerChannels: il canale " + std::to_string(c) +
+                Log::OutError("[boards." + fBoard + "] SelfTriggerChannels: il canale " + std::to_string(c) +
                               " non esiste.");
                 exit(1);
             }

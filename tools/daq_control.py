@@ -2065,7 +2065,7 @@ class Controllo:
             # Una riga per scheda, per il riquadro Boards; e i campi di sempre
             # riassunti su tutte, per la barra in alto e la coda.
             vive = {b: p for p, b in trova_daq_tutte().items() if b}
-            righe, somma_ev, somma_rate, nomi_run = [], 0, 0.0, []
+            righe, somma_ev, somma_rate, nomi_run = [], 0, None, []
             for sc in schede:
                 r = dict(sc, pid=vive.get(sc["nome"]))
                 r["in_corso"] = r["pid"] is not None
@@ -2077,19 +2077,28 @@ class Controllo:
                     r["eventi"], r["eventi_richiesti"] = ev, tot
                     r["rate"] = self._rate(ev, sc["nome"])
                     somma_ev += ev or 0
-                    somma_rate += r["rate"] or 0
+                    if r["rate"] is not None:
+                        somma_rate = (somma_rate or 0.0) + r["rate"]
                     if r["run"]:
                         nomi_run.append(r["run"])
                 else:
                     self.storie.pop(sc["nome"], None)
                 righe.append(r)
             s["schede"] = righe
+            # Il riquadro DAQ log: la console di ogni scheda del run, non quella
+            # della DAQ a scheda unica, che con le schede resta vuota.
+            log = []
+            for sc in schede:
+                if sc["attiva"] or vive.get(sc["nome"]):
+                    log.append("\u2500\u2500 %s \u2500\u2500" % sc["nome"])
+                    log += self.coda_log(12, self._console_di(sc["nome"]))
+            s["log"] = log
             if pid:
                 s["run"] = nomi_run[0] if len(nomi_run) == 1 else (
                     "%d boards" % len(nomi_run) if nomi_run else None)
                 s["eventi"] = somma_ev
                 s["eventi_richiesti"] = None
-                s["rate"] = round(somma_rate, 2)
+                s["rate"] = round(somma_rate, 2) if somma_rate is not None else None
                 avvio = avvio_processo(pid)
                 s["da_secondi"] = round(time.time() - avvio, 1) if avvio else None
             return s
@@ -2989,6 +2998,7 @@ PAGINA = r"""<!doctype html>
  .p-run{background:#dcefe4;color:#15603a}
  .p-off{background:#ececea;color:#8a8a84}
  .p-idle{background:#f3f3f0;color:#52514e}
+ .p-ko{background:#f8e0da;color:#8a2a18}
 </style></head><body>
 <h1>DAQ Control</h1>
 
@@ -3667,9 +3677,13 @@ function disegnaSchede(s){
   let h = "<thead><tr><td>in run</td><td>board</td><td>model &middot; serial</td><td>link</td>" +
           "<td>state</td><td>file</td><td>events</td><td>rate</td></tr></thead>";
   for(const x of sc){
+    // Spuntata ma ferma mentre le altre acquisiscono: non e' partita o si e'
+    // fermata da sola, e "idle" lo nasconderebbe.
     const stato = x.in_corso ? '<span class="pill p-run">RUNNING</span>'
-                : (x.attiva ? '<span class="pill p-idle">idle</span>'
-                            : '<span class="pill p-off">NOT IN RUN</span>');
+                : (x.attiva && s.in_corso
+                     ? '<span class="pill p-ko" title="look at its console in data/">NOT RUNNING</span>'
+                     : (x.attiva ? '<span class="pill p-idle">idle</span>'
+                                 : '<span class="pill p-off">NOT IN RUN</span>'));
     const g = x.attiva ? "" : ' style="color:#8a8a84"';
     // Spuntare a run in corso non fermerebbe ne' avvierebbe niente fino al
     // run dopo: la casella si blocca, cosi' non sembra un interruttore.

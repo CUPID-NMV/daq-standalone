@@ -71,9 +71,14 @@ Restano:
   evento, la USB porta 280 MB/s (~8 kHz), ma la scrittura HDF5 evento per
   evento puo' fermarsi prima. Poi la soppressione degli zeri della scheda
   (`EnChSuppr`), per i ~200 canali;
-- **controllore (fase 2)**: riconoscere DAQ-X2730 come DAQ (oggi guarda solo
-  `build/main/DAQ-WC`), avviarla e fermarla dalla pagina, numero di run
-  comune con `--run` quando gira insieme al V1742;
+- **controllore (fase 2)**: le schede di `[boards.*]` nella pagina (V1742 e
+  VX2730B, `DAQ-WC --board <nome>`), avvio e arresto insieme, numero di run
+  comune con `--run`. Prima un PNG da approvare. Due cose gia' viste il
+  2026-11-11: il log della run va cercato accanto al file dei dati (ha preso
+  `~/.CAEN/caendig2...` della libreria CAEN, e ha mandato una mail di run
+  finita male); e una scheda 2.0 accetta un cliente alla volta, quindi il
+  controllore non deve mai collegarsi alla scheda per conto suo durante una
+  run;
 - **monitor ed efficienza (fase 3)**: leggono gia' l'HDF5, ma il verso degli
   impulsi lo prendono dal DCOffset esadecimale del V1742 nel `.log`; per il
   VX2730B c'e' l'attributo `Polarity`;

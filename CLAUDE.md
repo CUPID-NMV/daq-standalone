@@ -947,9 +947,25 @@ Nello stesso crate, dietro lo stesso bridge V4718:
 ## VX2730B sul notebook (dal 2026-11-11)
 
 Digitizer 2.0 **V2730B / VX2730B** (16 canali, 14 bit, 500 MS/s, s/n 71709,
-firmware Scope 1.0.62), nel crate VME8004X, letto dal notebook via **USB-C**
-con `build/main/DAQ-X2730` (`src/X2730.cpp`). Configurazione nella sezione
-`[vx2730]` del TOML, commentata nel template.
+firmware Scope 1.0.62), nel crate VME8004X, letto dal notebook via **USB-C**.
+
+**E' una scheda della DAQ come i V1742** (richiesta dell'utente del
+2026-11-11: in futuro 2730 e 1742 li governa lo stesso controllore):
+`DAQ-WC run.toml --board vx2730 --run N`, con una sezione `[boards.vx2730]`
+che dice `Model = "VX2730B"` (esempio commentato nel template, in fondo a
+"PIU' DIGITIZER"). Il `Model` sceglie il codice: `src/X2730.cpp` con la FELib
+per i digitizer 2.0, il solito `Digitizer` senza `Model` o con "V1742". La
+sezione di una scheda 2.0 **non viene fusa in `[digitizer]`**
+(`Config::SelectBoardOnly`): le chiavi del V1742 li' hanno un altro
+significato (DCOffset in percento, non conteggi di un DAC); da `[digitizer]`
+prende solo OutputDir, OutputFile, NEvents e SaveData. Il primo giro (un
+programma separato, `DAQ-X2730`, del primo pomeriggio) e' stato tolto.
+
+**Stato al 2026-11-11: sul ramo git `schede-2730`, che sul notebook e' la
+copia di lavoro; il PC DAQ resta su `main` e non ne sa niente** (decisione
+dell'utente: si lavora solo sul notebook, al Gran Sasso si porta quando e'
+sistemato). Il percorso del V1742 non cambia, ma col V1742 si prova solo al
+Gran Sasso: a Frascati non c'e'.
 
 - **Con l'A4818 non si legge**: la scheda tecnica della famiglia (DS9688) da'
   solo USB 3.0, 1 GbE e 10 GbE, e Dig2, la libreria dei 27xx, non parla CONET2
@@ -976,8 +992,8 @@ con `build/main/DAQ-X2730` (`src/X2730.cpp`). Configurazione nella sezione
   (DS9688). Si accende all'accensione del crate; a scheda avviata
   `ErrorFlags = 0`, `BoardReady = True`, clock interno, temperature normali
   (aria 27/37 C, FPGA 60 C, ADC 33-41 C). Probabilmente la fase d'avvio, non
-  verificato. `DAQ-X2730` scrive temperature ed `ErrorFlags` nel log a inizio
-  e fine run.
+  verificato. La DAQ scrive temperature ed `ErrorFlags` nel log a inizio e
+  fine run.
 - **Collaudo a ingressi aperti** (2000 eventi a trigger software, 0 dB, DC
   offset 50%; `measurements/vx2730b_rumore_sw_0dB.png`): piedistallo
   8188-8195 conteggi, rumore **2.25-2.37 conteggi rms (0.55-0.58 mV)**
@@ -1011,14 +1027,49 @@ con `build/main/DAQ-X2730` (`src/X2730.cpp`). Configurazione nella sezione
 - **`Polarity` decide insieme fronte e segno della soglia** (la soglia nel
   TOML e' un modulo): sbagliarne uno da solo non darebbe errori, solo zero
   eventi. Il DC offset invece resta esplicito, in percento.
-- **Dove la FELib non c'e' (il PC DAQ) `DAQ-X2730` non si compila**, e
-  `DAQ-WC` resta com'era.
+- **Dove la FELib non c'e' (il PC DAQ) `DAQ-WC` si compila come prima**
+  (`DAQ_HAVE_FELIB` non definito), e una scheda 2.0 si rifiuta per nome.
+- **La scheda accetta UN cliente alla volta, e chi si collega dopo prende il
+  posto di chi c'era** (2026-11-11): una seconda DAQ, WaveDump2, CoMPASS, uno
+  script FELib, anche il mio programma di sola lettura dei parametri
+  (`~/DAQ/prove_vx2730/info_dig2`). La DAQ in corso resta muta: la lettura
+  dei dati restituisce solo "nessun dato", e prima della correzione una run
+  da 8 s si e' fermata a 2 s senza una riga nel log. Ora la DAQ se ne accorge
+  (20 trigger software rifiutati di fila, o niente dati da 2 s e la scheda
+  che non risponde) e chiude con "Lost the board ... giving up", il file
+  chiuso bene. **Durante una run non si collega alla scheda nient'altro.**
+  Per lo stesso motivo "rifiutare la partenza se la scheda sta gia'
+  acquisendo" non si puo' fare: gia' la domanda le toglierebbe la DAQ in
+  corso. L'**interfaccia web** (pagine pubbliche, senza login) **non
+  disturba**: 2387 eventi in 12 s, zero trigger falliti; da loggati non
+  provato. Dopo un `kill -9` della DAQ la scheda si riprende da sola.
+- `AcquisitionStatus`, dalla propria connessione: **47 in acquisizione, 40
+  ferma** (i bit 0 e 1, armata e in corsa). Letto da un'altra connessione
+  vale 40 anche a run in corso: e' gia' un altro cliente.
+- **Casi d'errore provati il 2026-11-11** (binario di `build-swmr`, che il
+  controllore non riconosce): scheda inesistente, `Enabled = false`, `Model`
+  sconosciuto, `Polarity` sbagliata, `TriggerSource` vuoto, canale 16,
+  numero di serie inesistente nell'URL, `BoardSerial` diverso: tutti fermi
+  con un messaggio sulla chiave sbagliata, nessun file creato. Ctrl-C: file
+  chiuso bene (flag del superblocco a 0). `SaveData = false`: `TEST_`
+  cancellato, resta il `.log`. Senza `--board` parte il codice del V1742.
 - Il trigger software va a ~200 Hz con intervalli un po' piu' regolari di
   un'esponenziale (cv 0.80): il comando via USB costa qualche millisecondo.
-- **Non ancora**: controllore e monitor non conoscono `DAQ-X2730` (il
-  controllore riconosce la DAQ da `build/main/DAQ-WC`), ed efficienza e
-  monitor leggono il verso dal DCOffset esadecimale del V1742, non dalle
-  percentuali. In `TODO.md`.
+- **Il controllore acceso sul notebook (dalle 14:35 del 2026-11-11, non da
+  me) ha mandato quattro mail false** alla lista copiata dal PC: la coda
+  attiva sul PC al momento della copia "interrotta da un riavvio", gli
+  alimentatori del Gran Sasso "not answering" (da Frascati non si vedono), e
+  una mia run di prova del 2730 data per finita male. Ha anche compresso i
+  file di prova (sul cloud niente: `cp_data` sul notebook non c'e'). Le prove
+  della DAQ sul notebook si fanno col binario di `build-swmr`, e il
+  controllore del notebook, finche' sta a Frascati, va tenuto spento o in
+  modalita' di prova (`--notifiche`, `--senza-archivio`, `--psu-host ""`).
+- **Per il controllore (fase 2)**: come log della run ha preso
+  `~/.CAEN/caendig2...`, un file della libreria CAEN che la DAQ tiene aperto,
+  e non avendo le righe di riepilogo l'ha data per finita male. Il log della
+  run va cercato accanto al file dei dati. Monitor ed efficienza leggono il
+  verso dal DCOffset esadecimale del V1742 nel `.log`: per il 2730 c'e'
+  l'attributo `Polarity`. In `TODO.md`.
 
 ## Prima prova al Gran Sasso (2026-10-23)
 

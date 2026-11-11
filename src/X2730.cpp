@@ -549,13 +549,15 @@ void X2730::Acquire() {
 
     if (CAEN_FELib_SendCommand(fDev, "/cmd/ArmAcquisition") != CAEN_FELib_Success) Fail("ArmAcquisition");
     if (CAEN_FELib_SendCommand(fDev, "/cmd/SwStartAcquisition") != CAEN_FELib_Success) Fail("SwStartAcquisition");
-    Log::OutSummary("→ Acquisition started (trigger " + fTriggerSourceFelib + ")");
+    Log::OutSummary("→ Acquisition started (trigger " + fTriggerSourceFelib + "), AcquisitionStatus " +
+                    Get("/par/AcquisitionStatus", false));
 
     // Trigger software a intervalli esponenziali, in un thread suo: il ciclo
     // di lettura resta libero. Come nel V1742: se resta indietro di oltre un
     // secondo riparte da adesso invece di recuperare con una raffica.
     std::atomic<bool> fermaSW{false};
     std::atomic<uint64_t> swInviati{0}, swFalliti{0};
+    std::atomic<int> swFallitiDiFila{0};
     std::thread sw;
     if (fSoftwareTrigger && fSWTriggerRate > 0) {
         sw = std::thread([&] {
@@ -566,8 +568,13 @@ void X2730::Acquire() {
                 auto ora = std::chrono::steady_clock::now();
                 if (ora >= prossimo) {
                     if (ora - prossimo > std::chrono::seconds(1)) prossimo = ora;
-                    if (CAEN_FELib_SendCommand(fDev, "/cmd/SendSwTrigger") == CAEN_FELib_Success) ++swInviati;
-                    else ++swFalliti;
+                    if (CAEN_FELib_SendCommand(fDev, "/cmd/SendSwTrigger") == CAEN_FELib_Success) {
+                        ++swInviati;
+                        swFallitiDiFila = 0;
+                    } else {
+                        ++swFalliti;
+                        ++swFallitiDiFila;
+                    }
                     prossimo += std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                         std::chrono::duration<double>(intervallo(rng)));
                 }
@@ -581,6 +588,20 @@ void X2730::Acquire() {
     uint64_t totale = 0, scartati = 0;
     int errori = 0;
     const int maxErrori = 20;
+    // La scheda accetta UN cliente alla volta: chi si collega dopo (un'altra
+    // DAQ, WaveDump2, uno script con la FELib, anche solo per leggere un
+    // parametro) prende il suo posto, e questa connessione resta muta. La
+    // lettura dei dati allora non da' errore, solo "nessun dato": misurato il
+    // 2026-11-11, una run da 8 s si e' fermata a 2 s senza una riga nel log.
+    // Quindi, senza dati da 2 s, si chiede alla scheda se risponde ancora.
+    auto ultimoEvento = t0, ultimoControllo = t0;
+    bool persa = false;
+    auto SchedaPersa = [&](const std::string& perche) {
+        Log::OutError("Lost the board (" + perche + "): giving up. Another program may have "
+                      "connected to it (the board takes one client at a time, and the last one "
+                      "takes over), or the USB link dropped.");
+        persa = true;
+    };
 
     while (true) {
         if (Stop::Requested()) {
@@ -603,8 +624,24 @@ void X2730::Acquire() {
         uint64_t ts = 0;
         uint32_t id = 0;
         size_t dim = 0;
+        if (swFallitiDiFila >= 20) {
+            SchedaPersa(std::to_string(swFallitiDiFila.load()) + " software triggers refused in a row");
+            break;
+        }
         const int r = CAEN_FELib_ReadData(fEp, 100, &ts, &id, wave.data(), nsamp.data(), &dim);
-        if (r == CAEN_FELib_Timeout) continue;
+        if (r == CAEN_FELib_Timeout) {
+            const auto adesso = std::chrono::steady_clock::now();
+            if (adesso - ultimoEvento > std::chrono::seconds(2) &&
+                adesso - ultimoControllo > std::chrono::seconds(2)) {
+                ultimoControllo = adesso;
+                char v[256] = {0};
+                if (CAEN_FELib_GetValue(fDev, "/par/AcquisitionStatus", v) != CAEN_FELib_Success) {
+                    SchedaPersa("it does not answer: " + LastError());
+                    break;
+                }
+            }
+            continue;
+        }
         if (r == CAEN_FELib_Stop) {
             Log::OutWarning("→ The board stopped the acquisition by itself.");
             break;
@@ -622,6 +659,7 @@ void X2730::Acquire() {
             continue;
         }
         errori = 0;
+        ultimoEvento = std::chrono::steady_clock::now();
 
         bool dimensioneGiusta = true;
         for (auto c : fChannels)
@@ -676,8 +714,10 @@ void X2730::Acquire() {
 
     fermaSW = true;
     if (sw.joinable()) sw.join();
-    CAEN_FELib_SendCommand(fDev, "/cmd/SwStopAcquisition");
-    CAEN_FELib_SendCommand(fDev, "/cmd/DisarmAcquisition");
+    if (!persa) {
+        CAEN_FELib_SendCommand(fDev, "/cmd/SwStopAcquisition");
+        CAEN_FELib_SendCommand(fDev, "/cmd/DisarmAcquisition");
+    }
 
     std::cout << std::endl << std::endl;
     if (fSoftwareTrigger)
@@ -693,7 +733,10 @@ void X2730::Acquire() {
     Log::OutSummary("→ Events written to file: " + std::to_string(fRows));
     if (scartati > 0)
         Log::OutWarning("→ Events skipped (unexpected size): " + std::to_string(scartati));
-    LogBoardStatus("at end");
+    if (persa)
+        Log::OutWarning("→ Board at end: not readable (connection lost).");
+    else
+        LogBoardStatus("at end");
 }
 
 // ===========================================================================

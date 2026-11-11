@@ -110,6 +110,7 @@ def main():
                 ax.set_ylabel(unita_y, fontsize=8)
             if k >= (RIGHE - 1) * COLONNE or k + COLONNE >= ncan:
                 ax.set_xlabel("time [ns]", fontsize=8)
+                ax.tick_params(labelbottom=True)   # con sharex e meno di 16 canali mancherebbero
         if ncan > RIGHE * COLONNE:
             print("Attenzione: %d canali, se ne vedono i primi %d (RIGHE x COLONNE)."
                   % (ncan, RIGHE * COLONNE))

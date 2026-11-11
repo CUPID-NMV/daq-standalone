@@ -77,3 +77,29 @@ def prefisso(base, et):
         return "%s_%s" % (nudo, et)
     i = vecchia.start()                  # prima della prima etichetta nudo e base coincidono
     return "%s_%s%s" % (nudo[:i], et, nudo[i:])
+
+
+def prossimo_numero(cartella, prefisso):
+    """Il numero del prossimo run col prefisso dato.
+
+    La stessa regola della DAQ (Digitizer::PrepareOutput): i file di DATI
+    della cartella che cominciano con "<prefisso>_" e contengono ".h5", le
+    quattro cifre subito dopo il prefisso, il massimo piu' uno. Con piu' schede
+    il numero lo da' il controllore a tutte (--run): contando i file ognuna lo
+    calcolerebbe a seconda di chi ha gia' creato il suo. I file di tutte le
+    schede contano, perche' il nome della scheda viene DOPO il numero.
+    """
+    import os
+    massimo = -1
+    try:
+        nomi_file = os.listdir(cartella)
+    except OSError:
+        return 0
+    testa = prefisso + "_"
+    for n in nomi_file:
+        if not n.startswith(testa) or ".h5" not in n:
+            continue
+        cifre = n[len(testa):len(testa) + 4]
+        if len(cifre) == 4 and cifre.isdigit():
+            massimo = max(massimo, int(cifre))
+    return massimo + 1

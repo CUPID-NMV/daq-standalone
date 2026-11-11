@@ -605,7 +605,7 @@ void X2730::Acquire() {
 
     while (true) {
         if (Stop::Requested()) {
-            Log::OutSummary("→ Arresto richiesto: chiudo la run dopo " + std::to_string(totale) + " eventi.");
+            Log::OutSummary("→ Arresto richiesto: chiudo il run dopo " + std::to_string(totale) + " eventi.");
             break;
         }
         if (fNEvents > 0 && totale >= fNEvents) break;
@@ -615,9 +615,12 @@ void X2730::Acquire() {
             Log::OutSummary("→ MaxTime reached (" + Num(fMaxTime) + " s).");
             break;
         }
-        if (ora - ultimaStampa > std::chrono::seconds(1)) {
-            std::cout << "\r   events " << totale << "   " << std::fixed << std::setprecision(1)
-                      << (t > 0 ? totale / t : 0.0) << " Hz   " << std::flush;
+        if (ora - ultimaStampa > std::chrono::milliseconds(500)) {
+            // Lo stesso formato del V1742, "Events decoded: N/M": e' la riga
+            // che il controllore legge dalla console per eventi e rate. Niente
+            // dopo il numero, o la lettura di M non riesce.
+            std::cout << "\r Events decoded: " << std::setw(6) << totale << "/" << fNEvents
+                      << std::flush;
             ultimaStampa = ora;
         }
 

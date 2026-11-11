@@ -602,6 +602,16 @@ def trova_daq():
     e un segnale finirebbe a lei. E' gia' successo, e la shell in questione
     ignorava SIGINT, cosi' l'arresto sembrava non funzionare.
     """
+    tutte = trova_daq_tutte()
+    return min(tutte) if tutte else None
+
+
+def trova_daq_tutte():
+    """{pid: scheda} di tutte le DAQ in esecuzione, riconosciute come sopra
+    dall'eseguibile. La scheda e' il --board con cui e' partita, oppure None
+    per la DAQ a scheda unica di sempre. Con piu' schede ([boards.*] nel TOML)
+    gira un processo per scheda, ed e' da qui che il controllore li distingue."""
+    out = {}
     for voce in os.listdir("/proc"):
         if not voce.isdigit():
             continue
@@ -612,8 +622,27 @@ def trova_daq():
         # Dopo una ricompilazione il link diventa "<percorso> (deleted)": il
         # processo vecchio e' ancora quello, e va comunque trovato.
         if exe == BINARIO or exe == BINARIO + " (deleted)":
-            return int(voce)
+            out[int(voce)] = _scheda_di(int(voce))
+    return out
+
+
+def _scheda_di(pid):
+    """Il --board della riga di comando di una DAQ, o None."""
+    try:
+        with open("/proc/%d/cmdline" % pid, "rb") as f:
+            argv = f.read().split(b"\0")
+    except OSError:
+        return None
+    for i in range(len(argv) - 1):
+        if argv[i] == b"--board":
+            return argv[i + 1].decode("utf-8", "replace") or None
     return None
+
+
+def e_digitizer2(modello):
+    """Un Model di [boards.<nome>] che la DAQ legge con la FELib (main/DAQ-WC.cpp)."""
+    m = str(modello or "").lower()
+    return any(f in m for f in ("2730", "2740", "2745", "2751"))
 
 
 def trova_monitor():
@@ -1274,11 +1303,13 @@ class Controllo:
         # volta per run.
         self.figli = []
         self.uscite = {}          # pid -> codice d'uscita delle run figlie finite
-        self._run_viva = None     # cosa si sa della run in corso, per quando finisce
-        self._console_prima = []  # la console della run prima, tenuta da _avvia
+        # Cosa si sa di ogni DAQ in corso, una per scheda: pid -> info.
+        self._runs_vive = {}
+        # La console di ogni scheda del run prima, tenuta da _avvia prima di
+        # riscriverla: percorso -> ultime righe.
+        self._console_prima = {}
         self.notifiche = notifiche.Notifiche(notifiche_cfg, self._cartelle_dati, porta,
                                              log=lambda t: print(t, flush=True))
-        self._daq_prima = trova_daq() is not None   # per vedere la FINE di una run
         self.archivio = archivio
         self._archivio_t = 0.0    # ultimo lancio di archivia.py: 0 = al primo giro
         # Dove sono le run rispetto al cloud, letto da archivia.py ogni
@@ -1292,7 +1323,7 @@ class Controllo:
         # qualcuno a guardare -- cioe' mai di notte, che e' quando le sequenze
         # lunghe finiscono. Due secondi, come il polling della pagina.
         threading.Thread(target=self._guarda_fine_run, daemon=True).start()
-        self.storia = []          # (istante, eventi) per il rate recente
+        self.storie = {}          # scheda -> [(istante, eventi)] per il rate recente
         self.porta_monitor = porta_monitor
         self.args_monitor = list(args_monitor or ARGS_MONITOR)
         # Il bias dei SiPM e l'alimentazione della scheda di amplificazione.
@@ -1349,6 +1380,47 @@ class Controllo:
                           "base": hex(c.get("BaseAddress", 0))}
         return out
 
+    # -- schede --------------------------------------------------------------
+    def schede(self, d=None):
+        """Le schede di [boards.*], nell'ordine del file.
+
+        Lista vuota: niente [boards] nel TOML, e il controllore lavora come
+        sempre, con una DAQ sola e senza --board. Con le schede, Start run ne
+        avvia un processo per ciascuna spuntata (Enabled), tutte con lo stesso
+        numero di run.
+        """
+        if d is None:
+            try:
+                import tomllib
+                with open(self.toml, "rb") as f:
+                    d = tomllib.load(f)
+            except Exception:
+                return []
+        g = d.get("digitizer", {})
+        out = []
+        for nome, t in (d.get("boards") or {}).items():
+            if not isinstance(t, dict):
+                continue
+            modello = str(t.get("Model") or "V1742")
+            d2 = e_digitizer2(modello)
+            if d2:
+                url = str(t.get("URL", ""))
+                collegamento = ("USB \u00b7 " + url.split("://", 1)[-1]
+                                if "/usb" in url else url)
+            else:
+                base = t.get("VMEBaseAddress", g.get("VMEBaseAddress"))
+                collegamento = ("VME 0x%08X via V4718" % base) if isinstance(base, int) else "VME"
+            out.append({"nome": nome, "attiva": bool(t.get("Enabled", True)),
+                        "modello": modello, "digitizer2": d2,
+                        "collegamento": collegamento, "serie": t.get("BoardSerial")})
+        return out
+
+    def _console_di(self, scheda):
+        """La console di una DAQ: quella di sempre, o una per scheda."""
+        if not scheda:
+            return self.log_path
+        return os.path.join(os.path.dirname(self.log_path), "daq-console-%s.log" % scheda)
+
     # -- configurazione modificabile ---------------------------------------
     def campi(self):
         """Le chiavi modificabili, con il valore che hanno adesso nel file.
@@ -1395,6 +1467,8 @@ class Controllo:
                                "Reload and redo your changes: I will not overwrite it."), []
 
             spec = {(s, c): (e, t, d) for s, c, e, t, d in CAMPI}
+            for sc in self.schede():
+                spec[("boards." + sc["nome"], "Enabled")] = ("in run (%s)" % sc["nome"], "booleano", None)
             richieste = []
             for sezione, chiave, valore in modifiche:
                 if (sezione, chiave) not in spec:
@@ -1488,9 +1562,9 @@ class Controllo:
         return True, "Thresholds applied to the running acquisition: %s" % righe.replace("\n", "  ").strip()
 
     # -- log ---------------------------------------------------------------
-    def coda_log(self, n=25):
+    def coda_log(self, n=25, percorso=None):
         try:
-            with open(self.log_path, "rb") as f:
+            with open(percorso or self.log_path, "rb") as f:
                 f.seek(0, os.SEEK_END)
                 taglia = f.tell()
                 f.seek(max(0, taglia - 60000))
@@ -1499,18 +1573,19 @@ class Controllo:
             return []
         return righe_terminale(testo)[-n:]
 
-    def testa_log(self, n=300):
+    def testa_log(self, n=300, percorso=None):
         """Prime righe del log. Il file viene troncato a ogni avvio, quindi
         l'inizio e' l'inizio di QUESTA run."""
         try:
-            with open(self.log_path, "rb") as f:
+            with open(percorso or self.log_path, "rb") as f:
                 testo = f.read(200000).decode("utf-8", "replace")
         except OSError:
             return []
         return righe_terminale(testo)[:n]
 
-    def eventi_correnti(self):
-        """(decodificati, richiesti, file) dal log della run.
+    def eventi_correnti(self, console=None):
+        """(decodificati, richiesti, file) dal log della run (la console di
+        una scheda, con console).
 
         Il contatore si legge in coda, il nome del file in testa: quella riga
         la DAQ la stampa una volta sola all'avvio, e cercarla in fondo
@@ -1518,7 +1593,7 @@ class Controllo:
         eventi era scorsa fuori dalla finestra e il nome spariva dalla pagina.
         """
         eventi = richiesti = None
-        for riga in self.coda_log(400):
+        for riga in self.coda_log(400, console):
             if "Events decoded:" in riga:
                 try:
                     a, b = riga.split("Events decoded:")[1].strip().split("/")
@@ -1527,7 +1602,7 @@ class Controllo:
                     pass
 
         runfile = None
-        for riga in self.testa_log():
+        for riga in self.testa_log(300, console):
             if "HDF5 output path selected:" in riga:
                 runfile = riga.split("HDF5 output path selected:")[1].strip()
         return eventi, richiesti, runfile
@@ -1536,28 +1611,31 @@ class Controllo:
         """Vede finire le run anche se nessuno sta guardando la pagina."""
         while True:
             try:
-                pid = trova_daq()
-                vivo = pid is not None
-                info = self._run_viva
-                # In coda la run dopo parte entro mezzo secondo dalla fine di
-                # quella prima, meno di un giro di questo ciclo, e un istante
-                # senza DAQ non si vede mai: la fine la dice il processo
-                # cambiato. Fino al 2026-11-02 quelle run restavano senza la
-                # diagnosi di fine run e senza compressione subito (la 0112,
-                # finita alle 15:02:49, alle 15:09 era ancora .h5).
-                cambiata = vivo and info is not None and info["pid"] != pid
-                if (self._daq_prima and not vivo) or cambiata:
-                    self._run_viva = None
-                    self._dopo_la_run(info, console_sovrascritta=cambiata)
-                elif time.time() - self._archivio_t > ARCHIVIO_OGNI_S:
+                vive = trova_daq_tutte()            # pid -> scheda
+                # Una DAQ e' finita quando il suo processo non c'e' piu'. Vale
+                # anche in coda, dove il run dopo parte entro mezzo secondo,
+                # meno di un giro di questo ciclo, e un istante senza DAQ non
+                # si vede mai: la fine la dice il processo cambiato. Fino al
+                # 2026-11-02 quei run restavano senza diagnosi di fine run e
+                # senza compressione subito (la 0112, finita alle 15:02:49,
+                # alle 15:09 era ancora .h5). Con piu' schede ogni processo
+                # finisce per conto suo.
+                finite = [p for p in self._runs_vive if p not in vive]
+                for p in finite:
+                    info = self._runs_vive.pop(p)
+                    # La console e' gia' stata riscritta se un'altra DAQ, partita
+                    # dopo, scrive la stessa: e' il run dopo della stessa scheda.
+                    sovrascritta = any(i is not info and i.get("console") == info.get("console")
+                                       for i in self._runs_vive.values())
+                    self._dopo_la_run(info, console_sovrascritta=sovrascritta)
+                if not finite and time.time() - self._archivio_t > ARCHIVIO_OGNI_S:
                     self._archivia()
-                if vivo:
-                    self._segui_run(pid)
+                for p, scheda in vive.items():
+                    info = self._segui_run(p, scheda)
                     try:
-                        self._campiona_rate()
+                        self._campiona_rate(info)
                     except Exception:
                         pass
-                self._daq_prima = vivo
             except Exception:
                 pass            # un errore qui non deve fermare il controllore
             time.sleep(2.0)
@@ -1600,7 +1678,7 @@ class Controllo:
                 print("notifiche: cloud: %s" % e, flush=True)
             time.sleep(CLOUD_OGNI_S)
 
-    def _segui_run(self, pid):
+    def _segui_run(self, pid, scheda=None):
         """Annota, a run viva, dove scrive: quando sara' morta non si potra' piu'.
 
         Il log della run si trova fra i file che il processo tiene aperti --
@@ -1608,29 +1686,47 @@ class Controllo:
         chiunque l'abbia lanciata: la pagina, la coda, uno scan, un terminale.
         Il nome dedotto dall'uscita della console varrebbe solo per le prime.
         """
-        info = self._run_viva
-        if info is None or info["pid"] != pid:
-            info = self._run_viva = {"pid": pid, "log": None, "console": None,
-                                     "inizio": avvio_processo(pid) or time.time(),
-                                     "scan": False}
+        info = self._runs_vive.get(pid)
+        if info is None:
+            info = self._runs_vive[pid] = {"pid": pid, "scheda": scheda, "log": None,
+                                           "console": None,
+                                           "inizio": avvio_processo(pid) or time.time(),
+                                           "scan": False}
         if trova_scan():
             # Basta averlo visto una volta: i punti di uno scan si chiudono col
             # timeout e senza riepilogo, e non sono run finite male.
             info["scan"] = True
         if info["log"] is None:
+            # Il log del run e' quello accanto al file dei dati, con lo stesso
+            # nome. Non "il primo .log aperto": la DAQ di una scheda 2.0 tiene
+            # aperto anche il log della libreria CAEN (~/.CAEN/caendig2...), e
+            # il 2026-11-11 e' stato preso per il log del run, che senza righe
+            # di riepilogo e' sembrato finito male (mail falsa).
+            logs, dati = [], set()
             try:
                 for fd in os.listdir("/proc/%d/fd" % pid):
                     dove = os.readlink("/proc/%d/fd/%s" % (pid, fd))
                     if dove.endswith(".log") and fd not in ("1", "2"):
-                        info["log"] = dove
+                        logs.append(dove)
+                    elif dove.endswith(".h5"):
+                        dati.add(os.path.splitext(dove)[0])
                     elif fd == "1" and os.path.isfile(dove):
                         info["console"] = dove
             except OSError:
                 pass
+            buoni = [l for l in logs if os.path.splitext(l)[0] in dati]
+            # Una DAQ che non scrive HDF5 (un dump in Transparent Mode) non ha
+            # un file accanto: dopo qualche secondo si prende un .log che non
+            # sia della libreria CAEN.
+            if not buoni and time.time() - info["inizio"] > 15:
+                buoni = [l for l in logs if os.sep + ".CAEN" + os.sep not in l]
+            if buoni:
+                info["log"] = buoni[0]
             if info["log"] and os.sep + "scan" + os.sep in info["log"]:
                 info["scan"] = True
+        return info
 
-    def _campiona_rate(self):
+    def _campiona_rate(self, info):
         """Annota quanti eventi ha la run in corso, ogni RATE_PASSO_S secondi.
 
         Dal file HDF5, letto in SWMR mentre la DAQ scrive: vale per qualunque
@@ -1638,7 +1734,6 @@ class Controllo:
         LiveMonitoring = false -- dal contatore che la DAQ stampa sulla sua
         uscita, quando quella e' un file.
         """
-        info = self._run_viva
         adesso = time.time()
         if not info or not info["log"] or adesso - info.get("campione", 0) < RATE_PASSO_S:
             return
@@ -1766,8 +1861,8 @@ class Controllo:
         # di aprire il log della run (un VME che non risponde, per esempio).
         console = []
         if (info["console"] and console_sovrascritta
-                and info["console"] == os.path.realpath(self.log_path)):
-            console = list(self._console_prima)
+                and info["console"] in self._console_prima):
+            console = list(self._console_prima[info["console"]])
         elif info["console"]:
             try:
                 with open(info["console"], "rb") as f:
@@ -1881,9 +1976,9 @@ class Controllo:
             return
         self._archivio_t = time.time()
         comando = [sys.executable, ARCHIVIA, "--toml", self.toml] + ([cartella] if cartella else [])
-        # Mai un'eccezione da qui: in _guarda_fine_run salterebbe
-        # l'aggiornamento di _daq_prima, e la fine run si ripeterebbe ogni due
-        # secondi, e-log compreso.
+        # Mai un'eccezione da qui: in _guarda_fine_run salterebbe il resto del
+        # giro, e la fine di un run si ripeterebbe ogni due secondi, e-log
+        # compreso.
         try:
             self._raccogli_figli()
             with open(ARCHIVIO_LOG, "a") as log:
@@ -1936,6 +2031,39 @@ class Controllo:
                 "da_secondi": round(time.time() - scan.get("avviato", time.time()), 1),
                 "log": self.coda_scan(),
             }
+        schede = self.schede()
+        if schede:
+            # Una riga per scheda, per il riquadro Boards; e i campi di sempre
+            # riassunti su tutte, per la barra in alto e la coda.
+            vive = {b: p for p, b in trova_daq_tutte().items() if b}
+            righe, somma_ev, somma_rate, nomi_run = [], 0, 0.0, []
+            for sc in schede:
+                r = dict(sc, pid=vive.get(sc["nome"]))
+                r["in_corso"] = r["pid"] is not None
+                ev, tot, runfile = self.eventi_correnti(self._console_di(sc["nome"]))
+                r["run"] = os.path.basename(runfile) if runfile else None
+                if r["in_corso"]:
+                    avvio = avvio_processo(r["pid"])
+                    r["da_secondi"] = round(time.time() - avvio, 1) if avvio else None
+                    r["eventi"], r["eventi_richiesti"] = ev, tot
+                    r["rate"] = self._rate(ev, sc["nome"])
+                    somma_ev += ev or 0
+                    somma_rate += r["rate"] or 0
+                    if r["run"]:
+                        nomi_run.append(r["run"])
+                else:
+                    self.storie.pop(sc["nome"], None)
+                righe.append(r)
+            s["schede"] = righe
+            if pid:
+                s["run"] = nomi_run[0] if len(nomi_run) == 1 else (
+                    "%d boards" % len(nomi_run) if nomi_run else None)
+                s["eventi"] = somma_ev
+                s["eventi_richiesti"] = None
+                s["rate"] = round(somma_rate, 2)
+                avvio = avvio_processo(pid)
+                s["da_secondi"] = round(time.time() - avvio, 1) if avvio else None
+            return s
         if pid:
             avvio = avvio_processo(pid)
             s["da_secondi"] = round(time.time() - avvio, 1) if avvio else None
@@ -1945,21 +2073,22 @@ class Controllo:
             s["run"] = os.path.basename(runfile) if runfile else None
             s["rate"] = self._rate(ev)
         else:
-            self.storia = []
+            self.storie = {}
         return s
 
-    def _rate(self, eventi):
-        """Rate sugli ultimi ~30 s. Il rate medio dall'inizio non serve a
-        niente mentre si guarda se la run sta andando."""
+    def _rate(self, eventi, chiave=None):
+        """Rate sugli ultimi ~30 s, per scheda. Il rate medio dall'inizio non
+        serve a niente mentre si guarda se il run sta andando."""
         if eventi is None:
             return None
         ora = time.time()
-        self.storia.append((ora, eventi))
-        self.storia = [(t, e) for t, e in self.storia if ora - t <= 30]
-        if len(self.storia) < 2:
+        st = self.storie.setdefault(chiave, [])
+        st.append((ora, eventi))
+        st[:] = [(t, e) for t, e in st if ora - t <= 30]
+        if len(st) < 2:
             return None
-        dt = self.storia[-1][0] - self.storia[0][0]
-        de = self.storia[-1][1] - self.storia[0][1]
+        dt = st[-1][0] - st[0][0]
+        de = st[-1][1] - st[0][1]
         return round(de / dt, 2) if dt > 0.5 else None
 
     # -- coda di run -------------------------------------------------------
@@ -2261,9 +2390,24 @@ class Controllo:
                         self._ferma(da_coda=True)
                     break
 
+            ev, runfile = self._riassunto_ultimo_run()
+            segna(stato="done", run=runfile, eventi=ev,
+                  messaggio="%.0f s" % (time.time() - inizio))
+
+    def _riassunto_ultimo_run(self):
+        """(eventi, nome) dell'ultimo run, per la coda: con piu' schede la
+        somma degli eventi e i file di tutte."""
+        schede = [sc for sc in self.schede() if sc["attiva"]]
+        if not schede:
             ev, _, runfile = self.eventi_correnti()
-            segna(stato="done", run=os.path.basename(runfile) if runfile else None,
-                  eventi=ev, messaggio="%.0f s" % (time.time() - inizio))
+            return ev, (os.path.basename(runfile) if runfile else None)
+        evs, files = [], []
+        for sc in schede:
+            ev, _, runfile = self.eventi_correnti(self._console_di(sc["nome"]))
+            if runfile:
+                files.append(os.path.basename(runfile))
+                evs.append(ev or 0)
+        return (sum(evs) if evs else None), (", ".join(files) or None)
 
     # -- scan --------------------------------------------------------------
     def coda_scan(self, n=30):
@@ -2478,18 +2622,15 @@ class Controllo:
         # La tensione dei SiPM nel nome del file, prima di partire: dopo non
         # si puo' piu', il nome la DAQ lo compone una volta sola.
         prefisso = self._scrivi_prefisso_hv()
+        schede = self.schede()
+        if schede:
+            return self._avvia_schede(schede, prefisso)
 
         # La console della run prima si riscrive qui sotto. In coda la sua fine
         # la vede il controllore solo dopo, a run nuova gia' partita, e una
         # DAQ morta prima di aprire il suo log ha il motivo solo li': le
         # ultime righe si tengono da parte per _fine_run.
-        try:
-            with open(self.log_path, "rb") as f:
-                f.seek(0, os.SEEK_END)
-                f.seek(max(0, f.tell() - 20000))
-                self._console_prima = righe_terminale(f.read().decode("utf-8", "replace"))[-40:]
-        except OSError:
-            self._console_prima = []
+        self._tieni_console(self.log_path)
         try:
             log = open(self.log_path, "wb")
         except OSError as e:
@@ -2515,6 +2656,82 @@ class Controllo:
                 return True, ("DAQ started." if not prefisso
                               else "DAQ started, writing %s_NNNN..." % prefisso)
         return False, "Started but I cannot find it among the processes: check the log."
+
+    def _tieni_console(self, percorso):
+        """Le ultime righe di una console prima di riscriverla: in coda la fine
+        del run prima la vede il controllore solo dopo, a run nuovo gia'
+        partito, e una DAQ morta prima di aprire il suo log ha il motivo solo
+        li'. Le legge _fine_run."""
+        try:
+            with open(percorso, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                f.seek(max(0, f.tell() - 20000))
+                self._console_prima[os.path.realpath(percorso)] = righe_terminale(
+                    f.read().decode("utf-8", "replace"))[-40:]
+        except OSError:
+            self._console_prima.pop(os.path.realpath(percorso), None)
+
+    def _avvia_schede(self, schede, prefisso):
+        """Un processo DAQ per ogni scheda spuntata, tutte con lo stesso numero.
+
+        Il numero lo da' il controllore (--run): contando i file ogni scheda lo
+        calcolerebbe a seconda di chi ha gia' creato il suo. La regola e' la
+        stessa della DAQ (tools/nomi.py). Una scheda che non parte non ferma
+        le altre: lo si dice e il run va avanti senza di lei.
+        """
+        attive = [sc for sc in schede if sc["attiva"]]
+        if not attive:
+            return False, "No board is ticked in Boards: nothing to start."
+        try:
+            import tomllib
+            with open(self.toml, "rb") as f:
+                g = tomllib.load(f).get("digitizer", {})
+        except Exception as e:
+            return False, "Cannot read %s: %s" % (self.toml, e)
+        cartella = str(g.get("OutputDir", "."))
+        if not os.path.isabs(cartella):
+            cartella = os.path.join(os.path.dirname(BINARIO), cartella)
+        base = str(g.get("OutputFile", "test")) if g.get("SaveData", True) else "TEST"
+        numero = nomi.prossimo_numero(cartella, base)
+        partite, errori = [], []
+        for sc in attive:
+            console = self._console_di(sc["nome"])
+            self._tieni_console(console)
+            try:
+                log = open(console, "wb")
+            except OSError as e:
+                errori.append("%s: cannot write %s: %s" % (sc["nome"], console, e))
+                continue
+            try:
+                # start_new_session come per la DAQ di sempre: il run
+                # sopravvive al riavvio del controllore e alla rete che cade.
+                self.figli.append(subprocess.Popen(
+                    [BINARIO, self.toml, "--board", sc["nome"], "--run", str(numero)],
+                    cwd=os.path.dirname(BINARIO), stdout=log, stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL, start_new_session=True))
+                partite.append(sc["nome"])
+            except OSError as e:
+                errori.append("%s: %s" % (sc["nome"], e))
+            finally:
+                log.close()
+        for _ in range(50):
+            time.sleep(0.1)
+            viste = set(trova_daq_tutte().values())
+            if all(n in viste for n in partite):
+                break
+        viste = set(trova_daq_tutte().values())
+        vive = [n for n in partite if n in viste]
+        morte = [n for n in partite if n not in viste]
+        if not vive:
+            return False, ("Run %04d: no board started (%s). Look at their consoles."
+                           % (numero, "; ".join(errori + morte) or "?"))
+        messaggio = "Run %04d started on %s" % (numero, ", ".join(vive))
+        if prefisso:
+            messaggio += ", writing %s_%04d_..." % (prefisso, numero)
+        if morte or errori:
+            messaggio += (". NOT running: %s (look at its console in data/)."
+                          % ", ".join(morte + errori))
+        return True, messaggio + "."
 
     def cartella_uscita(self):
         """OutputDir dal TOML, oppure None se non si riesce a leggerlo."""
@@ -2606,13 +2823,15 @@ class Controllo:
         if trova_scan():
             return False, ("A scan is running: stopping the single run would leave "
                            "it half done. Use Stop scan.")
-        pid = trova_daq()
-        if not pid:
+        # Con piu' schede si fermano tutte: un processo per scheda.
+        pids = list(trova_daq_tutte())
+        if not pids:
             return False, "No DAQ is running."
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except OSError as e:
-            return False, "Signal failed: %s" % e
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError as e:
+                return False, "Signal failed: %s" % e
         for i in range(ATTESA_ARRESTO_S * 2):
             time.sleep(0.5)
             if not trova_daq():
@@ -2711,6 +2930,12 @@ PAGINA = r"""<!doctype html>
  input{font:inherit;padding:6px 9px;border:1px solid #d5d5d0;border-radius:6px}
  a{color:#2a78d6}
  button.nb{padding:3px 10px;font-size:12px;background:#ececea}
+ .schede td{padding:5px 10px 5px 4px;font-size:13px;border-bottom:1px solid #f0f0ec;white-space:nowrap}
+ .schede thead td{color:#6b6a65;font-weight:600;font-size:12px}
+ .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:600}
+ .p-run{background:#dcefe4;color:#15603a}
+ .p-off{background:#ececea;color:#8a8a84}
+ .p-idle{background:#f3f3f0;color:#52514e}
 </style></head><body>
 <h1>DAQ Control</h1>
 
@@ -2760,6 +2985,17 @@ PAGINA = r"""<!doctype html>
   <div id="cloudriga" style="display:none;margin-top:10px;padding:8px 12px;border-radius:6px;
        background:#f8e0da;color:#8a2a18;font-size:12px;line-height:1.5"></div>
   <div id="msg" class="msg"></div>
+</div>
+
+<!-- Le schede di [boards.*]: una DAQ per scheda, tutte con lo stesso numero di
+     run. Senza [boards] nel TOML il riquadro non compare e la pagina e' quella
+     di sempre. -->
+<div class="box" id="b_schede" style="display:none;margin-bottom:14px"><h2>Boards<span class="riass"></span></h2>
+  <table class="schede" id="schede"></table>
+  <div style="font-size:12px;color:#6b6a65;margin-top:8px">
+    Start run starts every ticked board with the same run number; Stop run stops them all.
+    A board that stops by itself (lost link, error) shows it here and in the mail; the others go on.
+    Ticking a board writes Enabled in its [boards] section: it applies from the next run.</div>
 </div>
 
 <div class="riga">
@@ -3259,6 +3495,16 @@ async function aggiorna(){
   $("sommario").textContent = s.in_corso
       ? (s.run || "") + (s.rate !== null && s.rate !== undefined ? "   " + s.rate + " Hz" : "")
       : "";
+  // Con le schede la barra dice il run e quante schede lo stanno prendendo:
+  // il nome di un file solo non basta piu'.
+  const conSchede = !!(s.schede && s.schede.length);
+  const vive = conSchede ? s.schede.filter(x => x.in_corso) : [];
+  const numRun = vive.map(x => numeroRun(x.run)).find(x => x);
+  if(conSchede && s.in_corso)
+    $("sommario").textContent = (numRun ? "run " + numRun + " \u00b7 " : "") + vive.length +
+        (vive.length === 1 ? " board" : " boards") +
+        (s.rate != null ? " \u00b7 " + s.rate + " Hz in total" : "");
+  disegnaSchede(s);
   $("avvia").disabled = s.in_corso || !!s.scan || (s.coda && s.coda.attiva);
   $("ferma").disabled = !s.in_corso || !!s.scan || (s.coda && s.coda.attiva);
   aggiornaMonitor(s);
@@ -3286,7 +3532,13 @@ async function aggiorna(){
   riass("b_azioni", (s.azioni && s.azioni.length)
           ? s.azioni[s.azioni.length - 1].quando : "");
 
-  tabella($("run"), s.in_corso
+  if(conSchede && s.in_corso)
+    tabella($("run"), [["run", (numRun ? numRun + ", " : "") +
+                         (s.da_secondi == null ? "" : "running for " + Math.round(s.da_secondi) + " s")]]
+      .concat(vive.map(x => [x.nome,
+        (x.eventi == null ? "&mdash;" : x.eventi + (x.eventi_richiesti ? " / " + x.eventi_richiesti : "")) +
+        " ev &middot; " + (x.rate == null ? "waiting" : x.rate + " Hz") + " &middot; pid " + x.pid])));
+  else tabella($("run"), s.in_corso
     ? [["pid", s.pid],
        ["file", s.run],
        ["events", s.eventi === null ? "—" : s.eventi + " / " + s.eventi_richiesti],
@@ -3345,6 +3597,66 @@ async function aggiorna(){
   ).join("<br>") || "no actions recorded";
   if(s.notifiche) disegnaNotifiche(s.notifiche);
 }
+
+// --- schede ----------------------------------------------------------------
+function numeroRun(nome){
+  const m = /_(\d{4})_/.exec(nome || "");
+  return m ? m[1] : null;
+}
+
+function disegnaSchede(s){
+  const sc = s.schede || [];
+  $("b_schede").style.display = sc.length ? "block" : "none";
+  if(!sc.length) return;
+  const vive = sc.filter(x => x.in_corso);
+  riass("b_schede", vive.length ? vive.length + " of " + sc.length + " running"
+                                : sc.length + (sc.length === 1 ? " board" : " boards"));
+  let h = "<thead><tr><td>in run</td><td>board</td><td>model &middot; serial</td><td>link</td>" +
+          "<td>state</td><td>file</td><td>events</td><td>rate</td></tr></thead>";
+  for(const x of sc){
+    const stato = x.in_corso ? '<span class="pill p-run">RUNNING</span>'
+                : (x.attiva ? '<span class="pill p-idle">idle</span>'
+                            : '<span class="pill p-off">NOT IN RUN</span>');
+    const g = x.attiva ? "" : ' style="color:#8a8a84"';
+    // Spuntare a run in corso non fermerebbe ne' avvierebbe niente fino al
+    // run dopo: la casella si blocca, cosi' non sembra un interruttore.
+    h += `<tr><td><input type="checkbox" class="scheda-on" data-scheda="${x.nome}"` +
+         `${x.attiva ? " checked" : ""}${s.in_corso ? " disabled" : ""}></td>` +
+         `<td${g}><b>${x.nome}</b></td><td${g}>${x.modello}${x.serie ? " &middot; " + x.serie : ""}</td>` +
+         `<td${g}>${x.collegamento}</td><td>${stato}</td><td${g}>${x.run || "&mdash;"}</td>` +
+         `<td>${x.in_corso ? (x.eventi == null ? "&mdash;" : x.eventi +
+                (x.eventi_richiesti ? " / " + x.eventi_richiesti : "")) : ""}</td>` +
+         `<td>${x.in_corso ? (x.rate == null ? "waiting" : x.rate + " Hz") : ""}</td></tr>`;
+  }
+  // Riscrivere la tabella a ogni giro toglierebbe il clic a chi sta
+  // spuntando: si riscrive solo se e' cambiata.
+  if($("schede")._h !== h){ $("schede").innerHTML = h; $("schede")._h = h; }
+}
+
+$("schede").addEventListener("change", async ev => {
+  const c = ev.target;
+  if(!c.classList.contains("scheda-on")) return;
+  const torna = () => { c.checked = !c.checked; };
+  if(!CFG){ msg("The configuration is not loaded yet: try again.", false); torna(); return; }
+  // Spuntare scrive il TOML e poi lo rilegge: le modifiche non salvate nel
+  // riquadro Configuration andrebbero perse senza avviso.
+  if(modificheCorrenti().length){
+    msg("Save (or reload) the configuration first: ticking a board writes the TOML.", false);
+    torna(); return;
+  }
+  const nome = c.dataset.scheda, v = c.checked ? "true" : "false";
+  try{
+    const r = await fetch("/api/config?token=" + TOKEN, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({mtime: CFG.mtime, chi: $("chi").value,
+                            modifiche: [["boards." + nome, "Enabled", v]]})});
+    const d = await r.json();
+    msg(d.esito ? "Board " + nome + (c.checked ? " is in" : " is out of") + " the next run."
+                : d.messaggio, d.esito);
+    if(!d.esito) torna();
+  }catch(e){ msg("Save failed: " + e, false); torna(); }
+  caricaConfig();
+});
 
 // --- configurazione -------------------------------------------------------
 // Il form NON si ricarica col polling: riscriverebbe quello che stai

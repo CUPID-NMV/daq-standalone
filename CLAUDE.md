@@ -1022,8 +1022,12 @@ Gran Sasso: a Frascati non c'e'.
   `/config` `BoardModel`, `FirmwareType`, `DCOffsetPercent`, `GainDb`,
   `ADCToVolts`, `PreTriggerSamples`, `Polarity`. Nome:
   `<prefisso>_<NNNN>_vx2730_500Ms_<PT>PT.h5`, numerato come il V1742. Nel
-  `.log` le stesse righe di riepilogo del V1742. Non comprime: lo fa
-  `archivia.py`.
+  `.log` le stesse righe di riepilogo del V1742, e in console l'avanzamento
+  nel suo formato (`Events decoded: N/M`, che il controllore legge). Non
+  comprime: lo fa `archivia.py`. **`SamplingTime` e' in SECONDI, come per il
+  V1742** (tutti gli strumenti lo moltiplicano per 1e9): fino al 2026-11-11
+  sera la DAQ ci scriveva 2.0, e i file di prova presi fino ad allora (anche
+  `prova2730_0000`) hanno quel valore sbagliato.
 - **`Polarity` decide insieme fronte e segno della soglia** (la soglia nel
   TOML e' un modulo): sbagliarne uno da solo non darebbe errori, solo zero
   eventi. Il DC offset invece resta esplicito, in percento.
@@ -1064,12 +1068,47 @@ Gran Sasso: a Frascati non c'e'.
   della DAQ sul notebook si fanno col binario di `build-swmr`, e il
   controllore del notebook, finche' sta a Frascati, va tenuto spento o in
   modalita' di prova (`--notifiche`, `--senza-archivio`, `--psu-host ""`).
-- **Per il controllore (fase 2)**: come log della run ha preso
-  `~/.CAEN/caendig2...`, un file della libreria CAEN che la DAQ tiene aperto,
-  e non avendo le righe di riepilogo l'ha data per finita male. Il log della
-  run va cercato accanto al file dei dati. Monitor ed efficienza leggono il
-  verso dal DCOffset esadecimale del V1742 nel `.log`: per il 2730 c'e'
-  l'attributo `Polarity`. In `TODO.md`.
+- **Il controllore con piu' schede** (2026-11-11, stesso ramo, provato sul
+  notebook con una copia in `/tmp` sulla porta 8799 e la scheda vera; la
+  proposta approvata dall'utente e' `proposta-controllore-schede.png`). Con
+  `[boards.*]` nel TOML:
+  - riquadro **Boards**, una riga per scheda; la casella "in run" scrive
+    `Enabled` (bloccata a run in corso). **Start run** lancia un `DAQ-WC
+    --board` per ogni scheda spuntata, tutte con lo stesso numero (`--run`,
+    `nomi.prossimo_numero`, la regola della DAQ); **Stop run** le ferma
+    tutte. Console per scheda in `data/daq-console-<scheda>.log`;
+  - **una scheda che non parte o si ferma da sola non ferma le altre**
+    (scelta dell'utente: quella scritta nella proposta); nella pagina diventa
+    NOT RUNNING, e se il run era in coda parte la mail "board X did not
+    start". **Il run finisce quando finisce l'ultima scheda**, ognuna ai suoi
+    `NEvents` (scelta provvisoria: l'alternativa e' fermarle tutte con la
+    prima, per avere la stessa durata);
+  - stato, rate, "Current run" e diagnosi di fine run per scheda; **il log
+    del run si cerca accanto al file dei dati**: una scheda 2.0 tiene aperto
+    anche il log della libreria CAEN (`~/.CAEN/caendig2...`), che e' stato
+    preso per il log del run e ha fatto partire una mail falsa;
+  - **Configuration a linguette**: "run (common)" e' il riquadro di sempre,
+    poi una per scheda. Quella del VX2730B ha le chiavi di `X2730.cpp` e la
+    tabella dei canali (registrati, self-trigger, soglia in conteggi coi mV
+    NOMINALI accanto, DC offset in %, guadagno in dB, piedistallo dell'ultimo
+    run di quella scheda); quella di un V1742 in `[boards]` le sole chiavi che
+    scavalca. Save scrive le modifiche di tutte le linguette; una cella vuota
+    su un canale spuntato prende il valore di serie della DAQ.
+    `#cfg=<scheda>` nell'indirizzo apre quella linguetta;
+  - **il controllo di coerenza guarda `[digitizer]` solo se nel run c'e' un
+    V1742**: col solo 2730 "ChannelList is empty" bloccava ogni salvataggio;
+  - provato: due schede di cui una assente (il V1742, a Frascati non c'e'),
+    numeri 0000-0006, Stop a meta' (file chiusi bene), casella "in run", una
+    coda con piu' schede, il controllore riavviato a run in corso (lo
+    riprende), e il salvataggio della tabella del 2730 pilotando la pagina
+    in Chrome headless col protocollo di debug (`websocket-client` nel venv
+    del Mac): nessuna modifica fantasma all'apertura, valori giusti nel file.
+    **Senza `[boards]` tutto come prima.** Col V1742 vero si prova solo al
+    Gran Sasso.
+- `notifiche.esito_run` prende per un errore ogni riga della **console** che
+  contiene "Error": "ErrorFlags 0" nel riassunto del 2730 l'ha fatto (mail
+  falsa su un run finito bene). Ora la DAQ scrive "error flags".
+- Restano per la fase 3 (monitor) e altro in `TODO.md`.
 
 ## Prima prova al Gran Sasso (2026-10-23)
 

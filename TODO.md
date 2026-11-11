@@ -71,14 +71,13 @@ Restano:
   evento, la USB porta 280 MB/s (~8 kHz), ma la scrittura HDF5 evento per
   evento puo' fermarsi prima. Poi la soppressione degli zeri della scheda
   (`EnChSuppr`), per i ~200 canali;
-- **controllore (fase 2)**: le schede di `[boards.*]` nella pagina (V1742 e
-  VX2730B, `DAQ-WC --board <nome>`), avvio e arresto insieme, numero di run
-  comune con `--run`. Prima un PNG da approvare. Due cose gia' viste il
-  2026-11-11: il log della run va cercato accanto al file dei dati (ha preso
-  `~/.CAEN/caendig2...` della libreria CAEN, e ha mandato una mail di run
-  finita male); e una scheda 2.0 accetta un cliente alla volta, quindi il
-  controllore non deve mai collegarsi alla scheda per conto suo durante una
-  run;
+- ~~controllore (fase 2)~~ fatto il 2026-11-11 sul ramo `schede-2730` (CLAUDE.md,
+  "VX2730B sul notebook"). Restano: le soglie del 2730 a run in corso
+  ("Apply now" e' del V1742, e la scheda accetta un cliente alla volta: la
+  DAQ dovrebbe leggere un file di comando come `live-threshold.txt`); gli scan
+  in soglia per il 2730 (oggi solo V1742 e V812); l'oggetto delle mail dice
+  ancora "[DAQ V1742]"; riepilogo serale ed e-log coi file per scheda da
+  guardare; la scelta su come finisce un run a piu' schede (oggi con l'ultima);
 - **monitor ed efficienza (fase 3)**: leggono gia' l'HDF5, ma il verso degli
   impulsi lo prendono dal DCOffset esadecimale del V1742 nel `.log`; per il
   VX2730B c'e' l'attributo `Polarity`;

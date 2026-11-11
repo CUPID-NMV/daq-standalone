@@ -323,6 +323,35 @@ def monitor_acceso(porta=None):
 def coerenza(d):
     """Controlli sulla configurazione nel suo insieme. Torna (errori, avvisi).
 
+    Quelli del V1742, su [digitizer], solo se nel run c'e' un V1742: senza
+    [boards], o con almeno un V1742 spuntato. Con le sole schede 2.0 le chiavi
+    del V1742 non servono, e il "ChannelList is empty" su [digitizer] avrebbe
+    bloccato ogni salvataggio dalla pagina. Le schede 2.0 spuntate hanno i
+    controlli loro.
+    """
+    schede = {n: t for n, t in (d.get("boards") or {}).items() if isinstance(t, dict)}
+    attive = {n: t for n, t in schede.items() if t.get("Enabled", True)}
+    c_v1742 = (not schede) or any(not e_digitizer2(t.get("Model")) for t in attive.values())
+    errori, avvisi = _coerenza_v1742(d) if c_v1742 else ([], [])
+    for nome, t in attive.items():
+        if not e_digitizer2(t.get("Model")):
+            continue
+        if not t.get("ChannelList"):
+            errori.append("[boards.%s] ChannelList is empty: nothing would be recorded." % nome)
+        if str(t.get("Polarity", "positive")).lower() not in ("positive", "negative"):
+            errori.append("[boards.%s] Polarity must be \"positive\" or \"negative\"." % nome)
+        if not str(t.get("TriggerSource", "Software")).strip():
+            errori.append("[boards.%s] TriggerSource is empty: the board would acquire nothing." % nome)
+        if "self" in str(t.get("TriggerSource", "")).lower() and t.get("SelfTriggerChannels") == []:
+            avvisi.append("[boards.%s] self-trigger with no SelfTriggerChannels." % nome)
+    if schede and not attive:
+        avvisi.append("No board is ticked in Boards: Start run would start nothing.")
+    return errori, avvisi
+
+
+def _coerenza_v1742(d):
+    """I controlli del V1742 su [digitizer] e [cfd]. Torna (errori, avvisi).
+
     Un campo per volta puo' essere legittimo e l'insieme no: e' qui che si
     intercettano le combinazioni che fanno perdere una serata. Gli errori
     bloccano la scrittura, gli avvisi no -- alcune combinazioni strane sono

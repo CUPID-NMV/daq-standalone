@@ -263,14 +263,17 @@ void X2730::Open() {
 }
 
 void X2730::LogBoardStatus(const std::string& when) {
-    // Temperature ed errori della scheda, nel log della run: il LED FAIL
+    // Temperature ed errori della scheda, nel log del run ("error flags" in
+    // minuscolo: notifiche.esito_run prende per un errore ogni riga della
+    // console che contiene "Error", e "ErrorFlags 0" ha fatto partire una
+    // mail falsa il 2026-11-11). Il LED FAIL
     // della scheda vuol dire tensioni, temperatura o PLL, e ErrorFlags dice
     // quale (scheda tecnica DS9688).
     const std::string ef = Get("/par/ErrorFlags", false);
     Log::OutSummary("→ Board " + when + ": T air in/out " + Get("/par/TempSensAirIn", false) + "/" +
                     Get("/par/TempSensAirOut", false) + " C, FPGA " + Get("/par/TempSensCore", false) +
                     " C, hottest ADC " + Get("/par/TempSensHottestADC", false) + " C, clock " +
-                    Get("/par/ClockSource", false) + ", ErrorFlags " + ef);
+                    Get("/par/ClockSource", false) + ", error flags " + ef);
     if (!ef.empty() && ef != "0")
         Log::OutWarning("→ ErrorFlags = " + ef + ": the board reports an error (see the web "
                         "interface, board status).");

@@ -390,7 +390,8 @@ def coerenza(d):
     bloccato ogni salvataggio dalla pagina. Le schede 2.0 spuntate hanno i
     controlli loro.
     """
-    schede = {n: t for n, t in (d.get("boards") or {}).items() if isinstance(t, dict)}
+    schede = {n: t for n, t in (d.get("boards") or {}).items()
+              if isinstance(t, dict)} if usa_schede(d) else {}
     attive = {n: t for n, t in schede.items() if t.get("Enabled", True)}
     c_v1742 = (not schede) or any(not e_digitizer2(t.get("Model")) for t in attive.values())
     errori, avvisi = _coerenza_v1742(d) if c_v1742 else ([], [])
@@ -727,6 +728,19 @@ def _scheda_di(pid):
         if argv[i] == b"--board":
             return argv[i + 1].decode("utf-8", "replace") or None
     return None
+
+
+def usa_schede(d):
+    """Il controllore lavora a schede solo se il TOML lo chiede esplicitamente
+    ([settings] MultiBoard = true), non per la sola presenza di [boards].
+
+    Le sezioni [boards.*] c'erano gia' prima (i due V1742 del 2026-10-20, nel
+    run-local.toml del Gran Sasso con Enabled = true), e valevano solo per chi
+    lanciava a mano con --board: dedurre le schede dalla loro presenza avrebbe
+    fatto partire al Gran Sasso due DAQ, una senza self-trigger e una su una
+    scheda guasta, al posto di quella di sempre.
+    """
+    return bool((d.get("settings") or {}).get("MultiBoard", False))
 
 
 def e_digitizer2(modello):
@@ -1472,12 +1486,12 @@ class Controllo:
 
     # -- schede --------------------------------------------------------------
     def schede(self, d=None):
-        """Le schede di [boards.*], nell'ordine del file.
+        """Le schede di [boards.*], nell'ordine del file, se il controllore
+        deve lavorare a schede ([settings] MultiBoard = true).
 
-        Lista vuota: niente [boards] nel TOML, e il controllore lavora come
-        sempre, con una DAQ sola e senza --board. Con le schede, Start run ne
-        avvia un processo per ciascuna spuntata (Enabled), tutte con lo stesso
-        numero di run.
+        Lista vuota: il controllore lavora come sempre, con una DAQ sola e
+        senza --board. Con le schede, Start run ne avvia un processo per
+        ciascuna spuntata (Enabled), tutte con lo stesso numero di run.
         """
         if d is None:
             try:
@@ -1486,6 +1500,8 @@ class Controllo:
                     d = tomllib.load(f)
             except Exception:
                 return []
+        if not usa_schede(d):
+            return []
         g = d.get("digitizer", {})
         out = []
         for nome, t in (d.get("boards") or {}).items():

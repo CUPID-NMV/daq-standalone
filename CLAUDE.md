@@ -1070,8 +1070,14 @@ Gran Sasso: a Frascati non c'e'.
   modalita' di prova (`--notifiche`, `--senza-archivio`, `--psu-host ""`).
 - **Il controllore con piu' schede** (2026-11-11, stesso ramo, provato sul
   notebook con una copia in `/tmp` sulla porta 8799 e la scheda vera; la
-  proposta approvata dall'utente e' `proposta-controllore-schede.png`). Con
-  `[boards.*]` nel TOML:
+  proposta approvata dall'utente e' `proposta-controllore-schede.png`). **Si
+  accende solo con `[settings] MultiBoard = true`**, non per la sola presenza
+  di `[boards.*]`: il `run-local.toml` del Gran Sasso (e la sua copia sul
+  notebook) ha gia' `[boards.sipm]` e `[boards.pmt]` con `Enabled = true`, dai
+  due V1742 del 20/10, e il controllore avrebbe lanciato li' due DAQ (una
+  senza self-trigger, l'altra sulla 202 guasta) al posto di quella di sempre.
+  Prima di accendere `MultiBoard` al Gran Sasso, quelle due sezioni vanno
+  rifatte o spente. Con `MultiBoard = true`:
   - riquadro **Boards**, una riga per scheda; la casella "in run" scrive
     `Enabled` (bloccata a run in corso). **Start run** lancia un `DAQ-WC
     --board` per ogni scheda spuntata, tutte con lo stesso numero (`--run`,

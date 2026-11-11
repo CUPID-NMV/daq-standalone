@@ -390,7 +390,8 @@ IPAddress = "192.168.99.105"
 #  e il file porta il nome della scheda dopo il numero di run:
 #      test_0201_pmt_1Gs_60PT.h5
 #  Il numero di run lo da' il controllore, lo stesso a tutte le schede.
-#  Senza --board la DAQ ignora [boards] e fa come prima.
+#  Senza --board la DAQ ignora [boards] e fa come prima; il controllore usa le
+#  schede solo con [settings] MultiBoard = true.
 #
 #  Enabled = false esclude la scheda: il controllore non la avvia, e la DAQ
 #  lanciata a mano con --board si rifiuta di partire.
@@ -456,6 +457,12 @@ IPAddress = "192.168.99.105"
 #   0 = niente     1 = solo errori     2 = errori e avvisi
 #   3 = riepilogo (consigliato)        4 = tutto, comprese le righe Debug
 verbosity = 3
+
+# Il controllore lavora a schede ([boards.*], un DAQ-WC --board per scheda,
+# Start run le avvia tutte) SOLO con MultiBoard = true. Senza, lancia la DAQ di
+# sempre su [digitizer], e le sezioni [boards] valgono solo per chi lancia a
+# mano con --board, come prima.
+# MultiBoard = false
 
 [archive]
 # Compressione e trasferimento delle run finite, fuori dalla DAQ: li fa

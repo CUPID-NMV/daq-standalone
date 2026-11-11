@@ -2624,7 +2624,7 @@ class Controllo:
         prefisso = self._scrivi_prefisso_hv()
         schede = self.schede()
         if schede:
-            return self._avvia_schede(schede, prefisso)
+            return self._avvia_schede(schede, prefisso, da_coda)
 
         # La console della run prima si riscrive qui sotto. In coda la sua fine
         # la vede il controllore solo dopo, a run nuova gia' partita, e una
@@ -2671,7 +2671,7 @@ class Controllo:
         except OSError:
             self._console_prima.pop(os.path.realpath(percorso), None)
 
-    def _avvia_schede(self, schede, prefisso):
+    def _avvia_schede(self, schede, prefisso, da_coda=False):
         """Un processo DAQ per ogni scheda spuntata, tutte con lo stesso numero.
 
         Il numero lo da' il controllore (--run): contando i file ogni scheda lo
@@ -2722,6 +2722,13 @@ class Controllo:
         viste = set(trova_daq_tutte().values())
         vive = [n for n in partite if n in viste]
         morte = [n for n in partite if n not in viste]
+        # Una scheda morta prima che il controllore la veda non arriva mai
+        # alla diagnosi di fine run: senza questa mail un run in coda, di
+        # notte, andrebbe avanti con una scheda in meno senza che nessuno lo
+        # sappia. Lanciato a mano lo dice gia' la pagina.
+        if da_coda:
+            for nome in morte:
+                self._mail_scheda_non_partita(nome, numero, vive)
         if not vive:
             return False, ("Run %04d: no board started (%s). Look at their consoles."
                            % (numero, "; ".join(errori + morte) or "?"))
@@ -2729,9 +2736,26 @@ class Controllo:
         if prefisso:
             messaggio += ", writing %s_%04d_..." % (prefisso, numero)
         if morte or errori:
-            messaggio += (". NOT running: %s (look at its console in data/)."
+            messaggio += (". NOT running: %s (look at its console in data/)"
                           % ", ".join(morte + errori))
         return True, messaggio + "."
+
+    def _mail_scheda_non_partita(self, nome, numero, vive):
+        console = self._console_di(nome)
+        try:
+            with open(console, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                f.seek(max(0, f.tell() - 20000))
+                righe = righe_terminale(f.read().decode("utf-8", "replace"))[-25:]
+        except OSError:
+            righe = []
+        corpo = ("Board %s did not start for run %04d. The other boards went on: %s.\n\n"
+                 "Last lines of its console (%s):\n  %s\n\nController: %s\n"
+                 % (nome, numero, ", ".join(vive) or "none", console,
+                    "\n  ".join(righe) or "(nothing)",
+                    notifiche.indirizzo_pagina(self.notifiche.porta)))
+        self.notifiche.manda(("errori",), "[DAQ V1742] ERROR \u2014 board %s did not start (run %04d)"
+                             % (nome, numero), corpo)
 
     def cartella_uscita(self):
         """OutputDir dal TOML, oppure None se non si riesce a leggerlo."""

@@ -944,6 +944,82 @@ Nello stesso crate, dietro lo stesso bridge V4718:
   partenza TRG-OUT -> S-IN) e' riassunta in `TODO.md` con le fonti. Prove
   rimaste, fase 2 (controllore) e fase 3 (monitor) sono in `TODO.md`.
 
+## VX2730B sul notebook (dal 2026-11-11)
+
+Digitizer 2.0 **V2730B / VX2730B** (16 canali, 14 bit, 500 MS/s, s/n 71709,
+firmware Scope 1.0.62), nel crate VME8004X, letto dal notebook via **USB-C**
+con `build/main/DAQ-X2730` (`src/X2730.cpp`). Configurazione nella sezione
+`[vx2730]` del TOML, commentata nel template.
+
+- **Con l'A4818 non si legge**: la scheda tecnica della famiglia (DS9688) da'
+  solo USB 3.0, 1 GbE e 10 GbE, e Dig2, la libreria dei 27xx, non parla CONET2
+  (lo fa solo Dig1, quella dei digitizer 1.0).
+- **Via USB la scheda e' una rete IPv6**: due interfacce sul PC (driver
+  `cdc_eem` e `rndis_host`), la scheda e' `fda6:cae0:1:<serie in
+  esadecimale>::1` (e `fda7:...`). Per Dig2: `dig2://caen.internal/usb/71709`;
+  il nome `caendgtz-usb-<serie>` degli esempi di CAEN si risolve solo su
+  Windows. Interfaccia web: `http://[fda6:cae0:1:181d::1]/`, utente `admin`,
+  la password di serie e' nel manuale (non nei documenti pubblici). La scheda
+  si annunciava come via d'uscita IPv6 del notebook: il profilo
+  NetworkManager `VX2730B-USB`, che la riconosce dal driver, glielo vieta
+  (`never-default`). Lo stesso driver lo usano i telefoni Android in
+  condivisione USB: col profilo non danno internet.
+- **FELib 1.3.4 e Dig2 1.8.3 compilate dai sorgenti ufficiali** di CAEN su
+  GitHub (`caenspa/caen-felib`, `caenspa/caen-dig2`, LGPL), in
+  `~/DAQ/CAEN/sorgenti` del notebook, installate in `/usr/local`: niente login
+  al sito. Dopo un `git clone` le date dei file degli autotools sono a caso e
+  `make` prova a rigenerarli con automake 1.16, che su Ubuntu 26.04 non c'e'
+  (`Error 127`): `sh ../date_autotools.sh` nella cartella del pacchetto le
+  rimette in ordine. Dig2 compila con Boost 1.90 e g++ 15 (CAEN dichiara fino
+  a 1.87 e 15). Servono `libboost-dev`.
+- **LED FAIL**: "power fail, over temperature condition or PLL lock loss"
+  (DS9688). Si accende all'accensione del crate; a scheda avviata
+  `ErrorFlags = 0`, `BoardReady = True`, clock interno, temperature normali
+  (aria 27/37 C, FPGA 60 C, ADC 33-41 C). Probabilmente la fase d'avvio, non
+  verificato. `DAQ-X2730` scrive temperature ed `ErrorFlags` nel log a inizio
+  e fine run.
+- **Collaudo a ingressi aperti** (2000 eventi a trigger software, 0 dB, DC
+  offset 50%; `measurements/vx2730b_rumore_sw_0dB.png`): piedistallo
+  8188-8195 conteggi, rumore **2.25-2.37 conteggi rms (0.55-0.58 mV)**
+  uguale sui 16 canali, base stabile da un evento all'altro, **nessuna
+  struttura agganciata al trigger** (0.05 conteggi sulla media, cioe' il
+  rumore diviso radice di N: il V1742 col trigger software ha le raffiche).
+  A 0 dB la dinamica e' 4 Vpp, 0.240-0.248 mV per conteggio a seconda del
+  canale (`ADCToVolts`, nell'HDF5).
+- **Self-trigger (ITLA): scatta nel punto giusto e col fronte giusto**,
+  agganciato all'orologio da 8 ns (nella media l'escursione e' larga 4
+  campioni), **ma la soglia effettiva non e' quella scritta, e cambia da
+  canale a canale** (2026-11-11, rumore a ingressi aperti, ch0 OR ch1, soglia
+  12 conteggi; `measurements/vx2730b_selftrigger_rumore.png`): in salita
+  scatta solo ch1, con escursione registrata di 8-10 conteggi (lo 0.2% sopra
+  12), in discesa solo ch0, 10-12 (il 20% sopra 12). La base su cui il
+  trigger conta la soglia "relativa" differisce di qualche conteggio da
+  quella dei dati registrati, e vince il canale con la soglia effettiva piu'
+  bassa: col rumore a 2.3 conteggi, 3.5 contro 4.5 sigma sono un fattore 5
+  di rate (2.7 kHz in salita, 520 Hz in discesa). Ipotesi non verificata: la
+  calibrazione dell'offset (`EnOffsetCalibration`) corregge i dati ma non il
+  percorso del trigger. **Da misurare con un impulsatore, canale per canale,
+  prima di dare una soglia in mV** (in `TODO.md`).
+- **Formato**: lo stesso HDF5 v3 del V1742 (canali concatenati in
+  `/events/waveforms`; `daqio` lo legge senza modifiche), piu'
+  `/events/timestamp` a 64 bit in unita' di 8 ns (attributo `UnitNs`) e in
+  `/config` `BoardModel`, `FirmwareType`, `DCOffsetPercent`, `GainDb`,
+  `ADCToVolts`, `PreTriggerSamples`, `Polarity`. Nome:
+  `<prefisso>_<NNNN>_vx2730_500Ms_<PT>PT.h5`, numerato come il V1742. Nel
+  `.log` le stesse righe di riepilogo del V1742. Non comprime: lo fa
+  `archivia.py`.
+- **`Polarity` decide insieme fronte e segno della soglia** (la soglia nel
+  TOML e' un modulo): sbagliarne uno da solo non darebbe errori, solo zero
+  eventi. Il DC offset invece resta esplicito, in percento.
+- **Dove la FELib non c'e' (il PC DAQ) `DAQ-X2730` non si compila**, e
+  `DAQ-WC` resta com'era.
+- Il trigger software va a ~200 Hz con intervalli un po' piu' regolari di
+  un'esponenziale (cv 0.80): il comando via USB costa qualche millisecondo.
+- **Non ancora**: controllore e monitor non conoscono `DAQ-X2730` (il
+  controllore riconosce la DAQ da `build/main/DAQ-WC`), ed efficienza e
+  monitor leggono il verso dal DCOffset esadecimale del V1742, non dalle
+  percentuali. In `TODO.md`.
+
 ## Prima prova al Gran Sasso (2026-10-23)
 
 Programma nuovo (schede, trigger software, MIDAS) compilato e INSTALLATO in

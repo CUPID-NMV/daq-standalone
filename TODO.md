@@ -54,6 +54,34 @@ installata; il funzionamento sta in CLAUDE.md. Restano:
 - **misurare** se compressione e trasferimento (stessa scheda di rete del
   bridge VME) abbassano il rate massimo della DAQ, vicino alla saturazione.
 
+## VX2730B con DAQ-X2730: cosa resta dopo la prima versione (2026-11-11)
+
+Com'e' fatto e cosa e' misurato sta in CLAUDE.md ("VX2730B sul notebook").
+Restano:
+- **la soglia del self-trigger, canale per canale**: quella effettiva sta
+  qualche conteggio sotto o sopra quella scritta, e diversamente per ogni
+  canale (rumore a ingressi aperti, 2026-11-11). Con un impulsatore: scan in
+  soglia per canale, ampiezza registrata contro soglia scritta, in salita e
+  in discesa. Prima prova veloce dell'ipotesi: ripetere quella sul rumore con
+  `EnOffsetCalibration = False` e vedere se la differenza sparisce;
+- **segnali veri**: trigger esterno su TRG-IN (livelli NIM), un PMT e un
+  SiPM, scelta del guadagno (0-29 dB) contro la dinamica; in che verso si
+  muove la base col DC offset in percento (misurato solo il 50%);
+- **il rate massimo** di DAQ-X2730: 16 canali da 1024 campioni sono 32 kB per
+  evento, la USB porta 280 MB/s (~8 kHz), ma la scrittura HDF5 evento per
+  evento puo' fermarsi prima. Poi la soppressione degli zeri della scheda
+  (`EnChSuppr`), per i ~200 canali;
+- **controllore (fase 2)**: riconoscere DAQ-X2730 come DAQ (oggi guarda solo
+  `build/main/DAQ-WC`), avviarla e fermarla dalla pagina, numero di run
+  comune con `--run` quando gira insieme al V1742;
+- **monitor ed efficienza (fase 3)**: leggono gia' l'HDF5, ma il verso degli
+  impulsi lo prendono dal DCOffset esadecimale del V1742 nel `.log`; per il
+  VX2730B c'e' l'attributo `Polarity`;
+- la password di `admin` dell'interfaccia web, dal manuale (si scarica col
+  numero di serie da caen.it/get-your-doc);
+- piu' avanti, se serve: il firmware DPP-PSD (eventi per canale, carica
+  calcolata dalla scheda), che DAQ-X2730 oggi rifiuta.
+
 ## Notebook che sostituira' il PC DAQ (installato il 2026-11-11)
 
 Com'e' fatto e la regola dell'allineamento stanno in CLAUDE.md ("Due

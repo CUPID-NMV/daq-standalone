@@ -64,9 +64,10 @@ Restano:
   soglia per canale (`tools/scan_scheda.sh -b vx2730 -c "..."`), ampiezza
   registrata contro soglia scritta, in salita e in discesa. Prima prova veloce dell'ipotesi: ripetere quella sul rumore con
   `EnOffsetCalibration = False` e vedere se la differenza sparisce;
-- **segnali veri**: trigger esterno su TRG-IN (livelli NIM), un PMT e un
-  SiPM, scelta del guadagno (0-29 dB) contro la dinamica; in che verso si
-  muove la base col DC offset in percento (misurato solo il 50%);
+- **segnali veri**: trigger esterno su TRG-IN (livelli NIM), un SiPM; in che
+  verso si muove la base col DC offset in percento (misurato solo il 50%). Il
+  guadagno e' misurato coi PMT il 2026-11-12 (CLAUDE.md): resta da tarare
+  `ADCToVolts`, che sbaglia fino al 7%, con un impulsatore canale per canale;
 - **il rate massimo** di DAQ-X2730: 16 canali da 1024 campioni sono 32 kB per
   evento, la USB porta 280 MB/s (~8 kHz), ma la scrittura HDF5 evento per
   evento puo' fermarsi prima. Poi la soppressione degli zeri della scheda

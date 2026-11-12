@@ -1050,6 +1050,33 @@ Gran Sasso: a Frascati non c'e'.
   In AND (`SelfTriggerLogic = "AND"`, finestra di coincidenza di fabbrica,
   che la DAQ non imposta) il run 0005 andava a ~5 Hz contro ~5.5 kHz in OR:
   se siano coincidenze vere o casuali non e' verificato.
+- **Il guadagno (`Gain`, `ChGain` della FELib)** e' un amplificatore analogico
+  a guadagno variabile per canale, PRIMA dell'ADC: 0-29 dB a passi di 1 (la
+  scheda tecnica DS9688 dichiara x1-x20, cioe' fino a 26 dB), dB di tensione,
+  cambiabile anche a run in corso (la DAQ lo imposta solo alla partenza). Il
+  fondo scala e' 4 Vpp / G: con la base al 50% restano 2 V / G agli impulsi
+  negativi (a 24 dB 126 mV, a 29 dB 71 mV). Misurato il 2026-11-12 coi due PMT
+  su ch0-ch1 e gli ingressi vuoti ch2-ch3, 0-29 dB e 0 dB ripetuto alla fine
+  (`measurements/vx2730b_gain_scan_20261112.png`, `vx2730b_gain_20261112.json`):
+  - **rumore riferito all'ingresso, ingressi vuoti: (0.18 mV)^2 + (0.52 mV /
+    G)^2** in quadratura: fino a ~12 dB domina l'ADC (2.1-2.3 conteggi, uguale
+    in conteggi), sopra il resto della scheda. 0.55 mV a 0 dB, 0.23 a 12, 0.18
+    a 29. Coi PMT il pavimento e' **0.25 mV su ch0 e 0.42 su ch1**: il di piu'
+    viene dal lato del PMT (cavo, modulo), molto di piu' su ch1;
+  - **`ADCToVolts` e' il valore nominale, 0.244 mV x 10^(-dB/20), e non e'
+    esatto**: il fotoelettrone in pC, rispetto a 0 dB, vale +0 / -0.5% a 6 dB,
+    +4 / +1% a 12, **+7 / +3.5% a 18**, +5 / +3% a 24, +3.5 / +1% a 29
+    (ch0 / ch1), e lo 0 dB ripetuto torna identico (non e' il PMT). Per dei mV
+    assoluti si tara canale per canale con un impulsatore;
+  - la base resta a meta' scala (ch0 8190 -> 8198, ch1 8194 -> 8228 a 29 dB);
+  - **la soglia del self-trigger e' in conteggi, quindi in mV scala col
+    guadagno**: ricalcolata per stare a ~5 mV, il rate e' rimasto 5.2-5.4 kHz a
+    ogni guadagno. Cambiando il guadagno va cambiata la soglia;
+  - FWHM interpolata degli impulsi 2.4-2.5 ns a ogni guadagno (i "4 ns" sopra
+    contano i campioni sopra meta' altezza): la banda ridotta sotto x2 che la
+    scheda tecnica lascia intendere qui non si vede;
+  - per questi PMT (fotoelettrone 10-13 mV) conviene ~12 dB: rumore dimezzato
+    rispetto a 0 dB, oltre non migliora, e restano 0.5 V (~40 fotoelettroni).
 - **Formato**: lo stesso HDF5 v3 del V1742 (canali concatenati in
   `/events/waveforms`; `daqio` lo legge senza modifiche), piu'
   `/events/timestamp` a 64 bit in unita' di 8 ns (attributo `UnitNs`) e in

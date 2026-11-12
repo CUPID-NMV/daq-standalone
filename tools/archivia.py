@@ -39,6 +39,15 @@ Per ogni run:
      (stessa lunghezza, stesso ETag) lo segna come mandato, se e' diverso NON
      lo manda e lo segnala come conflitto; se il cloud non sa rispondere, il
      file aspetta come dopo un trasferimento fallito.
+     Dopo ogni trasferimento rilegge dal cloud lunghezza ed ETag del file e
+     li confronta con quelli calcolati sul file locale: se non tornano il
+     trasferimento conta come fallito, e si riprova;
+  4. con DeleteAfterUpload = true (dal 2026-11-12, sul notebook: "i dati sul
+     notebook non vengono lasciati", decisione dell'utente) cancella i file
+     di DATI della run (.h5.gz, .mid.gz) quando tutti i file della run, .log
+     compreso, sono sul cloud e verificati. Il .log resta: pesa pochi kB, la
+     numerazione delle run e il riepilogo serale lo leggono. Senza
+     CloudCheckURL la verifica non si puo' fare, e non si cancella niente.
 
 Chi deve sapere se le run sono arrivate e' il controllore: ogni due minuti
 legge --stato --json, e se una run di dati non e' sul cloud mezz'ora dopo la
@@ -553,7 +562,7 @@ def guarda_sul_cloud(p, st, md5, url, reg):
         # E' questo stesso file, mandato senza che il registro lo sapesse: un
         # cp_data uscito con errore a trasferimento finito, o un registro perso.
         reg.aggiungi("caricato", file=p, chiave=chiave, byte=st.st_size, mtime=st.st_mtime,
-                     md5=md5, secondi=0.0, mb_s=0.0,
+                     md5=md5, secondi=0.0, mb_s=0.0, verificato=True, etag=remoto["etag"],
                      uscita="gia' sul cloud, identico (ETag %s)" % remoto["etag"])
         scrivi("gia' sul cloud, identico: %s" % chiave)
         return "fatto"
@@ -563,8 +572,58 @@ def guarda_sul_cloud(p, st, md5, url, reg):
     return "fermo"
 
 
-def carica_run(parti, comando, reg, url=CLOUD_URL):
-    """Manda i file di una run nell'ordine, fermandosi al primo che non passa.
+def verifica_sul_cloud(p, st, url):
+    """(True, ETag) se sul cloud c'e' proprio questo file: stessa lunghezza e
+    stesso ETag, ricalcolato da quello locale come lo calcola boto3 (vedi
+    PEZZO_S3). Se no (False, motivo)."""
+    if not url:
+        return False, "CloudCheckURL is empty: cannot verify"
+    try:
+        remoto = sul_cloud(os.path.basename(p), url)
+    except OSError as e:
+        return False, "cannot read it back from the cloud: %s" % e
+    if remoto is None:
+        return False, "not found on the cloud after the transfer"
+    if remoto["byte"] != st.st_size:
+        return False, "on the cloud %d bytes instead of %d" % (remoto["byte"], st.st_size)
+    et = etag_locale(p)
+    if remoto["etag"] != et:
+        return False, "ETag on the cloud %s instead of %s" % (remoto["etag"], et)
+    return True, et
+
+
+def verificato(p, reg):
+    """True se il trasferimento di p (com'e' adesso) e' stato verificato sul cloud."""
+    try:
+        st = os.stat(p)
+    except OSError:
+        return False
+    return any(e.get("verificato") for e in reg.di("caricato", file=p, byte=st.st_size, mtime=st.st_mtime))
+
+
+def cancella_dati(parti, reg):
+    """Cancella i file di DATI di una run gia' tutta sul cloud e verificata.
+    Il .log resta. Torna i file cancellati."""
+    if not all(verificato(p, reg) for p in parti):
+        return []
+    fuori = []
+    for p in parti:
+        if p.endswith(".log"):
+            continue
+        st = os.stat(p)
+        e = reg.di("caricato", file=p, byte=st.st_size, mtime=st.st_mtime)[-1]
+        os.unlink(p)
+        reg.aggiungi("cancellato", file=p, chiave=os.path.basename(p), byte=st.st_size,
+                     etag=e.get("etag"), fine=st.st_mtime,
+                     log=base_run(p) + ".log" if os.path.exists(base_run(p) + ".log") else None)
+        scrivi("cancellato dal disco, e' sul cloud e verificato: %s (%s)" % (p, mb(st.st_size)))
+        fuori.append(p)
+    return fuori
+
+
+def carica_run(parti, comando, reg, url=CLOUD_URL, cancella=False):
+    """Manda i file di una run nell'ordine, fermandosi al primo che non passa;
+    con `cancella`, a run tutta sul cloud e verificata ne cancella i dati.
     Torna True se ha provato almeno un trasferimento."""
     provato = False
     for p in parti:
@@ -598,6 +657,18 @@ def carica_run(parti, comando, reg, url=CLOUD_URL):
         except OSError as e:
             ok, messaggio = False, str(e)
         dt = max(time.time() - t0, 1e-3)
+        # cp_data esce con 0 a upload completato (CLAUDE.md), ma "completato"
+        # lo dice lui: si rilegge dal cloud. Se non torna e' un trasferimento
+        # fallito come gli altri, e si riprova. Senza CloudCheckURL non si
+        # puo' rileggere: si resta a quello che dice cp_data, e non si
+        # cancella niente.
+        etag, vero = None, False
+        if ok and url:
+            vero, quale = verifica_sul_cloud(p, st, url)
+            if vero:
+                etag = quale
+            else:
+                ok, messaggio = False, "transferred, but the check on the cloud fails: " + quale
         if not ok:
             reg.aggiungi("errore_carica", file=p, chiave=os.path.basename(p),
                          messaggio=messaggio[-300:], secondi=round(dt, 1))
@@ -605,9 +676,13 @@ def carica_run(parti, comando, reg, url=CLOUD_URL):
             return provato
         reg.aggiungi("caricato", file=p, chiave=os.path.basename(p), byte=st.st_size,
                      mtime=st.st_mtime, md5=md5, secondi=round(dt, 1),
-                     mb_s=round(st.st_size / 1e6 / dt, 2), uscita=messaggio[-300:])
-        scrivi("sul cloud in %.0f s (%.1f MB/s): %s" % (dt, st.st_size / 1e6 / dt,
-                                                        os.path.basename(p)))
+                     mb_s=round(st.st_size / 1e6 / dt, 2), uscita=messaggio[-300:],
+                     verificato=vero, etag=etag)
+        scrivi("sul cloud in %.0f s (%.1f MB/s)%s: %s" % (dt, st.st_size / 1e6 / dt,
+                                                          ", verificato" if vero else "",
+                                                          os.path.basename(p)))
+    if cancella:
+        cancella_dati(parti, reg)
     return provato
 
 
@@ -636,12 +711,12 @@ def giro_compressione(cartelle, reg, attesa_s):
         time.sleep(min(aspetta, attesa_s) + 1)
 
 
-def giro_cloud(cartelle, reg, comando, url=CLOUD_URL):
+def giro_cloud(cartelle, reg, comando, url=CLOUD_URL, cancella=False):
     while True:
         reg.rileggi()
         provato = False
         for parti in da_caricare(cartelle, reg):
-            provato |= carica_run(parti, comando, reg, url)
+            provato |= carica_run(parti, comando, reg, url, cancella)
         if not provato:
             return
 
@@ -751,6 +826,18 @@ def situazione(cartelle, reg, cloud, motivo_spento, comando, attesa_s, ore=48):
             if dopo:
                 v["prossimo"] = dopo
         run.append(v)
+    # I run i cui dati sono stati cancellati dopo la verifica (DeleteAfterUpload)
+    # non hanno piu' un .h5.gz da cui da_caricare li trovi: restano "sul
+    # cloud" dal registro, se no il riepilogo serale li darebbe per mancanti.
+    visti = {v["nome"] for v in run}
+    for e in reg.di("cancellato"):
+        nome = os.path.basename(base_run(e["file"]))
+        if nome in visti or adesso_s - e.get("fine", 0) > ore * 3600:
+            continue
+        visti.add(nome)
+        quando = [epoca(c["t"]) for c in reg.di("caricato", chiave=e["chiave"])]
+        run.append(dict(nome=nome, file=e["file"], fine=e.get("fine", epoca(e["t"])), stato="sul cloud",
+                        quando=max(quando) if quando else epoca(e["t"]), locale="cancellato"))
     run.sort(key=lambda v: v["fine"])
     ok, ko = reg.di("caricato"), reg.di("errore_carica")
     return dict(adesso=adesso_s, cloud=cloud, motivo_spento=motivo_spento, comando=comando,
@@ -783,6 +870,7 @@ def main():
     cloud = bool(arch.get("CloudUpload", False)) and not a.senza_cloud
     comando = str(arch.get("CloudCommand", "/usr/bin/cp_data"))
     url = str(arch.get("CloudCheckURL", CLOUD_URL))
+    cancella = bool(arch.get("DeleteAfterUpload", False))
     reg = Registro(os.path.abspath(a.registro))
     for opzione, evento, suff in ((a.aggiungi, "aggiunto", (".h5", ".h5.gz")),
                                   (a.comprimi, "da_comprimere", (".h5",))):
@@ -830,7 +918,10 @@ def main():
         f = lucchetto(reg.path + ".cloud.lock")
         if f is not None:
             try:
-                giro_cloud(cartelle, reg, comando, url)
+                if cancella and not url:
+                    scrivi("DeleteAfterUpload = true ma CloudCheckURL e' vuoto: senza verifica "
+                           "non cancello niente")
+                giro_cloud(cartelle, reg, comando, url, cancella and bool(url))
             finally:
                 f.close()
 

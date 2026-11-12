@@ -2251,7 +2251,14 @@ void Digitizer::PrepareOutput() {
             if (name.rfind(base + "_", 0) != 0)
                 continue;
 
-            if (name.find(".h5") == std::string::npos)
+            // Contano i dati e i .log: sul notebook i dati si cancellano appena
+            // verificati sul cloud (archivia.py, DeleteAfterUpload), e coi soli
+            // dati il numero tornerebbe a uno gia' usato. Le run di prova
+            // (TEST_) contano coi soli dati, come prima.
+            const bool dati = name.find(".h5") != std::string::npos;
+            const bool log = base != "TEST" && name.size() > 4 &&
+                             name.compare(name.size() - 4, 4, ".log") == 0;
+            if (!dati && !log)
                 continue;
 
             // Il numero di run sta subito dopo il prefisso "base_", non dopo il

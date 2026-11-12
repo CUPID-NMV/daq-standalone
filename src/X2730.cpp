@@ -397,15 +397,21 @@ void X2730::PrepareOutput() {
         exit(1);
     }
     // Stessa regola del V1742 (Digitizer::PrepareOutput): il numero viene
-    // dai file di dati col prefisso, le quattro cifre subito dopo; la
-    // scheda va DOPO il numero, cosi' le schede della stessa run lo
-    // condividono. Una run di prova si chiama TEST_ e non consuma numeri.
+    // dai file col prefisso, le quattro cifre subito dopo; la scheda va DOPO
+    // il numero, cosi' le schede della stessa run lo condividono. Contano
+    // anche i .log: sul notebook i dati si cancellano appena verificati sul
+    // cloud (archivia.py, DeleteAfterUpload, dal 2026-11-12), e contando i
+    // soli dati il numero tornerebbe a uno gia' usato. Una run di prova si
+    // chiama TEST_ e non consuma numeri: per lei contano i soli dati, come
+    // prima (il .log di una TEST resta, i dati no).
     const std::string base = fSaveData ? fOutputFile : std::string("TEST");
     int maxRun = -1;
     for (const auto& e : std::filesystem::directory_iterator(fOutputDir)) {
         if (!e.is_regular_file()) continue;
         const std::string n = e.path().filename().string();
-        if (n.rfind(base + "_", 0) != 0 || n.find(".h5") == std::string::npos) continue;
+        const bool dati = n.find(".h5") != std::string::npos;
+        const bool log = fSaveData && n.size() > 4 && n.compare(n.size() - 4, 4, ".log") == 0;
+        if (n.rfind(base + "_", 0) != 0 || !(dati || log)) continue;
         if (n.size() < base.size() + 5) continue;
         const std::string r = n.substr(base.size() + 1, 4);
         if (std::all_of(r.begin(), r.end(), ::isdigit)) maxRun = std::max(maxRun, std::stoi(r));

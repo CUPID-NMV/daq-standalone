@@ -7,12 +7,15 @@
 #
 #   tools/scan_scheda.sh -b vx2730 -o "200 100 60 40 30 20 15" -s 20
 #   tools/scan_scheda.sh -b vx2730 -c "0 1" -o "200 100 60 40 30 20 15" -s 20
+#   tools/scan_scheda.sh -b vx2730 -u mV -o "20 10 6 4 3 2" -s 20
 #
 # Senza -c tutti i canali del trigger si muovono insieme, e il rate e' quello
 # della logica della scheda (OR, AND...). Con -c un canale alla volta, gli
 # altri alla soglia massima: serve l'OR. Per il VX2730B le soglie sono
-# conteggi ADC dalla base. A fine scan, anche interrotto, si rimettono quelle
-# di partenza. JSON e grafico in plots/, che la pagina elenca.
+# conteggi ADC dalla base; con -u mV sono mV nominali, convertiti in conteggi
+# canale per canale col guadagno di ciascuno (cosi' "tutti insieme" vuol dire
+# la stessa soglia in mV anche con guadagni diversi). A fine scan, anche
+# interrotto, si rimettono quelle di partenza. JSON e grafico in plots/.
 #
 set -uo pipefail
 
@@ -24,6 +27,7 @@ SCHEDA=""
 VALORI=""
 CANALI=""
 SECONDI=20
+UNITA=counts
 
 uso() {
     sed -n '3,15p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
@@ -33,20 +37,23 @@ uso() {
     echo "  -o \"<lista>\"    soglie da provare, dalla piu' alta"
     echo "  -c \"<canali>\"   un canale alla volta, questi (serve SelfTriggerLogic = OR)"
     echo "  -s <secondi>    durata di ogni punto (default: $SECONDI)"
+    echo "  -u counts|mV    unita' delle soglie di -o (default: counts; mV solo per il VX2730B)"
     exit "${1:-0}"
 }
 
-while getopts "b:o:c:s:h" opt; do
+while getopts "b:o:c:s:u:h" opt; do
     case "$opt" in
         b) SCHEDA="$OPTARG" ;;
         o) VALORI="$OPTARG" ;;
         c) CANALI="$OPTARG" ;;
         s) SECONDI="$OPTARG" ;;
+        u) UNITA="$OPTARG" ;;
         h) uso 0 ;;
         *) uso 1 ;;
     esac
 done
 [[ -n "$SCHEDA" && -n "$VALORI" ]] || uso 1
+[[ "$UNITA" == "counts" || "$UNITA" == "mV" ]] || { echo "ERRORE: -u vale counts o mV, non '$UNITA'." >&2; exit 1; }
 
 # --- Controlli prima di partire ---------------------------------------------
 # La DAQ di QUESTA scheda: con piu' schede ce n'e' una per scheda, e che ne
@@ -112,7 +119,7 @@ fi
 # (SIGTERM al gruppo, che noise_scan.py intercetta per rimettere le soglie) e
 # non lascia avviare o fermare run mentre lo scan le usa. "script" e' il pezzo
 # di percorso che la pagina cerca nella riga di comando di questo processo.
-DESCR="$SCHEDA  $([[ -n "$CANALI" ]] && echo "one channel at a time ($CANALI)" || echo "all channels")  $VALORI"
+DESCR="$SCHEDA  $([[ -n "$CANALI" ]] && echo "one channel at a time ($CANALI)" || echo "all channels")  $VALORI$([[ "$UNITA" == mV ]] && echo " mV")"
 python3 - "$REGISTRO" "$$" "$(ps -o pgid= $$ | tr -d ' ')" "$SECONDI" "$DESCR" <<'EOF'
 import json, sys, time
 f, pid, pgid, sec, valori = sys.argv[1:]
@@ -143,7 +150,7 @@ INIZIO=$(date +%s)
 echo "=== Scan del self-trigger di $SCHEDA ($MODELLO) ==="
 echo "dati    : $DATI"
 echo "logica  : $LOGICA$([[ -n "$MAGG" && "${LOGICA^^}" == "MAJORITY" ]] && echo " $MAGG")"
-echo "soglie  : $VALORI"
+echo "soglie  : $VALORI $([[ "$UNITA" == mV ]] && echo "mV nominali" || echo "conteggi")"
 echo "canali  : $([[ -n "$CANALI" ]] && echo "uno alla volta: $CANALI" || echo "tutti insieme")"
 echo "durata  : $SECONDI s per punto"
 echo
@@ -151,6 +158,7 @@ echo
 ARGS=(--scheda "$SCHEDA" --offsets $VALORI --seconds "$SECONDI" -d "$DATI" -o "$PLOTS"
       --logica "$LOGICA")
 [[ -n "$MAGG" ]] && ARGS+=(--maggioranza "$MAGG")
+[[ "$UNITA" == "mV" ]] && ARGS+=(--mv)
 
 json=()
 completo=1
@@ -175,7 +183,9 @@ fi
 if (( ${#json[@]} > 0 )); then
     echo
     echo "=== Grafico ==="
-    python3 "$ROOT/tools/plot_scan.py" --logy -o "$PLOTS/scan_${SCHEDA}_${STAMP}.png" "${json[@]}"
+    PLOTARGS=(--logy)
+    [[ "$UNITA" == "mV" ]] && PLOTARGS+=(--mv-nominali)
+    python3 "$ROOT/tools/plot_scan.py" "${PLOTARGS[@]}" -o "$PLOTS/scan_${SCHEDA}_${STAMP}.png" "${json[@]}"
 fi
 deregistra
 (( completo )) || exit 1

@@ -56,6 +56,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import daqio
 from daqio import count_events, load as carica_run
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -310,7 +311,32 @@ def larghezza_impulsi(path, canali, quanti=300):
         return None
 
 
-def scrivi_misura(args, path, st, channels, sigma, rows, iniziali=None, interrotto=None):
+def guadagni(path):
+    """({canale: guadagno in dB}, {canale: mV per conteggio}) dall'header del
+    file del run (VX2730B: GainDb e ADCToVolts in /config, paralleli a
+    ChannelList). Dizionari vuoti se non ci sono (V1742) o non si leggono."""
+    try:
+        f, tmp = daqio.open_file(path, live=True)
+        try:
+            hdr = daqio.read_header(f)
+        finally:
+            f.close()
+            daqio._cleanup(tmp)
+        canali = [int(c) for c in np.atleast_1d(hdr["ChannelList"])]
+        g, a = hdr.get("GainDb"), hdr.get("ADCToVolts")
+        if a is None:
+            return {}, {}
+        a = np.atleast_1d(a).astype(float) * 1e3
+        g = np.atleast_1d(g).astype(float) if g is not None else np.full(len(canali), np.nan)
+        if len(a) != len(canali):
+            return {}, {}
+        return ({c: float(g[k]) for k, c in enumerate(canali)},
+                {c: float(a[k]) for k, c in enumerate(canali)})
+    except Exception:
+        return {}, {}
+
+
+def scrivi_misura(args, path, st, channels, sigma, rows, iniziali=None, interrotto=None, gdb=None, mvpc=None):
     """Misura salvata per intero, cosi' due scan si possono confrontare davvero."""
     rec = {
         "file": os.path.basename(path),
@@ -320,9 +346,11 @@ def scrivi_misura(args, path, st, channels, sigma, rows, iniziali=None, interrot
         "sigma_assunto": None if relativa(st) else sigma,
         "secondi_per_punto": args.seconds,
         "larghezza_fwhm_ns": larghezza_impulsi(path, channels),
-        "punti": [{"offset": r[0], "distanza": r[1], "rate": r[2],
-                   "atteso": r[3], "conteggi": r[4],
-                   "eventi_da": r[5], "eventi_a": r[6]} for r in rows],
+        "punti": [dict({"offset": r[0], "distanza": r[1], "rate": r[2],
+                        "atteso": r[3], "conteggi": r[4],
+                        "eventi_da": r[5], "eventi_a": r[6]},
+                       **({"soglie_scritte": {str(c): v for c, v in r[7].items()},
+                           "soglia_mv": r[8]} if len(r) > 8 else {})) for r in rows],
     }
     nome = "noise_scan_%s" % time.strftime("%Y%m%d_%H%M%S")
     if SCHEDA:
@@ -334,7 +362,15 @@ def scrivi_misura(args, path, st, channels, sigma, rows, iniziali=None, interrot
                                      else "offset counts"),
                     "offset_iniziali": {str(c): o for c, o in (iniziali or {}).items()},
                     "logica": args.logica, "maggioranza": args.maggioranza,
-                    "interrotto": interrotto})
+                    "interrotto": interrotto,
+                    # Il guadagno di ogni canale e i mV per conteggio della
+                    # scheda: senza, uno scan in conteggi non dice quanti mV
+                    # erano, e due scan a guadagni diversi sembrano la stessa
+                    # cosa. I mV sono nominali (ADCToVolts della scheda, fino
+                    # al 7% dal vero, misurato il 2026-11-12).
+                    "guadagno_db": {str(c): v for c, v in (gdb or {}).items()},
+                    "mv_per_conteggio": {str(c): v for c, v in (mvpc or {}).items()},
+                    "unita_richiesta": "mV" if getattr(args, "mv", False) else "counts"})
         nome += "_" + SCHEDA
     if args.canale is not None:
         # Col segnale acceso il rate "atteso" dal rumore gaussiano non vuol
@@ -378,6 +414,10 @@ def main():
     ap.add_argument("--scheda", default=None,
                     help="la scheda del controllore a schede: file di stato e di comando "
                          "con il suo nome (live-status-<scheda>.json)")
+    ap.add_argument("--mv", action="store_true",
+                    help="con una scheda a soglia relativa: i valori di --offsets sono mV "
+                         "(nominali, col guadagno di ogni canale), convertiti in conteggi canale "
+                         "per canale; tutti i canali insieme hanno cosi' la stessa soglia in mV")
     ap.add_argument("--logica", default=None,
                     help="logica del trigger della scheda (OR, AND, Majority), solo da "
                          "registrare nel JSON: il rate di tutti i canali insieme e' quello")
@@ -413,13 +453,33 @@ def main():
             sys.exit(f"Nessuna run in corso: nessun file .h5 in {args.data_dir}")
         path = max(files, key=os.path.getmtime)
 
+    gdb, mvpc = guadagni(path) if rel else ({}, {})
+    if args.mv and not rel:
+        sys.exit("--mv vale solo per una scheda a soglia relativa (VX2730B).")
+    if args.mv and not all(c in mvpc for c in (int(x["ch"]) for x in st["channels"])):
+        sys.exit("--mv: nel file %s non trovo i mV per conteggio (ADCToVolts) di tutti i canali "
+                 "del trigger." % os.path.basename(path))
+
+    def conteggi(c, v):
+        """La soglia da scrivere per il canale c: v in conteggi, o in mV con --mv."""
+        return int(round(v / mvpc[c])) if args.mv else int(v)
+
     if rel:
         # Una soglia relativa si scrive in conteggi interi, e la scheda rifiuta
         # quello che esce dalla dinamica: meglio dirlo prima del primo punto.
-        for v in args.offsets + [args.parcheggio]:
-            if v != int(v) or not 1 <= v <= PARCHEGGIO_RELATIVO:
-                sys.exit(f"Soglia {v:g}: per {st.get('model', 'questa scheda')} serve un "
-                         f"intero fra 1 e {PARCHEGGIO_RELATIVO} (conteggi ADC dalla base).")
+        if not args.mv:
+            for v in args.offsets + [args.parcheggio]:
+                if v != int(v) or not 1 <= v <= PARCHEGGIO_RELATIVO:
+                    sys.exit(f"Soglia {v:g}: per {st.get('model', 'questa scheda')} serve un "
+                             f"intero fra 1 e {PARCHEGGIO_RELATIVO} (conteggi ADC dalla base).")
+        else:
+            for v in args.offsets:
+                for c in (int(x["ch"]) for x in st["channels"]):
+                    n = conteggi(c, v)
+                    if not 1 <= n <= PARCHEGGIO_RELATIVO:
+                        sys.exit(f"Soglia {v:g} mV: su ch{c} ({gdb.get(c, float('nan')):g} dB, "
+                                 f"{mvpc[c]:.4f} mV/conteggio) sono {n} conteggi, fuori da 1-"
+                                 f"{PARCHEGGIO_RELATIVO}.")
 
     tutti = [int(c["ch"]) for c in st["channels"]]
     iniziali = {int(c["ch"]): c["offset"] for c in st["channels"]}
@@ -437,6 +497,11 @@ def main():
         print(f"scheda : {SCHEDA} ({st.get('model', '?')}), soglia relativa alla base "
               f"in conteggi ADC, fronte {st.get('polarity', '?')}")
         print(f"canali : {channels}")
+        if mvpc:
+            print("guadagno: " + ", ".join(f"ch{c} {gdb.get(c, float('nan')):g} dB "
+                                          f"({mvpc[c]:.4f} mV/conteggio)" for c in channels if c in mvpc))
+        if args.mv:
+            print("soglie in mV nominali, convertite in conteggi canale per canale")
     else:
         print(f"canali : {channels}      sigma assunto: {sigma} conteggi")
         print(f"baseline all'avvio della run (da {_nome('live-status.json')}):")
@@ -484,12 +549,13 @@ def main():
             # 20 s per punto sono venti secondi di silenzio.
             quale = "" if args.canale is None else f"ch{args.canale} "
             print(f"[punto {k}/{len(args.offsets)}] {quale}{'threshold' if rel else 'offset'} "
-                  f"{off:g}", flush=True)
+                  f"{off:g}{' mV' if args.mv else ''}", flush=True)
             if args.canale is None:
-                applied = set_offset(args.data_dir, channels, int(off) if rel else off)
+                applied = set_offsets(args.data_dir, {c: (conteggi(c, off) if rel else off)
+                                                      for c in channels})
             else:
-                applied = set_offsets(args.data_dir, {c: (off if c == args.canale
-                                                          else args.parcheggio)
+                applied = set_offsets(args.data_dir, {c: ((conteggi(c, off) if rel else off)
+                                                          if c == args.canale else args.parcheggio)
                                                       for c in tutti})
             thr = tuple(applied[ch][1] for ch in channels)
             # Il valore ASSOLUTO: la soglia sta sotto il piedistallo con gli
@@ -532,7 +598,16 @@ def main():
 
             print(f"  {off:7g} {str(thr):>13} {np.mean(dists):9.2f} {meas:>16} "
                   + (f"{exp_s:>11} {sfit_s}" if rumore else f"{counts:9d}"), flush=True)
-            rows.append((off, np.mean(dists), rate, exp, counts, start, start + counts))
+            riga = (off, np.mean(dists), rate, exp, counts, start, start + counts)
+            if rel:
+                # Le soglie scritte canale per canale e la soglia in mV nominali
+                # (la media sui canali dello scan: con --mv e' quella chiesta).
+                scritte = {ch: abs(int(applied[ch][1])) for ch in channels}
+                smv = (float(off) if args.mv else
+                       float(np.mean([scritte[c] * mvpc[c] for c in channels])) if all(c in mvpc for c in channels)
+                       else None)
+                riga += (scritte, smv)
+            rows.append(riga)
 
             if rate > rate_max:
                 print(f"     rate oltre {rate_max:g} Hz: mi fermo qui per non intasare la DAQ")
@@ -555,7 +630,8 @@ def main():
         # registrano, e il JSON dice che il canale non e' completo.
         if rows:
             scrivi_misura(args, path, st, channels, sigma, rows, iniziali,
-                          None if interrotto is None else str(getattr(interrotto, "code", "") or "interrotto"))
+                          None if interrotto is None else str(getattr(interrotto, "code", "") or "interrotto"),
+                          gdb, mvpc)
         if interrotto is not None:
             raise interrotto
         return

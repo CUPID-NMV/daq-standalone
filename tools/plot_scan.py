@@ -342,7 +342,7 @@ def leggibile(tag):
     return tag.replace("Gs", " GS/s").replace("Ms", " MS/s")
 
 
-def leggi(path, mv_per_offset_forzato):
+def leggi(path, mv_per_offset_forzato, mv_nominali=False):
     """Normalizza i due formati in (tipo, soglie, rate, limite, nota, dati, unita).
 
     L'ultimo elemento e' l'unita' dell'asse x, "mV" oppure "offset": senza una
@@ -369,6 +369,17 @@ def leggi(path, mv_per_offset_forzato):
         dist = np.abs(np.array([p["distanza"] for p in punti], dtype=float))
         y = np.array([max(p["rate"], 0.0) for p in punti], dtype=float)
         lim = np.array([p.get("conteggi", 1) == 0 for p in punti])
+        # Guadagno e mV per conteggio dei canali dello scan (dal 2026-11-12;
+        # gli scan di prima non li hanno e restano in conteggi).
+        chs = [str(x) for x in (d.get("canali") or [])]
+        gdb, mvpc = d.get("guadagno_db") or {}, d.get("mv_per_conteggio") or {}
+        g = sorted({gdb[c] for c in chs if c in gdb})
+        guad = ("%g dB" % g[0] if len(g) == 1 else "/".join("%g" % gdb[c] for c in chs) + " dB") if g else ""
+        x_mv = None
+        if all(p.get("soglia_mv") is not None for p in punti):
+            x_mv = np.array([p["soglia_mv"] for p in punti], dtype=float)
+        elif chs and all(c in mvpc for c in chs):
+            x_mv = dist * float(np.mean([mvpc[c] for c in chs]))
         # La logica del trigger la scrive scan_scheda.sh: col VX2730B il rate
         # di tutti i canali insieme puo' essere un AND, e "OR" lo direbbe falso.
         c = d.get("canali") or []
@@ -379,8 +390,11 @@ def leggi(path, mv_per_offset_forzato):
             quali = "%s-fold of ch %s" % (d.get("maggioranza", "?"), ", ".join(str(x) for x in c))
         else:
             quali = _canali(c)
-        nota = "%s self-trigger   %s   (%s)" % (d.get("modello") or d.get("scheda") or "?",
-                                               quali, leggibile(frequenza(d.get("file", ""))))
+        nota = "%s self-trigger   %s   (%s%s)" % (d.get("modello") or d.get("scheda") or "?",
+                                                 quali, leggibile(frequenza(d.get("file", ""))),
+                                                 ", " + guad if guad else "")
+        if mv_nominali and x_mv is not None:
+            return "dig2", x_mv, y, lim, nota, d, "mV nominali"
         return "dig2", dist, y, lim, nota, d, "ADC"
 
     # formato di noise_scan.py: soglia in conteggi di offset
@@ -444,6 +458,10 @@ def main():
     ap.add_argument("json", nargs="+", help="uno o piu' file di scan")
     ap.add_argument("--mv-per-offset", type=float, default=None,
                     help="forza la conversione offset -> mV del self-trigger")
+    ap.add_argument("--mv-nominali", action="store_true",
+                    help="scan del VX2730B: asse in mV nominali (conteggi x ADCToVolts della scheda, "
+                         "col guadagno di ogni canale) invece che in conteggi. Automatico se gli scan "
+                         "hanno guadagni diversi")
     ap.add_argument("--per-channel", action="store_true",
                     help="una curva per CANALE invece del rate del trigger: "
                          "quante volte ogni canale ha superato la soglia, "
@@ -477,7 +495,25 @@ def main():
     # Si leggono tutti prima di disegnare: due scan della stessa cosa darebbero
     # la stessa etichetta, e una legenda con due voci identiche non distingue
     # niente. Quando succede si aggiunge l'ora dello scan.
-    serie = [leggi(path, args.mv_per_offset) for path in args.json]
+    serie = [leggi(path, args.mv_per_offset, args.mv_nominali) for path in args.json]
+    # Scan del VX2730B a guadagni diversi -- fra loro, o fra i canali di uno
+    # scan di tutti i canali insieme -- in conteggi non stanno sullo stesso
+    # asse: lo stesso conteggio e' un'altra soglia. Si passa ai mV nominali,
+    # o ci si ferma se uno scan non sa quanti mV vale un conteggio.
+    dig2 = [x for x in serie if x[0] == "dig2"]
+    if dig2 and not args.mv_nominali:
+        firme = []
+        for x in dig2:
+            g = x[5].get("guadagno_db") or {}
+            firme.append(tuple(sorted({g.get(str(c)) for c in (x[5].get("canali") or [])}, key=str)))
+        if len(set(firme)) > 1 or any(len(f) > 1 for f in firme):
+            if all(x[5].get("mv_per_conteggio") for x in dig2):
+                print("scan del VX2730B a guadagni diversi: asse in mV nominali")
+                serie = [leggi(path, args.mv_per_offset, True) for path in args.json]
+            else:
+                raise SystemExit("Questi scan del VX2730B hanno guadagni diversi, e non tutti dicono "
+                                 "quanti mV vale un conteggio (gli scan di prima del 2026-11-12): in "
+                                 "conteggi non stanno sullo stesso asse. Disegnali separatamente.")
     # Copia stabile: piu' sotto, nel ramo per canale, `serie` viene
     # svuotata, e in fondo serve ancora sapere di che frequenza erano.
     tutte = list(serie)
@@ -658,6 +694,11 @@ def main():
                           % (dove, args.mv_per_offset, come))
         else:
             ax.set_xlabel("threshold  [mV at %s]" % dove)
+    elif unita == "mV nominali":
+        # Nominali: ADCToVolts della scheda, che col guadagno sbaglia fino al
+        # 7% (misurato il 2026-11-12); la soglia effettiva poi non e' quella
+        # scritta di qualche conteggio, diverso per canale (2026-11-11).
+        ax.set_xlabel("threshold from baseline  [mV, nominal: board ADCToVolts, up to 7% off]")
     elif unita == "ADC":
         # Conteggi dell'ADC, non millivolt: la soglia effettiva del VX2730B non
         # e' quella scritta e cambia da canale a canale (misurato il

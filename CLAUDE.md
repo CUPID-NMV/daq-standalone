@@ -1101,6 +1101,17 @@ Gran Sasso: a Frascati non c'e'.
     scheda tecnica lascia intendere qui non si vede;
   - per questi PMT (fotoelettrone 10-13 mV) conviene ~12 dB: rumore dimezzato
     rispetto a 0 dB, oltre non migliora, e restano 0.5 V (~40 fotoelettroni).
+- **Lo scan del self-trigger tiene conto del guadagno** (dal 2026-11-12):
+  `noise_scan.py --scheda` scrive nel JSON `guadagno_db` e `mv_per_conteggio`
+  di ogni canale (dall'header del file), le soglie scritte canale per canale
+  e la soglia in mV nominali di ogni punto; con `--mv` (`scan_scheda.sh -u mV`)
+  le soglie si danno in mV e si convertono in conteggi col guadagno di ciascun
+  canale, cosi' "tutti i canali insieme" e' la stessa soglia in mV anche con
+  guadagni diversi (provato: 12 mV = 277 conteggi a 15 dB, 196 a 12 dB).
+  `plot_scan.py --mv-nominali` disegna in mV nominali, e ci passa da solo se
+  gli scan hanno guadagni diversi; gli scan di prima, senza guadagno nel JSON,
+  restano in conteggi. Il blocco della pagina con le soglie in mV e' da fare,
+  dopo una proposta.
 - **Formato**: lo stesso HDF5 v3 del V1742 (canali concatenati in
   `/events/waveforms`; `daqio` lo legge senza modifiche), piu'
   `/events/timestamp` a 64 bit in unita' di 8 ns (attributo `UnitNs`) e in

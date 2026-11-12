@@ -553,7 +553,18 @@ DA_ARRIVARE = ("da comprimere", "compressione fallita", "da mandare", "in pausa"
 # Queste sul cloud non andranno: si dice una volta sola.
 SOLO_DISCO = ("chiusa male", "non HDF5")
 STATO_ILLEGGIBILE = "(upload status)"
-RE_NUMERO_RUN = re.compile(r"_(\d{4})(?:_|$)")
+# Il numero di run e' il gruppo di quattro cifre seguito (dopo la scheda, se
+# c'e') dalla frequenza: in "LNF_2730_0000_vx2730_500Ms_75PT" e' 0000, non il
+# 2730 del prefisso. La seconda regola, quella di prima, resta per i nomi senza
+# frequenza.
+RE_NUMERO_RUN = re.compile(r"_(\d{4})_(?:[^_]+_)?[\d.]+[GM]s_\d+PT")
+RE_NUMERO_RUN_SEMPLICE = re.compile(r"_(\d{4})(?:_|$)")
+
+
+def numero_run(nome):
+    """Il numero di run nel nome di un file, o None."""
+    m = RE_NUMERO_RUN.search(nome) or RE_NUMERO_RUN_SEMPLICE.search(nome)
+    return m.group(1) if m else None
 
 
 def _hm(t):
@@ -680,8 +691,8 @@ def pagina_cloud(st, ritardo_s):
     sul = [v for v in run if v["stato"] == "sul cloud"]
     if sul:
         v = max(sul, key=lambda v: v["quando"])
-        m = RE_NUMERO_RUN.search(v["nome"])
-        testo = "CLOUD OK · %s at %s" % ("run " + m.group(1) if m else v["nome"], _hm(v["quando"]))
+        n = numero_run(v["nome"])
+        testo = "CLOUD OK · %s at %s" % ("run " + n if n else v["nome"], _hm(v["quando"]))
     else:
         testo = "CLOUD OK"
     return {"livello": "bene", "testo": testo, "righe": righe, "problemi": []}

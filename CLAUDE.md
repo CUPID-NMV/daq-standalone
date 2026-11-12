@@ -1146,6 +1146,18 @@ Gran Sasso: a Frascati non c'e'.
     su un canale spuntato prende il valore di serie della DAQ.
     `#cfg=<scheda>` nell'indirizzo apre quella linguetta (`#cfg=_v1742`,
     `#cfg=_v812` quelle dei moduli);
+  - **Threshold scan con le schede** (2026-11-12, proposta
+    `proposta-scan-schede.png`): un blocco per scheda spuntata che usa il
+    self-trigger, con le sue unita' (conteggi ADC dalla base per il VX2730B,
+    offset per un V1742), tutti i canali insieme o uno alla volta (spento se
+    la logica non e' OR); lo lancia `tools/scan_scheda.sh`. Lo scan del V812
+    con le schede non c'e' ancora (fa un run per punto con una DAQ senza
+    `--board`) e la pagina lo dice. Provato sul notebook coi due PMT: avvio
+    dalla pagina, avanzamento, Stop (soglie rimesse, run acceso), disegno da
+    *Scan plots*. Lo stesso giorno: "Stop scan" di uno scan del self-trigger
+    aspettava 30 s che il run si fermasse e rispondeva col messaggio del V812;
+    il numero di run si leggeva dal prefisso (`LNF_2730_0000_...` dava 2730,
+    nella pagina e nel badge del cloud);
   - **il controllo di coerenza guarda `[digitizer]` solo se nel run c'e' un
     V1742**: col solo 2730 "ChannelList is empty" bloccava ogni salvataggio;
   - provato: due schede di cui una assente (il V1742, a Frascati non c'e'),
@@ -1601,6 +1613,7 @@ LNGS; solo correzione CAEN):
 |---|---|
 | `tools/run_check.py` | riepilogo di una run: ampiezza, larghezza, purezza, rumore, deriva, rate |
 | `tools/noise_scan.py` | scan in soglia a run in corso; scrive i confini in eventi di ogni passo. `--canale N`: un canale solo, gli altri alla soglia massima (offset 4095), offset di partenza rimessi alla fine anche se interrotto |
+| `tools/scan_scheda.sh` | scan del self-trigger di UNA scheda del controllore a schede (VX2730B, o un V1742 con `--board`), a run in corso: `-b <scheda> -o "soglie" [-c "canali"] -s <secondi>`; tutti i canali insieme o uno alla volta (solo in OR, gli altri a 16383); per il VX2730B soglie in conteggi ADC dalla base; a fine scan, anche fermato, rimette le soglie di partenza; si registra nella pagina, JSON per canale e grafico in `plots/`. Lo lancia anche il riquadro *Threshold scan* |
 | `tools/scan_v1742_canali.sh` | scan del self-trigger un canale alla volta, gruppi `"canali: offset"`; si registra nella pagina di controllo (avanzamento, Stop scan), un grafico per gruppo in `plots/`; `-F` ferma la run alla fine, `-R sezione.chiave=valore` rimette il TOML |
 | `tools/live_monitor.py` | monitor HTTP; `-b 0.0.0.0` per evitare inoltri di porta |
 | `tools/check_page.py` | sulla pagina viva: ogni `getElementById` ha il suo elemento, ogni funzione chiamata e' definita, il JS compila |

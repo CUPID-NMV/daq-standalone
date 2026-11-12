@@ -61,8 +61,8 @@ Restano:
 - **la soglia del self-trigger, canale per canale**: quella effettiva sta
   qualche conteggio sotto o sopra quella scritta, e diversamente per ogni
   canale (rumore a ingressi aperti, 2026-11-11). Con un impulsatore: scan in
-  soglia per canale, ampiezza registrata contro soglia scritta, in salita e
-  in discesa. Prima prova veloce dell'ipotesi: ripetere quella sul rumore con
+  soglia per canale (`tools/scan_scheda.sh -b vx2730 -c "..."`), ampiezza
+  registrata contro soglia scritta, in salita e in discesa. Prima prova veloce dell'ipotesi: ripetere quella sul rumore con
   `EnOffsetCalibration = False` e vedere se la differenza sparisce;
 - **segnali veri**: trigger esterno su TRG-IN (livelli NIM), un PMT e un
   SiPM, scelta del guadagno (0-29 dB) contro la dinamica; in che verso si
@@ -74,11 +74,12 @@ Restano:
 - ~~controllore (fase 2)~~ fatto il 2026-11-11 sul ramo `schede-2730` (CLAUDE.md,
   "VX2730B sul notebook"). Fatte lo stesso giorno le soglie del 2730 a run in
   corso (`live-threshold-<scheda>.txt`, "Apply now" nella linguetta della
-  scheda) e l'oggetto delle mail ("[DAQ]"). Restano: gli scan in soglia per il
-  2730 (oggi solo V1742 e V812: `noise_scan.py` legge `live-status.json`
-  senza scheda e una base in conteggi che il 2730 non ha, la soglia e'
-  relativa); riepilogo serale ed e-log coi file per scheda da guardare; la
-  scelta su come finisce un run a piu' schede (oggi con l'ultima);
+  scheda) e l'oggetto delle mail ("[DAQ]"); il 2026-11-12 la configurazione
+  divisa per modulo e gli scan in soglia per scheda (`scan_scheda.sh`, un
+  blocco per scheda nel riquadro *Threshold scan*). Restano: lo scan del V812
+  con le schede (oggi fa un run per punto con una DAQ senza `--board`);
+  riepilogo serale ed e-log coi file per scheda da guardare; la scelta su come
+  finisce un run a piu' schede (oggi con l'ultima);
 - **monitor ed efficienza (fase 3)**: proposta `proposta-monitor-schede.png`
   (2026-11-11), da approvare. Leggono gia' l'HDF5, ma il verso degli impulsi lo
   prendono dal DCOffset esadecimale del V1742 nel `.log` (per il VX2730B c'e'

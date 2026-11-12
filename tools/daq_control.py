@@ -817,9 +817,17 @@ def elenco_misure(n=20):
                 d = json.load(f)
         except (OSError, ValueError):
             continue
+        # Uno scan di una scheda (noise_scan.py --scheda) dice da se' modello
+        # e scheda: "V1742 self-trigger" su uno scan del VX2730B era falso.
+        if d.get("tipo") == "v812":
+            tipo = "V812 CFD"
+        elif d.get("scheda"):
+            tipo = "%s self-trigger (%s)" % (d.get("modello") or "?", d["scheda"])
+        else:
+            tipo = "V1742 self-trigger"
         fuori.append({"nome": nome, "quando": st.st_mtime,
                       "punti": len(d.get("punti", [])),
-                      "tipo": "V812 CFD" if d.get("tipo") == "v812" else "V1742 self-trigger",
+                      "tipo": tipo,
                       "canali": d.get("canali")})
     fuori.sort(key=lambda x: -x["quando"])
     return fuori[:n]
@@ -1524,9 +1532,24 @@ class Controllo:
             else:
                 base = t.get("VMEBaseAddress", g.get("VMEBaseAddress"))
                 collegamento = ("VME 0x%08X via V4718" % base) if isinstance(base, int) else "VME"
+            # Per il riquadro degli scan: se la scheda usa il self-trigger, con
+            # che logica e su che canali. Un V1742 eredita da [digitizer] quello
+            # che la sua sezione non scrive, come fa DAQ-WC --board.
+            if d2:
+                self_on = any(x.strip().lower() in ("self", "itla")
+                              for x in str(t.get("TriggerSource", "Software")).split("|"))
+                logica = str(t.get("SelfTriggerLogic", "OR"))
+                canali = t.get("SelfTriggerChannels") or t.get("ChannelList") or list(range(16))
+            else:
+                m = dict(g, **t)
+                self_on = bool(m.get("SelfTrigger", False))
+                logica = "OR"
+                canali = m.get("SelfTriggerChannels") or m.get("ChannelList") or []
             out.append({"nome": nome, "attiva": bool(t.get("Enabled", True)),
                         "modello": modello, "digitizer2": d2,
-                        "collegamento": collegamento, "serie": t.get("BoardSerial")})
+                        "collegamento": collegamento, "serie": t.get("BoardSerial"),
+                        "self": self_on, "logica": logica,
+                        "canali_self": [int(c) for c in canali]})
         return out
 
     def _console_di(self, scheda):
@@ -2651,7 +2674,7 @@ class Controllo:
                 return [int(m.group(1)), int(m.group(2)), m.group(3).strip()]
         return None
 
-    def avvia_scan(self, tipo, valori, secondi):
+    def avvia_scan(self, tipo, valori, secondi, scheda=None, canali=None):
         """Lancia uno scan. I due hanno prerequisiti OPPOSTI, e la pagina deve
         dirlo chiaro invece di limitarsi a fallire: quello del V1742 cambia le
         soglie a caldo e vuole una run gia' in corso, quello del V812 fa una
@@ -2665,7 +2688,22 @@ class Controllo:
                 return False, "A queue is running: it is the one driving the DAQ."
             spec = SCAN[tipo]
 
-            in_corso = trova_daq() is not None
+            sc = None
+            if tipo == "scheda":
+                # La DAQ che conta e' quella di QUESTA scheda: con piu' schede
+                # gira un processo per ciascuna.
+                sc = next((x for x in self.schede() if x["nome"] == scheda), None)
+                if sc is None:
+                    return False, "There is no board '%s' in [boards]." % scheda
+                if scheda not in trova_daq_tutte().values():
+                    return False, ("%s is not acquiring: the scan changes thresholds on a "
+                                   "running acquisition, so start the run first, with %s "
+                                   "ticked." % (scheda, scheda))
+                if not sc["self"]:
+                    return False, "%s does not use the self-trigger in its configuration." % scheda
+                in_corso = True
+            else:
+                in_corso = trova_daq() is not None
             if spec["serve_run"] and not in_corso:
                 return False, ("The self-trigger scan changes thresholds on a running "
                                "acquisition: start the run first.")
@@ -2692,14 +2730,45 @@ class Controllo:
             except (TypeError, ValueError):
                 return False, "Seconds per point must be between 1 and 3600."
 
+            argv = ["bash", spec["script"], spec["opzione"], " ".join(pezzi), "-s", str(int(sec))]
+            descr = " ".join(pezzi)
+            if sc is not None:
+                # Una soglia relativa del VX2730B e' un intero di conteggi: la
+                # scheda rifiuta il resto, ed e' meglio saperlo prima del via.
+                if sc["digitizer2"] and any(not float(x).is_integer() or not 1 <= float(x) <= 16383
+                                            for x in pezzi):
+                    return False, ("Thresholds of %s are whole ADC counts from the baseline, "
+                                   "between 1 and 16383." % scheda)
+                uno = [x for x in str(canali or "").replace(",", " ").split() if x]
+                try:
+                    uno = [int(x) for x in uno]
+                except ValueError:
+                    return False, "Channels must be numbers."
+                fuori = [c for c in uno if c not in sc["canali_self"]]
+                if fuori:
+                    return False, ("Channel(s) %s are not in the self-trigger of %s (%s)."
+                                   % (", ".join(map(str, fuori)), scheda,
+                                      ", ".join(map(str, sc["canali_self"]))))
+                # Un canale alla volta = gli altri a soglia massima: con AND o
+                # maggioranza il trigger non scatterebbe mai.
+                if uno and sc["logica"].upper() != "OR":
+                    return False, ("One channel at a time needs SelfTriggerLogic = OR; %s has %s. "
+                                   "Scan all channels together instead." % (scheda, sc["logica"]))
+                argv = ["bash", spec["script"], "-b", scheda, "-o", " ".join(pezzi),
+                        "-s", str(int(sec))]
+                if uno:
+                    argv += ["-c", " ".join(map(str, uno))]
+                # La stessa descrizione che scrive lo script nel registro.
+                descr = "%s  %s  %s" % (scheda, ("one channel at a time (%s)" % " ".join(map(str, uno)))
+                                        if uno else "all channels", " ".join(pezzi))
+
             try:
                 log = open(SCAN_LOG, "wb")
             except OSError as e:
                 return False, "Cannot write %s: %s" % (SCAN_LOG, e)
             try:
                 proc = subprocess.Popen(
-                    ["bash", spec["script"], spec["opzione"], " ".join(pezzi),
-                     "-s", str(int(sec))],
+                    argv,
                     cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL, start_new_session=True)
             except OSError as e:
@@ -2708,7 +2777,7 @@ class Controllo:
                 log.close()
 
             stato = {"pid": proc.pid, "pgid": proc.pid, "tipo": tipo,
-                     "script": spec["script"], "valori": " ".join(pezzi),
+                     "script": spec["script"], "valori": descr,
                      "secondi": sec, "avviato": time.time()}
             try:
                 with open(SCAN_STATO, "w") as f:
@@ -2738,7 +2807,8 @@ class Controllo:
                     pass
                 return False, "The scan stopped at once. " + perche
 
-            return True, "%s scan started on %d points." % (spec["etichetta"], len(pezzi))
+            return True, "%s scan%s started on %d points." % (
+                spec["etichetta"], (" of " + scheda) if sc else "", len(pezzi))
 
     def ferma_scan(self):
         """SIGTERM al GRUPPO, mai KILL.
@@ -2765,6 +2835,14 @@ class Controllo:
                     break
             if fermo is None:
                 return False, "The scan has not responded for 40 s."
+
+            # Gli scan del self-trigger lavorano su un run che resta acceso:
+            # aspettare che la DAQ si fermi voleva dire 30 s di attesa e poi il
+            # messaggio del V812 ("the run of the last point is still closing").
+            if SCAN.get(s.get("tipo"), {}).get("serve_run"):
+                return True, ("Scan stopped in %.1f s; the run goes on%s." % (
+                    fermo, ", with the starting thresholds put back"
+                    if s.get("tipo") == "scheda" else ""))
 
             # Lo script muore prima della DAQ che aveva lanciato: quella sta
             # chiudendo il file e comprimendolo, e ci mette il suo. Tornare
@@ -3400,7 +3478,13 @@ PAGINA = r"""<!doctype html>
 
 <div class="box" id="b_scan"><h2>Threshold scan<span class="riass"></span></h2>
   <div id="scanstato" style="margin-bottom:10px"></div>
-  <div style="display:flex;gap:22px;flex-wrap:wrap">
+  <!-- Con le schede (MultiBoard): un blocco per scheda spuntata che usa il
+       self-trigger, ciascuno con le sue unita' (conteggi ADC dalla base per il
+       VX2730B, offset per un V1742). Lo disegna disegnaScanSchede(). Senza
+       schede si vedono i due scan di sempre, qui sotto. -->
+  <div id="scanschede" style="display:none"></div>
+  <div id="scanschedepiede" style="display:none;font-size:11px;color:#6b6a65;margin-top:10px"></div>
+  <div id="scanclassico" style="display:flex;gap:22px;flex-wrap:wrap">
     <div>
       <div style="font-size:12px;color:#6b6a65;margin-bottom:4px">V1742 self-trigger &mdash; offsets</div>
       <input id="s1val" value="3 4 5 6 8 10" style="width:170px">
@@ -3415,9 +3499,9 @@ PAGINA = r"""<!doctype html>
       <button id="s2go" style="background:#eb6834;color:#fff">Start</button>
       <div style="font-size:11px;color:#6b6a65;margin-top:3px">one run per point: the DAQ must be stopped</div>
     </div>
-    <div style="margin-left:auto;align-self:flex-end">
-      <button id="sstop" style="background:#a8321f;color:#fff">Stop scan</button>
-    </div>
+  </div>
+  <div style="display:flex;justify-content:flex-end;margin-top:8px">
+    <button id="sstop" style="background:#a8321f;color:#fff">Stop scan</button>
   </div>
   <pre id="scanlog" style="margin-top:12px;display:none"></pre>
 </div>
@@ -3858,6 +3942,8 @@ async function aggiorna(){
   $("s1go").disabled = !!sc || !s.in_corso;
   $("s2go").disabled = !!sc || s.in_corso;
   $("sstop").disabled = !sc;
+  window._scanTipo = sc ? sc.tipo : null;
+  disegnaScanSchede(s);
   // Il log resta visibile anche a scan finito: e' li' che si legge perche'
   // uno scan si e' rifiutato di partire, e nasconderlo appena il processo
   // muore vuol dire nasconderlo proprio quando serve.
@@ -3873,8 +3959,11 @@ async function aggiorna(){
 }
 
 // --- schede ----------------------------------------------------------------
+// Il numero e' il gruppo di quattro cifre seguito (dopo la scheda, se c'e')
+// dalla frequenza: "LNF_2730_0000_vx2730_500Ms_75PT.h5" e' il run 0000, non
+// il 2730 del prefisso, che il primo "_NNNN_" prendeva (2026-11-12).
 function numeroRun(nome){
-  const m = /_(\d{4})_/.exec(nome || "");
+  const m = /_(\d{4})_(?:[^_]+_)?[\d.]+[GM]s_\d+PT/.exec(nome || "") || /_(\d{4})_/.exec(nome || "");
   return m ? m[1] : null;
 }
 
@@ -4536,11 +4625,93 @@ async function avviaScan(tipo, idval, idsec, nome){
   aggiorna();
 }
 
+// --- scan per scheda (MultiBoard) -------------------------------------------
+// I blocchi si ridisegnano solo quando cambiano le schede o la loro
+// configurazione, non a ogni giro: riscriverebbero quello che si sta digitando.
+function disegnaScanSchede(s){
+  const schede = s.schede || [];
+  const multi = schede.length > 0;
+  $("scanclassico").style.display = multi ? "none" : "flex";
+  $("scanschede").style.display = $("scanschedepiede").style.display = multi ? "" : "none";
+  if(!multi) return;
+  const usate = schede.filter(x => x.attiva && x.self);
+  const firma = JSON.stringify(usate.map(x => [x.nome, x.modello, x.digitizer2, x.logica, x.canali_self]));
+  if($("scanschede")._firma !== firma){
+    $("scanschede")._firma = firma;
+    $("scanschede").innerHTML = usate.length ? usate.map(bloccoScanScheda).join("")
+      : '<div style="font-size:12px;color:#6b6a65">No ticked board uses the self-trigger.</div>';
+  }
+  for(const x of usate){
+    const b = $("sgo_" + x.nome);
+    if(!b) continue;
+    b.disabled = !!s.scan || !x.in_corso;
+    b.title = x.in_corso ? "" : x.nome + " is not acquiring: start the run first";
+  }
+  // Il V812 fa un run per punto con una DAQ senza --board: con le schede non
+  // funziona ancora, e si dice invece di lasciare un pulsante che fallisce.
+  const fuori = schede.filter(x => !(x.attiva && x.self))
+    .map(x => x.nome + (x.attiva ? " (no self-trigger)" : ""));
+  $("scanschedepiede").textContent = "V812 CFD scan: one run per point, not yet with boards" +
+    (fuori.length ? "  \u00b7  " + fuori.join(", ") + ": not in the scan" : "");
+}
+function bloccoScanScheda(x){
+  const n = x.nome, or = (x.logica || "OR").toUpperCase() === "OR";
+  const unita = x.digitizer2 ? "thresholds [ADC counts from the baseline]" : "offsets";
+  const valori = x.digitizer2 ? "200 100 60 40 30 20 15" : "1200 600 300 100 50";
+  return `<div style="border-top:1px solid #eee;padding-top:10px;margin-top:10px">
+    <div style="font-size:12px;color:#6b6a65;margin-bottom:5px"><b style="color:#1a1a19">${n}</b>
+      &middot; ${x.modello} self-trigger &mdash; ${unita}</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px">
+      <input id="sv_${n}" value="${valori}" style="width:190px">
+      <input id="ss_${n}" value="20" style="width:52px" title="seconds per point">
+      <span style="font-size:11px;color:#6b6a65">s/point</span>
+      <label><input type="radio" name="sm_${n}" value="tutti" checked> all channels together (${x.logica})</label>
+      <label${or ? "" : ' style="color:#9a9a94"'}><input type="radio" name="sm_${n}" value="uno"${or ? "" : " disabled"}> one at a time:</label>
+      <input id="sc_${n}" value="${(x.canali_self || []).join(" ")}" style="width:70px"${or ? "" : " disabled"}>
+      <button id="sgo_${n}" class="sgo" data-scheda="${n}" style="background:#2a78d6;color:#fff;margin-left:auto">Start</button>
+    </div>` +
+    (or ? "" : `<div style="font-size:11px;color:#6b6a65;margin-top:4px">one at a time needs
+      SelfTriggerLogic = OR: with ${x.logica} the parked channels would stop every trigger</div>`) +
+    `<div style="font-size:11px;color:#6b6a65;margin-top:4px">changes the thresholds of the running ${n}
+      run, all points in the same file; at the end, or on Stop scan, they go back to the ones in use
+      when it started</div></div>`;
+}
+$("scanschede").addEventListener("click", async ev => {
+  const b = ev.target.closest(".sgo");
+  if(!b) return;
+  const n = b.dataset.scheda;
+  const v = $("sv_" + n).value.trim(), sec = $("ss_" + n).value.trim();
+  const uno = document.querySelector(`input[name="sm_${n}"][value="uno"]`).checked;
+  const canali = uno ? $("sc_" + n).value.trim() : "";
+  const punti = v.split(/[\s,]+/).filter(x => x !== "").length;
+  const ncan = uno ? Math.max(1, canali.split(/[\s,]+/).filter(x => x !== "").length) : 1;
+  if(!confirm("Start the self-trigger scan of " + n + "?\n\n" +
+              (uno ? "One channel at a time (" + canali + "), the others parked at the maximum.\n"
+                   : "All channels together.\n") +
+              punti + " points of " + sec + " s" + (uno ? " per channel" : "") + ": about " +
+              Math.round(punti * ncan * sec / 60) + " minutes.\n\n" +
+              "The thresholds of the running acquisition change at every point and go back " +
+              "to the starting ones at the end.")) return;
+  try{
+    const q = new URLSearchParams({tipo: "scheda", scheda: n, valori: v, secondi: sec,
+                                   canali: canali, chi: $("chi").value, token: TOKEN});
+    const d = await (await fetch("/api/scan/avvia?" + q, {method: "POST"})).json();
+    msg(d.messaggio, d.esito);
+  }catch(e){ msg("Request failed: " + e, false); }
+  aggiorna();
+});
+
 $("s1go").onclick = () => avviaScan("v1742", "s1val", "s1sec", "self-trigger");
 $("s2go").onclick = () => avviaScan("v812",  "s2val", "s2sec", "CFD");
 $("sstop").onclick = async () => {
-  if(!confirm("Stop the scan?\n\nThe script restores the TOML and the running acquisition " +
-              "is closed properly.")) return;
+  // Il V812 fa un run per punto (si chiude quello in corso); gli scan del
+  // self-trigger cambiano solo le soglie, e il run resta acceso.
+  // Per il V1742 dipende da quale script: quello per canale rimette gli
+  // offset di partenza, quello di tutti i canali (scan_v1742.sh) no.
+  const dopo = {v812: "The script restores the TOML and the running acquisition is closed properly.",
+                v1742: "The run goes on.",
+                scheda: "The starting thresholds are put back; the run goes on."};
+  if(!confirm("Stop the scan?\n\n" + (dopo[window._scanTipo] || ""))) return;
   try{
     const q = new URLSearchParams({chi: $("chi").value, token: TOKEN});
     const d = await (await fetch("/api/scan/ferma?" + q, {method: "POST"})).json();
@@ -5270,7 +5441,9 @@ def crea_handler(ctrl, token):
             elif parti.path == "/api/scan/avvia":
                 esito, messaggio = ctrl.avvia_scan(qs.get("tipo", [""])[0],
                                                    qs.get("valori", [""])[0],
-                                                   qs.get("secondi", ["20"])[0])
+                                                   qs.get("secondi", ["20"])[0],
+                                                   qs.get("scheda", [""])[0] or None,
+                                                   qs.get("canali", [""])[0])
                 registra(chi, da, "avvia scan", messaggio)
 
             elif parti.path == "/api/scan/ferma":

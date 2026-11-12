@@ -1110,8 +1110,13 @@ Gran Sasso: a Frascati non c'e'.
   guadagni diversi (provato: 12 mV = 277 conteggi a 15 dB, 196 a 12 dB).
   `plot_scan.py --mv-nominali` disegna in mV nominali, e ci passa da solo se
   gli scan hanno guadagni diversi; gli scan di prima, senza guadagno nel JSON,
-  restano in conteggi. Il blocco della pagina con le soglie in mV e' da fare,
-  dopo una proposta.
+  restano in conteggi. **Nella pagina** (proposta `proposta-scan-mv.png`) il
+  blocco dello scan di un VX2730B ha la scelta dell'unita' (conteggi o mV) e
+  sotto la conversione per canale, col guadagno del run in corso (letto
+  dall'header del suo file, una volta per file) o, senza run, con quello
+  della tabella dei canali; in conteggi con guadagni diversi un avviso dice
+  che la stessa lista e' una soglia diversa in mV. Cambiando unita', la lista
+  di serie passa all'altra (200 ... 15 conteggi, 20 ... 2 mV).
 - **Formato**: lo stesso HDF5 v3 del V1742 (canali concatenati in
   `/events/waveforms`; `daqio` lo legge senza modifiche), piu'
   `/events/timestamp` a 64 bit in unita' di 8 ns (attributo `UnitNs`) e in

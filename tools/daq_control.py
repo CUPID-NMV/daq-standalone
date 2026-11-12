@@ -1949,6 +1949,35 @@ class Controllo:
                 print("notifiche: cloud: %s" % e, flush=True)
             time.sleep(CLOUD_OGNI_S)
 
+    # -- guadagno del run in corso -------------------------------------------
+    def guadagni_file(self, path):
+        """{canale: [dB, mV per conteggio]} dall'header di un file del VX2730B
+        (GainDb, ADCToVolts), letto una volta per file: e' il guadagno con cui
+        il run sta davvero acquisendo, che il TOML puo' non dire piu'."""
+        cache = self.__dict__.setdefault("_cache_guadagni", {})
+        if path in cache:
+            return cache[path]
+        out = {}
+        try:
+            import daqio
+            f, tmp = daqio.open_file(path, live=True)
+            try:
+                hdr = daqio.read_header(f)
+            finally:
+                f.close()
+                daqio._cleanup(tmp)
+            canali = [int(c) for c in list(hdr["ChannelList"])]
+            a, g = hdr.get("ADCToVolts"), hdr.get("GainDb")
+            if a is not None and len(list(a)) == len(canali):
+                g = list(g) if g is not None else [None] * len(canali)
+                out = {str(c): [None if g[k] is None else float(g[k]), float(list(a)[k]) * 1e3]
+                       for k, c in enumerate(canali)}
+        except Exception:
+            out = {}
+        if out:
+            cache[path] = out
+        return out
+
     # -- spazio sul disco ----------------------------------------------------
     def soglie_spazio(self):
         """(GB per avviare, GB sotto cui fermare), da [settings] o di serie."""
@@ -2434,6 +2463,8 @@ class Controllo:
                 r["in_corso"] = r["pid"] is not None
                 ev, tot, runfile = self.eventi_correnti(self._console_di(sc["nome"]))
                 r["run"] = os.path.basename(runfile) if runfile else None
+                if r["in_corso"] and sc["digitizer2"] and runfile:
+                    r["guadagni_run"] = self.guadagni_file(runfile)
                 if r["in_corso"]:
                     avvio = avvio_processo(r["pid"])
                     r["da_secondi"] = round(time.time() - avvio, 1) if avvio else None
@@ -2849,7 +2880,7 @@ class Controllo:
                 return [int(m.group(1)), int(m.group(2)), m.group(3).strip()]
         return None
 
-    def avvia_scan(self, tipo, valori, secondi, scheda=None, canali=None):
+    def avvia_scan(self, tipo, valori, secondi, scheda=None, canali=None, unita="counts"):
         """Lancia uno scan. I due hanno prerequisiti OPPOSTI, e la pagina deve
         dirlo chiaro invece di limitarsi a fallire: quello del V1742 cambia le
         soglie a caldo e vuole una run gia' in corso, quello del V812 fa una
@@ -2908,12 +2939,28 @@ class Controllo:
             argv = ["bash", spec["script"], spec["opzione"], " ".join(pezzi), "-s", str(int(sec))]
             descr = " ".join(pezzi)
             if sc is not None:
+                mv = (unita or "counts") == "mV"
+                if mv and not sc["digitizer2"]:
+                    return False, "Thresholds in mV only for a VX2730B; a V1742 scans offsets."
                 # Una soglia relativa del VX2730B e' un intero di conteggi: la
                 # scheda rifiuta il resto, ed e' meglio saperlo prima del via.
-                if sc["digitizer2"] and any(not float(x).is_integer() or not 1 <= float(x) <= 16383
-                                            for x in pezzi):
+                if sc["digitizer2"] and not mv and any(not float(x).is_integer() or not 1 <= float(x) <= 16383
+                                                       for x in pezzi):
                     return False, ("Thresholds of %s are whole ADC counts from the baseline, "
                                    "between 1 and 16383." % scheda)
+                if mv:
+                    if any(float(x) <= 0 for x in pezzi):
+                        return False, "Thresholds in mV must be positive."
+                    # Col guadagno del run in corso: quanti conteggi diventano.
+                    runfile = self.eventi_correnti(self._console_di(scheda))[2]
+                    gr = self.guadagni_file(runfile) if runfile else {}
+                    for c in sc["canali_self"]:
+                        if str(c) in gr:
+                            for x in pezzi:
+                                n = int(round(float(x) / gr[str(c)][1]))
+                                if not 1 <= n <= 16383:
+                                    return False, ("%s mV on ch%d (%g dB) is %d counts, outside 1-16383."
+                                                   % (x, c, gr[str(c)][0] or 0, n))
                 uno = [x for x in str(canali or "").replace(",", " ").split() if x]
                 try:
                     uno = [int(x) for x in uno]
@@ -2933,9 +2980,11 @@ class Controllo:
                         "-s", str(int(sec))]
                 if uno:
                     argv += ["-c", " ".join(map(str, uno))]
+                if mv:
+                    argv += ["-u", "mV"]
                 # La stessa descrizione che scrive lo script nel registro.
-                descr = "%s  %s  %s" % (scheda, ("one channel at a time (%s)" % " ".join(map(str, uno)))
-                                        if uno else "all channels", " ".join(pezzi))
+                descr = "%s  %s  %s%s" % (scheda, ("one channel at a time (%s)" % " ".join(map(str, uno)))
+                                          if uno else "all channels", " ".join(pezzi), " mV" if mv else "")
 
             try:
                 log = open(SCAN_LOG, "wb")
@@ -4620,7 +4669,7 @@ function disegnaSchedeConfig(){
   if(!valide.includes(t)) t = "comune";
   mostraTab(schede.length ? t : "comune");
   $("cfgschede").oninput = $("cfgschede").onchange = () => {
-    for(const x of schede) if(x.digitizer2) aggiornaMvDig2(x.nome, nCanaliModello(x.modello));
+    for(const x of schede) if(x.digitizer2){ aggiornaMvDig2(x.nome, nCanaliModello(x.modello)); convScan(x.nome); }
     aggiornaStatoSalva();
   };
 }
@@ -4847,6 +4896,8 @@ function disegnaScanSchede(s){
     mostraScanTab();
   }
   const usate = schede.filter(x => x.attiva && x.self);
+  for(const x of schede) SCHEDE_ST[x.nome] = x;
+  for(const x of usate) if(x.digitizer2) convScan(x.nome);
   for(const x of usate){
     const b = $("sgo_" + x.nome);
     if(!b) continue;
@@ -4859,6 +4910,37 @@ function disegnaScanSchede(s){
     : "No ticked board uses the self-trigger: there is no scan to start.";
 }
 const STILE_SCAN = "margin-top:14px;padding-top:10px;border-top:1px solid #eee";
+const SCHEDE_ST = {};     // l'ultimo stato di ogni scheda, per la conversione conteggi <-> mV
+const LISTA_SCAN = {counts: "200 100 60 40 30 20 15", mV: "20 10 6 4 3 2"};
+// La conversione per canale sotto la lista delle soglie di uno scan del
+// VX2730B, col guadagno del run in corso (dall'header del suo file) o, senza
+// run, con quello della tabella dei canali della stessa linguetta. E l'avviso
+// che in conteggi la stessa lista e' una soglia diversa in mV su canali con
+// guadagni diversi.
+function convScan(n){
+  const el = $("sconv_" + n), av = $("savv_" + n), x = SCHEDE_ST[n];
+  if(!el || !x) return;
+  const mv = $("su_" + n).value === "mV";
+  const vals = $("sv_" + n).value.split(/[\s,]+/).map(Number).filter(v => isFinite(v) && v > 0);
+  const uno = document.querySelector(`input[name="sm_${n}"][value="uno"]`).checked;
+  const chs = uno ? $("sc_" + n).value.split(/[\s,]+/).filter(v => v !== "").map(Number)
+                  : (x.canali_self || []);
+  const daRun = x.guadagni_run && Object.keys(x.guadagni_run).length > 0;
+  const g = c => {
+    if(daRun && x.guadagni_run[c]) return x.guadagni_run[c];
+    const cella = $(idD2(n, "gain", c));
+    const db = cella ? (parseFloat(cella.value) || 0) : 0;
+    return [db, 4000 / 16384 / Math.pow(10, db / 20)];
+  };
+  if(!vals.length || !chs.length){ el.textContent = ""; av.style.display = "none"; return; }
+  const hi = Math.max(...vals), lo = Math.min(...vals);
+  el.textContent = chs.map(c => {
+    const [db, k] = g(c);
+    return mv ? `ch${c}, ${db} dB: ${hi} \u2026 ${lo} mV = ${Math.round(hi / k)} \u2026 ${Math.round(lo / k)} counts`
+              : `ch${c}, ${db} dB: ${hi} \u2026 ${lo} counts \u2248 ${(hi * k).toFixed(1)} \u2026 ${(lo * k).toFixed(1)} mV`;
+  }).join("   \u00b7   ") + (daRun ? "   (gains of the running run)" : "   (gains in the channel table)");
+  av.style.display = (!mv && !uno && new Set(chs.map(c => g(c)[0])).size > 1) ? "" : "none";
+}
 const TITOLO_SCAN = "font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b6a65;margin-bottom:5px";
 function notaScan(nome, perche){
   return `<div style="${STILE_SCAN};font-size:12px;color:#6b6a65">Threshold scan of ${nome}: ${perche}.</div>`;
@@ -4866,11 +4948,14 @@ function notaScan(nome, perche){
 function bloccoScanScheda(x){
   const n = x.nome, or = (x.logica || "OR").toUpperCase() === "OR";
   const unita = x.digitizer2 ? "thresholds [ADC counts from the baseline]" : "offsets";
-  const valori = x.digitizer2 ? "200 100 60 40 30 20 15" : "1200 600 300 100 50";
+  const valori = x.digitizer2 ? LISTA_SCAN.counts : "1200 600 300 100 50";
+  const scelta = x.digitizer2
+    ? `<select id="su_${n}" title="unit of the thresholds"><option value="counts">ADC counts</option><option value="mV">mV</option></select>`
+    : "";
   return `<div style="${STILE_SCAN}">
-    <div style="${TITOLO_SCAN}">threshold scan of ${n} &mdash; <span style="text-transform:none">${unita}</span></div>
+    <div style="${TITOLO_SCAN}">threshold scan of ${n} &mdash; <span style="text-transform:none">${x.digitizer2 ? "thresholds from the baseline" : unita}</span></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px">
-      <input id="sv_${n}" value="${valori}" style="width:190px">
+      <input id="sv_${n}" value="${valori}" style="width:190px">${scelta}
       <input id="ss_${n}" value="20" style="width:52px" title="seconds per point">
       <span style="font-size:11px;color:#6b6a65">s/point</span>
       <label><input type="radio" name="sm_${n}" value="tutti" checked> all channels together (${x.logica})</label>
@@ -4878,9 +4963,12 @@ function bloccoScanScheda(x){
       <input id="sc_${n}" value="${(x.canali_self || []).join(" ")}" style="width:70px"${or ? "" : " disabled"}>
       <button id="sgo_${n}" class="sgo" data-scheda="${n}" style="background:#2a78d6;color:#fff;margin-left:auto">Start scan</button>
     </div>` +
+    (x.digitizer2 ? `<div id="sconv_${n}" style="font-size:12px;color:#52514e;margin-top:6px;font-variant-numeric:tabular-nums"></div>
+      <div id="savv_${n}" style="display:none;font-size:11px;color:#8a6d1f;margin-top:3px">the channels have different
+      gains: with the same counts they get different thresholds in mV. Choose mV to scan them at the same threshold.</div>` : "") +
     (or ? "" : `<div style="font-size:11px;color:#6b6a65;margin-top:4px">one at a time needs
       SelfTriggerLogic = OR: with ${x.logica} the parked channels would stop every trigger</div>`) +
-    `<div style="font-size:11px;color:#6b6a65;margin-top:4px">on the running ${n} run, all points in the
+    `<div style="font-size:11px;color:#6b6a65;margin-top:4px">${x.digitizer2 ? "mV are nominal (board ADCToVolts, up to 7% off). " : ""}On the running ${n} run, all points in the
       same file; at the end, or on Stop scan, the thresholds go back to the ones in use when it started.
       Progress and Stop in the Threshold scan box.</div></div>`;
 }
@@ -4897,6 +4985,20 @@ function bloccoScanV812(){
     <div style="font-size:11px;color:#6b6a65;margin-top:4px">one run per point: not yet with boards
       (it starts a DAQ without --board)</div></div>`;
 }
+function schedaDi(el){
+  const m = /^s[vucm]_(.+)$/.exec(el.id || el.name || "");
+  return m ? m[1] : null;
+}
+$("cfgscan").addEventListener("input", ev => { const n = schedaDi(ev.target); if(n) convScan(n); });
+$("cfgscan").addEventListener("change", ev => {
+  const n = schedaDi(ev.target);
+  if(!n) return;
+  if(ev.target.id === "su_" + n){
+    const v = $("sv_" + n), altra = ev.target.value === "mV" ? "counts" : "mV";
+    if(v.value.trim() === LISTA_SCAN[altra]) v.value = LISTA_SCAN[ev.target.value];
+  }
+  convScan(n);
+});
 $("cfgscan").addEventListener("click", async ev => {
   const b = ev.target.closest(".sgo");
   if(!b) return;
@@ -4904,18 +5006,20 @@ $("cfgscan").addEventListener("click", async ev => {
   const v = $("sv_" + n).value.trim(), sec = $("ss_" + n).value.trim();
   const uno = document.querySelector(`input[name="sm_${n}"][value="uno"]`).checked;
   const canali = uno ? $("sc_" + n).value.trim() : "";
+  const unita = $("su_" + n) ? $("su_" + n).value : "counts";
   const punti = v.split(/[\s,]+/).filter(x => x !== "").length;
   const ncan = uno ? Math.max(1, canali.split(/[\s,]+/).filter(x => x !== "").length) : 1;
   if(!confirm("Start the self-trigger scan of " + n + "?\n\n" +
               (uno ? "One channel at a time (" + canali + "), the others parked at the maximum.\n"
                    : "All channels together.\n") +
+              (unita === "mV" ? "Thresholds " + v + " mV, converted to counts channel by channel.\n" : "") +
               punti + " points of " + sec + " s" + (uno ? " per channel" : "") + ": about " +
               Math.round(punti * ncan * sec / 60) + " minutes.\n\n" +
               "The thresholds of the running acquisition change at every point and go back " +
               "to the starting ones at the end.")) return;
   try{
     const q = new URLSearchParams({tipo: "scheda", scheda: n, valori: v, secondi: sec,
-                                   canali: canali, chi: $("chi").value, token: TOKEN});
+                                   canali: canali, unita: unita, chi: $("chi").value, token: TOKEN});
     const d = await (await fetch("/api/scan/avvia?" + q, {method: "POST"})).json();
     msg(d.messaggio, d.esito);
   }catch(e){ msg("Request failed: " + e, false); }
@@ -5681,7 +5785,8 @@ def crea_handler(ctrl, token):
                                                    qs.get("valori", [""])[0],
                                                    qs.get("secondi", ["20"])[0],
                                                    qs.get("scheda", [""])[0] or None,
-                                                   qs.get("canali", [""])[0])
+                                                   qs.get("canali", [""])[0],
+                                                   qs.get("unita", ["counts"])[0])
                 registra(chi, da, "avvia scan", messaggio)
 
             elif parti.path == "/api/scan/ferma":

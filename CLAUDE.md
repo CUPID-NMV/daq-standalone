@@ -65,8 +65,10 @@ ad avere hardware e librerie CAEN.
     ancora girato davvero. Nessun driver del kernel: il V4718 si raggiunge in
     Ethernet. Ethernet su adattatore USB a 1 Gb/s; sospensione gia'
     disattivata (`sleep.target` mascherato, quindi anche col coperchio chiuso).
-  - **Disco: 165 GB liberi**, ~9 giorni di run compresse a ~18 GB al giorno.
-    I 155 GB di `data/LNGS` del PC non ci stanno.
+  - **Disco: 468 GB, ~160 liberi** (2026-11-12). I dati non vi restano: si
+    cancellano appena verificati sul cloud (vedi "Compressione e cloud"); il
+    controllore ferma i run sotto 5 GB liberi. Il 2026-11-12 il disco si e'
+    riempito con un run da 129 GB (vedi "VX2730B sul notebook").
   - Copiati dal PC il 2026-11-11 alle ~14: `run-local.toml`,
     `controllore-local.env` e `data/` senza i file delle run (485 `.log`,
     registri, lista delle mail, impostazioni del monitor). Il PC continua a
@@ -580,8 +582,30 @@ Da sapere:
   credenziali non si legge" scritto qui fino al 2026-11-11. **L'ETag di un file
   mandato da `cp_data` si ricalcola dal file locale**: md5 degli md5 dei pezzi
   da 8 MiB seguito da `-N` (il pezzo di boto3), sotto gli 8 MiB l'md5 semplice;
-  provato sulla 0362, 50 pezzi. Rileggere ogni file appena mandato si puo'
-  quindi fare da `archivia.py`, senza toccare `cp_data`: in `TODO.md`.
+  provato sulla 0362, 50 pezzi. **Dal 2026-11-12 `archivia.py` rilegge ogni
+  file appena mandato** (lunghezza ed ETag, un 404 si richiede una volta dopo
+  5 s): se non torna, il trasferimento conta come fallito e si riprova.
+- **Sul notebook i dati non restano** (decisione dell'utente del 2026-11-12):
+  con `[archive] DeleteAfterUpload = true` `archivia.py` cancella i file di
+  DATI di un run (`.h5.gz`, `.mid.gz`) quando tutti i suoi file, `.log`
+  compreso, sono sul cloud e verificati; il `.log` resta (numerazione,
+  riepilogo). Senza `CloudCheckURL` non cancella niente. Nel registro
+  l'evento `cancellato`; nello stato per il controllore il run resta "sul
+  cloud" (`locale: cancellato`). Il numero di run lo contano anche i `.log`,
+  nel controllore (`nomi.prossimo_numero`) e nella DAQ (V1742 e VX2730B,
+  provato sul notebook: con solo un `.log` 0007 il run e' diventato 0008).
+  Provato sul Mac contro il cloud vero con un `cp_data` finto: file identico
+  sul cloud cancellato, file assente lasciato (verifica fallita), senza
+  `CloudCheckURL` lasciato.
+- **`cp_data` sul notebook** (dal 2026-11-12): copiato dal PC passando dal Mac
+  in un tubo ssh (md5 uguali), in `~/bin/cp_data` con permessi 700 -- sul
+  notebook c'e' anche `cuore_muons`, e dentro ci sono le credenziali -- e
+  `~/DAQ/online/source/cp_data.py` (lo stesso percorso del PC, che lo script
+  cita); `boto3` nello spazio di `daq` (`pip --user`). `CloudCommand` nel TOML
+  del notebook punta a `~/bin/cp_data`. Manda in `NMV/WC/LNGS/`, come il PC:
+  i run del notebook (`LNF_2730_...`) finiscono nella stessa cartella. Perche'
+  il notebook mandi davvero, il controllore va avviato SENZA
+  `--senza-archivio`.
 - **Prima di ogni file `archivia.py` chiede al cloud se quel nome c'e' gia'**
   (dal 2026-11-11, `CLOUD_URL`, sovrascrivibile con `[archive]
   CloudCheckURL`): il registro sa solo cosa ha mandato QUEL PC, e un nome

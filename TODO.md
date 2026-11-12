@@ -35,15 +35,8 @@ installata; il funzionamento sta in CLAUDE.md. Restano:
   CLOUD nella barra in alto, con le run in ritardo elencate sotto, e mail
   "Cloud" (la posta dal Gran Sasso ora parte, da smtp.lngs.infn.it). Una
   tabella di tutti i file (in attesa, compresso, sul cloud) solo se serve;
-- **rileggere il file dal cloud dopo l'upload** (lunghezza ed ETag), deciso
-  dall'utente il 2026-11-11. Ora si puo' fare da `archivia.py`, senza toccare
-  `cp_data` di CYGNO: il cloud risponde in anonimo col tenant davanti al
-  bucket, e l'ETag si ricalcola dal file locale (CLAUDE.md, "Compressione e
-  cloud"). In `carica_run`, dopo un `cp_data` uscito con 0: `sul_cloud()` sul
-  nome e confronto con `st_size` ed `etag_locale()`; se non torna,
-  `errore_carica` col motivo (si riprova da solo, e dopo 30 minuti parte la
-  mail Cloud). Un 404 subito dopo l'upload va riprovato una volta prima di
-  dichiararlo fallito, nel caso lo storage non lo mostri ancora;
+- ~~rileggere il file dal cloud dopo l'upload~~ fatto il 2026-11-12 in `archivia.py`
+  (CLAUDE.md, "Compressione e cloud"), insieme alla cancellazione dei dati sul notebook;
 - **pulizia del disco** dei file gia' sul cloud: 439 GB liberi sul PC, ~18 GB
   al giorno al ritmo delle run 0041-0054, cioe' circa tre settimane; **sul
   notebook 165 GB, cioe' ~9 giorni**. Prima il C++ deve contare anche i

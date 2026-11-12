@@ -580,6 +580,11 @@ def verifica_sul_cloud(p, st, url):
         return False, "CloudCheckURL is empty: cannot verify"
     try:
         remoto = sul_cloud(os.path.basename(p), url)
+        if remoto is None:
+            # Appena finito l'upload lo storage puo' non mostrarlo ancora:
+            # una seconda domanda prima di dichiararlo fallito.
+            time.sleep(5)
+            remoto = sul_cloud(os.path.basename(p), url)
     except OSError as e:
         return False, "cannot read it back from the cloud: %s" % e
     if remoto is None:

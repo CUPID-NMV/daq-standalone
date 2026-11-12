@@ -4902,7 +4902,13 @@ function disegnaScanSchede(s){
     const b = $("sgo_" + x.nome);
     if(!b) continue;
     b.disabled = !!s.scan || !x.in_corso;
-    b.title = s.scan ? "a scan is already running" : x.in_corso ? "" : x.nome + " is not acquiring: start the run first";
+    // Il motivo scritto accanto, non solo nel suggerimento del mouse: un
+    // pulsante spento senza spiegazione sembra un guasto (2026-11-12).
+    const perche = s.scan ? "a scan is already running"
+                 : x.in_corso ? "" : x.nome + " is not acquiring: start the run first, the scan changes the thresholds of a running run";
+    b.title = perche;
+    const e = $("sperche_" + x.nome);
+    if(e){ e.textContent = perche; e.style.display = perche ? "" : "none"; }
   }
   $("scanschedepiede").textContent = usate.length
     ? "A scan starts from the tab of its board in Configuration: " +
@@ -4962,7 +4968,8 @@ function bloccoScanScheda(x){
       <label${or ? "" : ' style="color:#9a9a94"'}><input type="radio" name="sm_${n}" value="uno"${or ? "" : " disabled"}> one at a time:</label>
       <input id="sc_${n}" value="${(x.canali_self || []).join(" ")}" style="width:70px"${or ? "" : " disabled"}>
       <button id="sgo_${n}" class="sgo" data-scheda="${n}" style="background:#2a78d6;color:#fff;margin-left:auto">Start scan</button>
-    </div>` +
+    </div>
+    <div id="sperche_${n}" style="display:none;font-size:11px;color:#8a6d1f;text-align:right;margin-top:3px"></div>` +
     (x.digitizer2 ? `<div id="sconv_${n}" style="font-size:12px;color:#52514e;margin-top:6px;font-variant-numeric:tabular-nums"></div>
       <div id="savv_${n}" style="display:none;font-size:11px;color:#8a6d1f;margin-top:3px">the channels have different
       gains: with the same counts they get different thresholds in mV. Choose mV to scan them at the same threshold.</div>` : "") +

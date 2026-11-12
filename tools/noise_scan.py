@@ -28,6 +28,14 @@ di partenza. Serve quando sulla scheda ci sono rivelatori diversi -- SiPM e
 PMT -- che con lo stesso offset non hanno niente in comune.
 
     python3 tools/noise_scan.py --canale 20 --offsets 400 200 100 50 --seconds 60
+
+Con --scheda lavora sui file di UNA scheda del controllore a schede
+(live-status-<scheda>.json, live-threshold-<scheda>.txt). Per un VX2730B i
+valori sono la soglia in conteggi ADC dalla base (la scheda la tiene relativa
+alla base da se'), non offset di un DAC; a fine scan, anche interrotto, le
+soglie tornano quelle di partenza. Lo lancia tools/scan_scheda.sh.
+
+    python3 tools/noise_scan.py --scheda vx2730 --canale 0 --offsets 100 60 40 30 20
 """
 
 import argparse
@@ -53,10 +61,33 @@ from daqio import count_events, load as carica_run
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 F_ADC = 30e6          # campionamento dell'ADC in Transparent Mode, ~30 MHz
 
+# Soglia dei canali fermi nello scan di un canale, per una scheda a soglia
+# relativa (VX2730B): il massimo che la scheda accetta, 16383 conteggi dalla
+# base, cioe' oltre tutta la dinamica: quei canali non possono scattare.
+PARCHEGGIO_RELATIVO = 16383
+
+# La scheda dello scan, se ce n'e' una (--scheda): decide i nomi dei file di
+# stato e di comando. Globale perche' la usano tutte le funzioni di I/O.
+SCHEDA = None
+
+
+def _nome(base):
+    """live-status.json -> live-status-<scheda>.json, se c'e' una scheda."""
+    if not SCHEDA:
+        return base
+    radice, est = os.path.splitext(base)
+    return "%s-%s%s" % (radice, SCHEDA, est)
+
 
 def status(data_dir):
-    with open(os.path.join(data_dir, "live-status.json")) as f:
+    with open(os.path.join(data_dir, _nome("live-status.json"))) as f:
         return json.load(f)
+
+
+def relativa(st):
+    """True se la soglia e' relativa alla base (VX2730B): la base non si
+    conosce, e la distanza dalla base e' la soglia stessa."""
+    return st.get("threshold_mode") == "relative"
 
 
 def n_events(path):
@@ -75,7 +106,7 @@ def set_offset(data_dir, channels, offset, timeout=15):
 
 def set_offsets(data_dir, offsets, timeout=15):
     """Come set_offset, con un offset per canale: {canale: offset}."""
-    path = os.path.join(data_dir, "live-threshold.txt")
+    path = os.path.join(data_dir, _nome("live-threshold.txt"))
     # La DAQ si accorge del comando dal tempo di modifica del file, che ha la
     # risoluzione del secondo: una seconda scrittura nello stesso secondo non
     # la vede, e il passo aspetterebbe un offset che non arriva mai. Succede
@@ -86,8 +117,10 @@ def set_offsets(data_dir, offsets, timeout=15):
     except OSError:
         pass
     with open(path, "w") as f:
+        # %g: 20.0 si scrive "20". Il VX2730B vuole una soglia intera e
+        # "20.0" potrebbe non prenderlo per tale; il V1742 legge tutti e due.
         for ch, off in offsets.items():
-            f.write(f"{ch} {off}\n")
+            f.write(f"{ch} {off:g}\n")
     t0 = time.time()
     while time.time() - t0 < timeout:
         st = status(data_dir)
@@ -133,7 +166,14 @@ def perche_non_applica(data_dir, offset, timeout):
                 fine = f" Si e' chiusa dopo {m.group(1)} eventi (vedi {os.path.basename(log)})."
         return msg + " La DAQ NON E' PIU' IN ESECUZIONE: la run e' finita." + fine
     try:
-        eta = time.time() - os.path.getmtime(os.path.join(data_dir, "live-status.json"))
+        # Il VX2730B riscrive lo stato solo quando cambia una soglia, non di
+        # continuo come il V1742: la sua eta' non dice se la DAQ e' viva. Il
+        # motivo piu' probabile li' e' un valore che la scheda ha rifiutato,
+        # e lo dice il log della run.
+        if relativa(status(data_dir)):
+            return msg + (" La scheda puo' averlo rifiutato (fuori scala): guarda il log "
+                          "della run, riga \"Live threshold\".")
+        eta = time.time() - os.path.getmtime(os.path.join(data_dir, _nome("live-status.json")))
         if eta > 10:
             return msg + (f" La DAQ gira, ma live-status.json non si aggiorna da {eta:.0f} s: "
                           "e' bloccata, o scrive lo stato in un'altra cartella (OutputDir).")
@@ -147,9 +187,10 @@ def ultimo_log(data_dir):
     return max(logs, key=os.path.getmtime) if logs else None
 
 
-def eventi_previsti(path, n_passi, secondi):
+def eventi_previsti(path, n_passi, secondi, rate_max=1000):
     """Avvisa PRIMA di partire se la run finira' a NEvents a meta' scan.
-    Il conto usa il rate di saturazione, ~1000 Hz: a bassa soglia si va li'."""
+    Il conto usa il rate massimo dello scan (~1000 Hz, la saturazione del
+    V1742): a bassa soglia si va li'."""
     log = path[:-3] + ".log" if path.endswith(".h5") else None
     try:
         n = re.search(r"(?m)^NEvents\s*=\s*(\d+)", open(log, errors="replace").read())
@@ -158,10 +199,10 @@ def eventi_previsti(path, n_passi, secondi):
     if not n:
         return
     restano = int(n.group(1)) - n_events(path)
-    servono = n_passi * (secondi + 2) * 1000
+    servono = int(n_passi * (secondi + 2) * rate_max)
     if restano < servono:
         print(f"ATTENZIONE: alla run restano {restano} eventi prima di NEvents = {n.group(1)}; "
-              f"a rate di saturazione (~1000 Hz) lo scan ne puo' chiedere fino a {servono}.\n"
+              f"a {rate_max:g} Hz lo scan ne puo' chiedere fino a {servono}.\n"
               "            La run potrebbe chiudersi a meta' scan: alza NEvents nel TOML e "
               "riavvia la run.\n")
 
@@ -276,7 +317,7 @@ def scrivi_misura(args, path, st, channels, sigma, rows, iniziali=None, interrot
         "quando": time.strftime("%Y-%m-%d %H:%M:%S"),
         "canali": channels,
         "baseline": {str(int(c["ch"])): c["baseline"] for c in st["channels"]},
-        "sigma_assunto": sigma,
+        "sigma_assunto": None if relativa(st) else sigma,
         "secondi_per_punto": args.seconds,
         "larghezza_fwhm_ns": larghezza_impulsi(path, channels),
         "punti": [{"offset": r[0], "distanza": r[1], "rate": r[2],
@@ -284,6 +325,17 @@ def scrivi_misura(args, path, st, channels, sigma, rows, iniziali=None, interrot
                    "eventi_da": r[5], "eventi_a": r[6]} for r in rows],
     }
     nome = "noise_scan_%s" % time.strftime("%Y%m%d_%H%M%S")
+    if SCHEDA:
+        # Chi legge il JSON mesi dopo deve sapere che unita' ha l'asse: con una
+        # soglia relativa i valori sono conteggi ADC dalla base, non offset.
+        rec.update({"scheda": SCHEDA, "modello": st.get("model"),
+                    "soglia_relativa": relativa(st),
+                    "unita_soglia": ("ADC counts from the baseline" if relativa(st)
+                                     else "offset counts"),
+                    "offset_iniziali": {str(c): o for c, o in (iniziali or {}).items()},
+                    "logica": args.logica, "maggioranza": args.maggioranza,
+                    "interrotto": interrotto})
+        nome += "_" + SCHEDA
     if args.canale is not None:
         # Col segnale acceso il rate "atteso" dal rumore gaussiano non vuol
         # dire niente: resta nei punti per chi legge il formato, ma si dice.
@@ -319,17 +371,56 @@ def main():
                     help="scan di UN canale, col segnale acceso: gli altri canali del "
                          "trigger restano a --parcheggio e a fine scan tornano tutti "
                          "agli offset di partenza")
-    ap.add_argument("--parcheggio", type=float, default=4095,
+    ap.add_argument("--parcheggio", type=float, default=None,
                     help="offset dei canali fermi con --canale (default 4095: la soglia "
-                         "va al massimo del registro e quei canali non scattano)")
+                         "va al massimo del registro e quei canali non scattano; con una "
+                         "scheda a soglia relativa %d conteggi)" % PARCHEGGIO_RELATIVO)
+    ap.add_argument("--scheda", default=None,
+                    help="la scheda del controllore a schede: file di stato e di comando "
+                         "con il suo nome (live-status-<scheda>.json)")
+    ap.add_argument("--logica", default=None,
+                    help="logica del trigger della scheda (OR, AND, Majority), solo da "
+                         "registrare nel JSON: il rate di tutti i canali insieme e' quello")
+    ap.add_argument("--maggioranza", type=int, default=None,
+                    help="livello di maggioranza, con --logica Majority (solo registrato)")
+    ap.add_argument("--rate-max", type=float, default=None,
+                    help="rate oltre il quale lo scan si ferma [Hz] (default 5000; 20000 "
+                         "con una scheda a soglia relativa)")
     args = ap.parse_args()
 
-    files = glob.glob(os.path.join(args.data_dir, "*.h5"))
-    if not files:
-        sys.exit(f"Nessuna run in corso: nessun file .h5 in {args.data_dir}")
-    path = max(files, key=os.path.getmtime)
+    global SCHEDA
+    SCHEDA = args.scheda
+    try:
+        st = status(args.data_dir)
+    except OSError as e:
+        sys.exit(f"Non trovo lo stato della DAQ: {e}")
+    rel = relativa(st)
+    if args.parcheggio is None:
+        args.parcheggio = PARCHEGGIO_RELATIVO if rel else 4095
+    rate_max = args.rate_max or (20000 if rel else 5000)
 
-    st = status(args.data_dir)
+    # Il file dei dati: quello che la scheda dichiara nel suo stato. Nella
+    # cartella ci sono anche i file delle altre schede dello stesso run, e il
+    # piu' recente potrebbe essere di un'altra.
+    if SCHEDA and st.get("file"):
+        path = os.path.join(args.data_dir, st["file"])
+        if not os.path.exists(path):
+            sys.exit(f"La scheda {SCHEDA} dichiara il file {st['file']}, che in "
+                     f"{args.data_dir} non c'e'.")
+    else:
+        files = glob.glob(os.path.join(args.data_dir, f"*_{SCHEDA}_*.h5" if SCHEDA else "*.h5"))
+        if not files:
+            sys.exit(f"Nessuna run in corso: nessun file .h5 in {args.data_dir}")
+        path = max(files, key=os.path.getmtime)
+
+    if rel:
+        # Una soglia relativa si scrive in conteggi interi, e la scheda rifiuta
+        # quello che esce dalla dinamica: meglio dirlo prima del primo punto.
+        for v in args.offsets + [args.parcheggio]:
+            if v != int(v) or not 1 <= v <= PARCHEGGIO_RELATIVO:
+                sys.exit(f"Soglia {v:g}: per {st.get('model', 'questa scheda')} serve un "
+                         f"intero fra 1 e {PARCHEGGIO_RELATIVO} (conteggi ADC dalla base).")
+
     tutti = [int(c["ch"]) for c in st["channels"]]
     iniziali = {int(c["ch"]): c["offset"] for c in st["channels"]}
     if args.canale is not None and args.canale not in tutti:
@@ -342,29 +433,44 @@ def main():
     # della run. Se si sposta fra una run e l'altra -- per esempio perche' e'
     # cambiata la corrente di anodo -- distanze nominalmente uguali non lo sono.
     print(f"file   : {os.path.basename(path)}")
-    print(f"canali : {channels}      sigma assunto: {sigma} conteggi")
-    print("baseline all'avvio della run (da live-status.json):")
-    for c in st["channels"]:
-        print(f"   ch{int(c['ch'])}: {c['baseline']:.3f}")
+    if rel:
+        print(f"scheda : {SCHEDA} ({st.get('model', '?')}), soglia relativa alla base "
+              f"in conteggi ADC, fronte {st.get('polarity', '?')}")
+        print(f"canali : {channels}")
+    else:
+        print(f"canali : {channels}      sigma assunto: {sigma} conteggi")
+        print(f"baseline all'avvio della run (da {_nome('live-status.json')}):")
+        for c in st["channels"]:
+            print(f"   ch{int(c['ch'])}: {c['baseline']:.3f}")
     print()
-    eventi_previsti(path, len(args.offsets), args.seconds)
-    if args.canale is None:
+    eventi_previsti(path, len(args.offsets), args.seconds, 10000 if rel else 1000)
+    # Le soglie si rimettono come erano anche nello scan di tutti i canali,
+    # per una scheda: col VX2730B non c'e' una misura del piedistallo che
+    # le ricalcoli al run dopo, e la run resterebbe all'ultimo punto.
+    ripristina = args.canale is not None or SCHEDA is not None
+    if args.canale is not None:
+        fermi = [c for c in tutti if c != args.canale]
+        print(f"scan del solo ch{args.canale}: {', '.join('ch%d' % c for c in fermi)} "
+              f"a {'soglia' if rel else 'offset'} {args.parcheggio:g}")
+    elif not rel:
         print("ATTENZIONE: il segnale deve essere spento. Se i PMT sono attivi,")
         print("            quello che misuri e' segnale piu' rumore.\n")
     else:
-        fermi = [c for c in tutti if c != args.canale]
-        print(f"scan del solo ch{args.canale}: {', '.join('ch%d' % c for c in fermi)} "
-              f"a offset {args.parcheggio:g}")
-        print("offset di partenza, rimessi a fine scan: "
+        print("tutti i canali del trigger insieme, con la stessa soglia")
+    if ripristina:
+        print(("soglie" if rel else "offset") + " di partenza, rimesse a fine scan: "
               + ", ".join(f"ch{c} {o:g}" for c, o in iniziali.items()) + "\n")
         # SIGTERM e' quello che manda "Stop scan" della pagina di controllo:
         # deve passare dal ripristino degli offset come la fine normale, se no
         # la run resta con quattro canali su cinque spenti.
         signal.signal(signal.SIGTERM, lambda *_: sys.exit("scan interrotto (SIGTERM)"))
     # Col segnale acceso il modello del rumore non c'entra: le sue due colonne
-    # sarebbero numeri senza significato accanto a quelli misurati.
-    rumore = args.canale is None
-    print(f"  {'offset':>7} {'soglie':>13} {'distanza':>10} {'rate misurato':>16} "
+    # sarebbero numeri senza significato accanto a quelli misurati. Nemmeno
+    # con il VX2730B: il modello e' quello del comparatore del V1742, che
+    # campiona a ~30 MHz in Transparent Mode.
+    rumore = args.canale is None and not rel
+    print(f"  {'soglia' if rel else 'offset':>7} {'scritte' if rel else 'soglie':>13} "
+          f"{'distanza':>10} {'rate misurato':>16} "
           + (f"{'atteso':>11} {'sigma implicito':>16}" if rumore else f"{'eventi':>9}"))
 
     rows = []
@@ -377,9 +483,10 @@ def main():
             # piantato: la tabella stampa una riga solo a punto FINITO, e con
             # 20 s per punto sono venti secondi di silenzio.
             quale = "" if args.canale is None else f"ch{args.canale} "
-            print(f"[punto {k}/{len(args.offsets)}] {quale}offset {off:g}", flush=True)
+            print(f"[punto {k}/{len(args.offsets)}] {quale}{'threshold' if rel else 'offset'} "
+                  f"{off:g}", flush=True)
             if args.canale is None:
-                applied = set_offset(args.data_dir, channels, off)
+                applied = set_offset(args.data_dir, channels, int(off) if rel else off)
             else:
                 applied = set_offsets(args.data_dir, {c: (off if c == args.canale
                                                           else args.parcheggio)
@@ -393,7 +500,10 @@ def main():
             # 3e7 Hz su tutta la riga, mentre il sigma implicito non si poteva
             # nemmeno calcolare. Il verso e' registrato altrove (campo
             # "polarity" di live-status.json), qui non aggiunge niente.
-            dists = [abs(applied[ch][0] - applied[ch][1]) for ch in channels]
+            # Con la soglia relativa la base non si conosce (null): la distanza
+            # dalla base e' la soglia stessa.
+            dists = [abs(applied[ch][1]) if applied[ch][0] is None
+                     else abs(applied[ch][0] - applied[ch][1]) for ch in channels]
 
             if thr == prev_thr:
                 print(f"  {off:7g} {str(thr):>13}   COLLASSA sulla soglia precedente, salto")
@@ -424,23 +534,23 @@ def main():
                   + (f"{exp_s:>11} {sfit_s}" if rumore else f"{counts:9d}"), flush=True)
             rows.append((off, np.mean(dists), rate, exp, counts, start, start + counts))
 
-            if rate > 5000:
-                print("     rate molto alto: mi fermo qui per non intasare la DAQ")
+            if rate > rate_max:
+                print(f"     rate oltre {rate_max:g} Hz: mi fermo qui per non intasare la DAQ")
                 break
     except (SystemExit, KeyboardInterrupt) as e:
-        if args.canale is None:
+        if not ripristina:
             raise
         interrotto = e
     finally:
-        if args.canale is not None:
+        if ripristina:
             try:
                 set_offsets(args.data_dir, iniziali)
-                print("offset di partenza rimessi: "
+                print(("soglie di partenza rimesse: " if rel else "offset di partenza rimessi: ")
                       + ", ".join(f"ch{c} {o:g}" for c, o in iniziali.items()), flush=True)
             except SystemExit as e:
                 print(f"ATTENZIONE: offset di partenza NON rimessi. {e.code}", flush=True)
 
-    if args.canale is not None:
+    if ripristina:
         # I punti misurati valgono anche se lo scan e' stato interrotto: si
         # registrano, e il JSON dice che il canale non e' completo.
         if rows:

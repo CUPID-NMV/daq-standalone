@@ -124,6 +124,14 @@ SCAN = {
         "opzione": "-t",
         "serve_run": False,  # ogni punto e' una run sua: la DAQ deve essere ferma
     },
+    # Il self-trigger di UNA scheda del controllore a schede (VX2730B, o un
+    # V1742 con --board): come quello del V1742, a run in corso.
+    "scheda": {
+        "script": os.path.join(ROOT, "tools", "scan_scheda.sh"),
+        "etichetta": "self-trigger",
+        "opzione": "-o",
+        "serve_run": True,
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -2223,7 +2231,9 @@ class Controllo:
             s["scan"] = {
                 "avanzamento": self.avanzamento_scan(),
                 "tipo": scan["tipo"],
-                "etichetta": SCAN[scan["tipo"]]["etichetta"],
+                # .get: un tipo che questo controllore non conosce (uno script
+                # piu' nuovo di lui) non deve buttare giu' la pagina intera.
+                "etichetta": SCAN.get(scan["tipo"], {}).get("etichetta", scan["tipo"]),
                 "valori": scan.get("valori"),
                 "secondi": scan.get("secondi"),
                 "da_secondi": round(time.time() - scan.get("avviato", time.time()), 1),

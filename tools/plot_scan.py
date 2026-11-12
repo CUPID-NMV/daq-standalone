@@ -44,7 +44,7 @@ MV_PER_OFFSET = {"2.5Gs": 3.5, "1Gs": 2.7}
 # 1 GS/s, per un meccanismo che non e' capito, quindi non si interpola.
 # Tenendole insieme, un tag senza calibrazione sembrava un nome di file
 # illeggibile e lo scan non si disegnava affatto.
-TAG_FREQUENZA = ["5Gs", "2.5Gs", "1Gs", "750Ms"]
+TAG_FREQUENZA = ["5Gs", "2.5Gs", "1Gs", "750Ms", "500Ms"]
 
 # Il colore distingue le SERIE, non lo strumento: due scan dello stesso
 # modulo -- per esempio un canale per volta -- devono avere colori diversi, se
@@ -58,8 +58,8 @@ TAG_FREQUENZA = ["5Gs", "2.5Gs", "1Gs", "750Ms"]
 PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100",
            "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
 
-MARKER = {"v1742": "o", "v812": "s"}
-TRATTO = {"v1742": "-", "v812": "--"}
+MARKER = {"v1742": "o", "v812": "s", "dig2": "D"}
+TRATTO = {"v1742": "-", "v812": "--", "dig2": "-"}
 INCHIOSTRO = "#52514e"
 
 
@@ -361,6 +361,28 @@ def leggi(path, mv_per_offset_forzato):
         nota = "V812 CFD   %s" % _canali(d.get("canali"), d.get("maggioranza", 1))
         return "v812", x, y, lim, nota, d, "mV"
 
+    # Una scheda a soglia relativa (VX2730B, noise_scan.py --scheda): la
+    # soglia e' gia' in conteggi ADC dalla base, misurati dalla scheda stessa.
+    # E' un'altra grandezza dagli offset del DAC del V1742, quindi un'altra
+    # unita': i due non finiscono sullo stesso asse.
+    if d.get("soglia_relativa"):
+        dist = np.abs(np.array([p["distanza"] for p in punti], dtype=float))
+        y = np.array([max(p["rate"], 0.0) for p in punti], dtype=float)
+        lim = np.array([p.get("conteggi", 1) == 0 for p in punti])
+        # La logica del trigger la scrive scan_scheda.sh: col VX2730B il rate
+        # di tutti i canali insieme puo' essere un AND, e "OR" lo direbbe falso.
+        c = d.get("canali") or []
+        logica = str(d.get("logica") or "OR").upper()
+        if len(c) > 1 and logica == "AND":
+            quali = "AND of ch %s" % ", ".join(str(x) for x in c)
+        elif len(c) > 1 and logica == "MAJORITY":
+            quali = "%s-fold of ch %s" % (d.get("maggioranza", "?"), ", ".join(str(x) for x in c))
+        else:
+            quali = _canali(c)
+        nota = "%s self-trigger   %s   (%s)" % (d.get("modello") or d.get("scheda") or "?",
+                                               quali, leggibile(frequenza(d.get("file", ""))))
+        return "dig2", dist, y, lim, nota, d, "ADC"
+
     # formato di noise_scan.py: soglia in conteggi di offset
     tag = frequenza(d.get("file", ""))
     # In conteggi di offset sempre, SiPM e PMT, salvo una conversione chiesta
@@ -479,6 +501,12 @@ def main():
         if note.count(s[4]) > 1:
             quando = (s[5].get("quando") or "")[5:16].replace("-", "/")
             serie[i] = s[:4] + (s[4] + ("   [%s]" % quando if quando else "   [%d]" % (i + 1)),) + s[5:]
+
+    if args.per_channel and any(s[0] == "dig2" for s in serie):
+        raise SystemExit("Il conteggio per canale ricostruisce l'ampiezza con la "
+                         "calibrazione del V1742: per il VX2730B non c'e' ancora. "
+                         "Lo scan un canale alla volta (scan_scheda.sh -c) da' gia' "
+                         "una curva per canale.")
 
     if args.per_channel and any(s[0] == "v812" for s in serie):
         # Per il V812 "per canale" vuol dire CHI ha fatto scattare il trigger
@@ -630,6 +658,12 @@ def main():
                           % (dove, args.mv_per_offset, come))
         else:
             ax.set_xlabel("threshold  [mV at %s]" % dove)
+    elif unita == "ADC":
+        # Conteggi dell'ADC, non millivolt: la soglia effettiva del VX2730B non
+        # e' quella scritta e cambia da canale a canale (misurato il
+        # 2026-11-11 sul rumore), quindi i mV nominali sarebbero un numero
+        # piu' preciso di quanto si sa.
+        ax.set_xlabel("threshold from baseline  [ADC counts, as written]")
     else:
         # Si dice "from baseline" perche' e' una distanza, non una soglia
         # assoluta: il piedistallo sta scritto nel JSON di ogni scan.

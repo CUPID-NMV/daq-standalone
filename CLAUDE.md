@@ -1195,6 +1195,24 @@ Gran Sasso: a Frascati non c'e'.
     del Mac): nessuna modifica fantasma all'apertura, valori giusti nel file.
     **Senza `[boards]` tutto come prima.** Col V1742 vero si prova solo al
     Gran Sasso.
+- **Il disco del notebook si e' riempito il 2026-11-12** (468 GB, 0 liberi):
+  il run 0009 del 2730, 31 milioni di eventi di buio dei PMT a ~5 kHz in OR,
+  era di 129 GB, e lo 0012 ha riempito il resto fino a fermarsi. **Un
+  salvataggio dalla pagina ha lasciato `run-local.toml` e il suo backup a zero
+  byte**: il controllore scriveva il file direttamente, l'apertura lo svuota e
+  l'errore di spazio arrivava alla chiusura implicita, dove Python lo ignora;
+  la pagina e' tornata alla modalita' a scheda singola con tutte le chiavi
+  "not in the file". Rimesso dal backup delle 15:14 (piu' la modifica di quel
+  salvataggio, dal registro delle azioni); 0009 e 0012 cancellati su richiesta
+  dell'utente, i loro `.log` restano. Da allora TOML, backup e `coda.json` si
+  scrivono con `scrivi_sicuro` (temporaneo, fsync, lunghezza, rename: col
+  disco pieno il file resta com'era e la pagina lo dice), la fine di una coda
+  non rimette un backup vuoto, e **`nomi.prossimo_numero` conta anche i
+  `.log`**, perche' cancellati i dati di un run il numero non torni a lui
+  (vale col MultiBoard, dove il numero lo da' il controllore; la DAQ da sola
+  conta ancora i soli dati). **Nessuno controlla lo spazio libero** prima o
+  durante un run: in `TODO.md`. A 5 kHz e 2 canali da 1024 campioni il 2730
+  scrive ~20 MB/s, 70 GB all'ora.
 - `notifiche.esito_run` prende per un errore ogni riga della **console** che
   contiene "Error": "ErrorFlags 0" nel riassunto del 2730 l'ha fatto (mail
   falsa su un run finito bene). Ora la DAQ scrive "error flags".

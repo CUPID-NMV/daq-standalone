@@ -82,12 +82,15 @@ def prefisso(base, et):
 def prossimo_numero(cartella, prefisso):
     """Il numero del prossimo run col prefisso dato.
 
-    La stessa regola della DAQ (Digitizer::PrepareOutput): i file di DATI
-    della cartella che cominciano con "<prefisso>_" e contengono ".h5", le
-    quattro cifre subito dopo il prefisso, il massimo piu' uno. Con piu' schede
-    il numero lo da' il controllore a tutte (--run): contando i file ognuna lo
-    calcolerebbe a seconda di chi ha gia' creato il suo. I file di tutte le
-    schede contano, perche' il nome della scheda viene DOPO il numero.
+    La regola della DAQ (Digitizer::PrepareOutput) -- i file della cartella
+    che cominciano con "<prefisso>_", le quattro cifre subito dopo il
+    prefisso, il massimo piu' uno -- ma contando anche i .log, non solo i file
+    di DATI: cancellati i dati di un run (il 2026-11-12, per liberare il disco
+    del notebook), la DAQ ridarebbe il suo numero al run dopo e ne
+    sovrascriverebbe il .log. Con piu' schede il numero lo da' il controllore a
+    tutte (--run): contando i file ognuna lo calcolerebbe a seconda di chi ha
+    gia' creato il suo. I file di tutte le schede contano, perche' il nome
+    della scheda viene DOPO il numero.
     """
     import os
     massimo = -1
@@ -97,7 +100,7 @@ def prossimo_numero(cartella, prefisso):
         return 0
     testa = prefisso + "_"
     for n in nomi_file:
-        if not n.startswith(testa) or ".h5" not in n:
+        if not n.startswith(testa) or (".h5" not in n and not n.endswith(".log")):
             continue
         cifre = n[len(testa):len(testa) + 4]
         if len(cifre) == 4 and cifre.isdigit():

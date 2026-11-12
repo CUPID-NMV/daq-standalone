@@ -941,6 +941,35 @@ def percorso_grafico(nome):
     return percorso if os.path.isfile(percorso) else None
 
 
+def scrivi_sicuro(percorso, testo):
+    """Scrive il file intero o non lo tocca: in un temporaneo accanto, fsync,
+    controllo della lunghezza, poi lo sostituisce.
+
+    Il 2026-11-12, col disco del notebook pieno, un salvataggio dalla pagina
+    ha lasciato run-local.toml E il suo backup a zero byte: aprire in "w"
+    svuota il file prima di scriverci, e l'errore di spazio arrivava alla
+    chiusura implicita, dove Python lo ignora. La pagina ha detto "Saved" e il
+    controllore e' ripartito senza configurazione."""
+    d = os.path.dirname(os.path.abspath(percorso))
+    tmp = os.path.join(d, ".%s.tmp-%d" % (os.path.basename(percorso), os.getpid()))
+    dati = testo.encode("utf-8")
+    try:
+        with open(tmp, "wb") as f:
+            f.write(dati)
+            f.flush()
+            os.fsync(f.fileno())
+        if os.path.getsize(tmp) != len(dati):
+            raise OSError("%s: written %d bytes instead of %d"
+                          % (os.path.basename(percorso), os.path.getsize(tmp), len(dati)))
+        os.replace(tmp, percorso)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def trova_scan():
     """Lo scan in corso, oppure None.
 
@@ -1693,11 +1722,13 @@ class Controllo:
             while os.path.exists(backup):
                 backup = "%s.%d" % (base, n)
                 n += 1
+            # Prima il backup, poi il file: se il backup non si scrive (disco
+            # pieno) il TOML non si tocca.
             try:
-                io.open(backup, "w", encoding="utf-8").write(testo)
-                io.open(self.toml, "w", encoding="utf-8").write(nuovo)
+                scrivi_sicuro(backup, testo)
+                scrivi_sicuro(self.toml, nuovo)
             except OSError as e:
-                return False, "Write failed: %s" % e, []
+                return False, "Write failed, the TOML is unchanged: %s" % e, []
 
             messaggio = "Saved. Backup in %s" % os.path.basename(backup)
             if avvisi:
@@ -2356,8 +2387,7 @@ class Controllo:
 
     def _scrivi_coda(self, d):
         try:
-            with open(CODA, "w") as f:
-                json.dump(d, f, indent=1)
+            scrivi_sicuro(CODA, json.dumps(d, indent=1))
         except OSError:
             pass
 
@@ -2485,9 +2515,9 @@ class Controllo:
         except Exception as e:
             return False, "Invalid TOML: %s" % e
         try:
-            io.open(self.toml, "w", encoding="utf-8").write(nuovo)
+            scrivi_sicuro(self.toml, nuovo)
         except OSError as e:
-            return False, str(e)
+            return False, "Write failed, the TOML is unchanged: %s" % e
         return True, ""
 
     def coda_avvia(self):
@@ -2506,8 +2536,10 @@ class Controllo:
 
             backup = "%s.bak-coda-%s" % (self.toml, time.strftime("%Y%m%d-%H%M%S"))
             try:
-                io.open(backup, "w", encoding="utf-8").write(
-                    io.open(self.toml, encoding="utf-8").read())
+                attuale = io.open(self.toml, encoding="utf-8").read()
+                if not attuale.strip():
+                    return False, "The TOML is empty: restore it before starting a queue."
+                scrivi_sicuro(backup, attuale)
             except OSError as e:
                 return False, "Cannot back up the TOML: %s" % e
 
@@ -2538,11 +2570,17 @@ class Controllo:
                     v["stato"] = "interrupted"
             b = d.get("backup_toml")
             if b and os.path.exists(b):
+                # Un backup vuoto o rotto non si rimette: svuoterebbe il TOML.
                 try:
-                    io.open(self.toml, "w", encoding="utf-8").write(
-                        io.open(b, encoding="utf-8").read())
-                except OSError:
-                    d["messaggio"] += "  (WARNING: could not restore the TOML)"
+                    import tomllib
+                    vecchio = io.open(b, encoding="utf-8").read()
+                    tomllib.loads(vecchio)
+                    if not vecchio.strip():
+                        raise ValueError("empty backup")
+                    scrivi_sicuro(self.toml, vecchio)
+                except Exception as e:
+                    d["messaggio"] += "  (WARNING: could not restore the TOML from %s: %s)" % (
+                        os.path.basename(b), e)
             d["backup_toml"] = None
             sessione, avviata = d.get("sessione") or [], d.get("avviata")
             d["sessione"] = []

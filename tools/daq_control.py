@@ -41,6 +41,7 @@ import re
 import json
 import os
 import shlex
+import shutil
 import signal
 import socket
 import subprocess
@@ -110,6 +111,17 @@ ARCHIVIO_OGNI_S = 600
 # --stato --json, un secondo di lavoro): per la barra della pagina e per gli
 # allarmi, che scattano mezz'ora dopo la fine di una run (tools/notifiche.py).
 CLOUD_OGNI_S = 120
+
+# Lo spazio sul disco. Il 2026-11-12 un run del VX2730B (31 milioni di eventi
+# di buio dei PMT, 129 GB) ha riempito il disco del notebook, e col disco pieno
+# un salvataggio della pagina ha svuotato il TOML. Sotto SPAZIO_AVVIO_GB un run
+# non parte e, a run in corso, parte un avviso; sotto SPAZIO_FERMA_GB scan, coda
+# e run si fermano, con la mail. Si cambiano in [settings] (MinFreeGBStart,
+# MinFreeGBStop). Con 5 GB e un controllo ogni SPAZIO_OGNI_S secondi resta
+# margine: a ~20 MB/s (VX2730B a 5 kHz, due canali) 20 s sono 400 MB.
+SPAZIO_AVVIO_GB = 20.0
+SPAZIO_FERMA_GB = 5.0
+SPAZIO_OGNI_S = 20
 
 SCAN = {
     "v1742": {
@@ -1466,6 +1478,9 @@ class Controllo:
         # --senza-archivio, perche' leggerlo non tocca niente.
         self.cloud = None
         threading.Thread(target=self._guarda_cloud, daemon=True).start()
+        self.disco = None         # l'ultimo controllo dello spazio, per la pagina
+        self._storia_disco = []   # [(istante, GB liberi)] degli ultimi minuti, per la stima
+        threading.Thread(target=self._guarda_spazio, daemon=True).start()
         # Un filo che guarda la fine delle run per conto suo. Non basta
         # accorgersene dentro stato(): quello gira solo quando qualcuno ha la
         # pagina aperta, e allora l'e-log si aggiornerebbe solo se c'e'
@@ -1934,6 +1949,120 @@ class Controllo:
                 print("notifiche: cloud: %s" % e, flush=True)
             time.sleep(CLOUD_OGNI_S)
 
+    # -- spazio sul disco ----------------------------------------------------
+    def soglie_spazio(self):
+        """(GB per avviare, GB sotto cui fermare), da [settings] o di serie."""
+        try:
+            import tomllib
+            with open(self.toml, "rb") as f:
+                st = tomllib.load(f).get("settings", {})
+        except Exception:
+            st = {}
+        try:
+            avvio = float(st.get("MinFreeGBStart", SPAZIO_AVVIO_GB))
+            ferma = float(st.get("MinFreeGBStop", SPAZIO_FERMA_GB))
+        except (TypeError, ValueError):
+            avvio, ferma = SPAZIO_AVVIO_GB, SPAZIO_FERMA_GB
+        return avvio, min(ferma, avvio)
+
+    def spazio_libero(self):
+        """(GB liberi, cartella) del disco piu' pieno fra quelli dove si scrive:
+        data/ del controllore e l'OutputDir di [digitizer] e di ogni scheda.
+        Una cartella che non c'e' ancora conta col disco di quella sopra."""
+        cartelle = [os.path.join(ROOT, "data")]
+        try:
+            import tomllib
+            with open(self.toml, "rb") as f:
+                d = tomllib.load(f)
+            for t in [d.get("digitizer", {})] + list((d.get("boards") or {}).values()):
+                if isinstance(t, dict) and t.get("OutputDir"):
+                    c = str(t["OutputDir"])
+                    cartelle.append(c if os.path.isabs(c) else os.path.join(ROOT, c))
+        except Exception:
+            pass
+        peggio = (None, None)
+        for c in cartelle:
+            while c and not os.path.isdir(c) and os.path.dirname(c) != c:
+                c = os.path.dirname(c)
+            try:
+                libero = shutil.disk_usage(c).free / 1e9
+            except OSError:
+                continue
+            if peggio[0] is None or libero < peggio[0]:
+                peggio = (libero, c)
+        return peggio
+
+    def _guarda_spazio(self):
+        """Ogni SPAZIO_OGNI_S: lo spazio libero per la pagina, e a run in corso
+        l'avviso sotto la soglia d'avvio e l'arresto sotto quella di fermata."""
+        time.sleep(10)
+        while True:
+            try:
+                libero, dove = self.spazio_libero()
+                avvio, ferma = self.soglie_spazio()
+                ora = time.time()
+                if libero is not None:
+                    self._storia_disco = [(t, g) for t, g in self._storia_disco if ora - t < 900] + [(ora, libero)]
+                self.disco = {"libero_gb": libero, "cartella": dove, "avvio_gb": avvio,
+                              "ferma_gb": ferma, "gb_ora": self._consumo_disco()}
+                if libero is not None and trova_daq_tutte():
+                    if libero < ferma:
+                        self._ferma_per_spazio(libero, dove, ferma)
+                    elif libero < avvio:
+                        self._avviso_spazio(libero, dove, avvio, ferma)
+            except Exception as e:
+                print("spazio sul disco: %s" % e, flush=True)
+            time.sleep(SPAZIO_OGNI_S)
+
+    def _consumo_disco(self):
+        """GB all'ora che se ne vanno, dagli ultimi minuti; None se non si sa."""
+        h = self._storia_disco
+        if len(h) < 2 or h[-1][0] - h[0][0] < 120:
+            return None
+        return (h[0][1] - h[-1][1]) / (h[-1][0] - h[0][0]) * 3600
+
+    def _avviso_spazio(self, libero, dove, avvio, ferma):
+        # Una volta ogni ripeti_hw_min, qui e non solo in notifiche.manda: la
+        # sua attesa vale solo se qualcuno e' iscritto, e senza iscritti lo
+        # storico delle mail prendeva una voce ogni SPAZIO_OGNI_S.
+        ora = time.time()
+        if ora - getattr(self, "_avviso_disco_t", 0) < 60 * self.notifiche.cfg["ripeti_hw_min"]:
+            return
+        self._avviso_disco_t = ora
+        consumo = self._consumo_disco()
+        quando = ""
+        if consumo and consumo > 0:
+            quando = (" At the current rate (%.1f GB per hour) that is in about %.0f minutes."
+                      % (consumo, (libero - ferma) / consumo * 60))
+        corpo = ("Only %.1f GB are free on the disk of %s, below the %g GB needed to start a run.\n\n"
+                 "The run in progress goes on, and will be stopped when the free space falls under "
+                 "%g GB.%s\n\nFree some space (old runs, after they are on the cloud) or stop the run.\n\n"
+                 "Controller: %s\n" % (libero, dove, avvio, ferma, quando,
+                                        notifiche.indirizzo_pagina(self.notifiche.porta)))
+        self.notifiche.manda(("hw",), notifiche.PREFISSO + " HARDWARE \u2014 disk below %g GB, "
+                             "the run will be stopped at %g GB" % (avvio, ferma), corpo, chiave="disco/poco")
+
+    def _ferma_per_spazio(self, libero, dove, ferma):
+        """Ferma scan, coda e run, in quest'ordine: lo scan e la coda prima,
+        perche' rifiuterebbero di lasciar fermare la run sotto di loro."""
+        fatto = []
+        if trova_scan():
+            fatto.append("scan: " + self.ferma_scan()[1])
+        if self.coda_attiva():
+            fatto.append("queue: " + self.coda_ferma()[1])
+        if trova_daq_tutte():
+            fatto.append("run: " + self.ferma(da_coda=True)[1])
+        esito = "%.1f GB free on %s, under %g GB: %s" % (libero, dove, ferma, "; ".join(fatto) or "nothing to stop")
+        registra("controller", "disk check", "stopped for disk space", esito)
+        print("spazio sul disco: " + esito, flush=True)
+        corpo = ("Only %.1f GB were free on the disk of %s, under the %g GB limit: the controller "
+                 "stopped what was running.\n\n%s\n\nA new run will not start until there are "
+                 "%g GB free.\n\nController: %s\n"
+                 % (libero, dove, ferma, "\n".join(fatto), self.soglie_spazio()[0],
+                    notifiche.indirizzo_pagina(self.notifiche.porta)))
+        self.notifiche.manda(("hw",), notifiche.PREFISSO + " HARDWARE \u2014 disk almost full: run stopped",
+                             corpo, chiave="disco/pieno")
+
     def _segui_run(self, pid, scheda=None):
         """Annota, a run viva, dove scrive: quando sara' morta non si potra' piu'.
 
@@ -2280,6 +2409,7 @@ class Controllo:
              "psu_ampli": self.psu_ampli.stato() if self.psu_ampli else None,
              "notifiche": self.notifiche.stato(),
              "cloud": notifiche.pagina_cloud(self.cloud, 60 * self.notifiche.cfg["cloud_ritardo_min"]),
+             "disco": self.disco,
              "versione": VERSIONE_PAGINA}
         if scan:
             s["scan"] = {
@@ -2650,6 +2780,13 @@ class Controllo:
                 segna(stato="failed", messaggio=errore)
                 continue
 
+            libero, _ = self.spazio_libero()
+            if libero is not None and libero < self.soglie_spazio()[0]:
+                # Ogni voce fallirebbe allo stesso modo in un attimo: meglio
+                # fermare la coda e lasciare le voci da fare com'erano.
+                segna(stato="pending", messaggio="")
+                self._chiudi_coda("Queue stopped: only %.1f GB free on the disk." % libero)
+                return
             with self.lock:
                 avviata, messaggio = self._avvia(da_coda=True)
             if not avviata:
@@ -2952,6 +3089,17 @@ class Controllo:
             return False, "Binary not found: %s" % BINARIO
         if not os.path.exists(self.toml):
             return False, "Configuration not found: %s" % self.toml
+        try:
+            if not open(self.toml, "rb").read().strip():
+                return False, "The configuration file is empty: %s" % self.toml
+        except OSError as e:
+            return False, "Cannot read %s: %s" % (self.toml, e)
+        libero, dove = self.spazio_libero()
+        avvio, _ = self.soglie_spazio()
+        if libero is not None and libero < avvio:
+            return False, ("Only %.1f GB free on the disk of %s: a run starts with at least %g GB "
+                           "([settings] MinFreeGBStart). Free some space first: at ~5 kHz the VX2730B "
+                           "writes ~70 GB an hour." % (libero, dove, avvio))
         # La tensione dei SiPM nel nome del file, prima di partire: dopo non
         # si puo' piu', il nome la DAQ lo compone una volta sola.
         prefisso = self._scrivi_prefisso_hv()
@@ -3346,6 +3494,8 @@ PAGINA = r"""<!doctype html>
     <!-- Il cloud accanto all'alimentazione, per la stessa ragione: le run che
          non arrivano sul cloud devono vedersi entrando, non in fondo alla pagina. -->
     <span id="cloud" class="alim spento" style="display:none;cursor:help"></span>
+    <!-- Lo spazio sul disco: compare solo quando comincia a mancare. -->
+    <span id="disco" class="alim spento" style="display:none;cursor:help"></span>
     <label style="margin-left:auto;color:#6b6a65">who are you
       <input id="chi" placeholder="your name" style="width:140px">
     </label>
@@ -3412,6 +3562,11 @@ PAGINA = r"""<!doctype html>
       </label>
       <button id="applica" style="background:#ececea;margin-left:6px">Apply now</button>
     </div>
+    <!-- Con le schede: lo scan di ogni scheda nella sua linguetta, sotto
+         "Apply now" (richiesta dell'utente del 2026-11-12, proposta
+         proposta-scan-linguette.png). Lo disegna disegnaScanSchede(), se ne
+         vede uno solo, quello della linguetta aperta. -->
+    <div id="cfgscan" style="display:none"></div>
   </div>
   <div class="colonna">
   <div class="box" id="b_run"><h2>Current run<span class="riass"></span></h2><table id="run"></table></div>
@@ -3516,12 +3671,11 @@ PAGINA = r"""<!doctype html>
 
 <div class="box" id="b_scan"><h2>Threshold scan<span class="riass"></span></h2>
   <div id="scanstato" style="margin-bottom:10px"></div>
-  <!-- Con le schede (MultiBoard): un blocco per scheda spuntata che usa il
-       self-trigger, ciascuno con le sue unita' (conteggi ADC dalla base per il
-       VX2730B, offset per un V1742). Lo disegna disegnaScanSchede(). Senza
-       schede si vedono i due scan di sempre, qui sotto. -->
-  <div id="scanschede" style="display:none"></div>
-  <div id="scanschedepiede" style="display:none;font-size:11px;color:#6b6a65;margin-top:10px"></div>
+  <!-- Con le schede (MultiBoard) gli scan si avviano dalla linguetta della
+       loro scheda in Configuration; qui restano stato, log e Stop scan, che
+       si devono vedere qualunque linguetta sia aperta. Senza schede si vedono
+       i due scan di sempre, qui sotto. -->
+  <div id="scanschedepiede" style="display:none;font-size:12px;color:#6b6a65;margin-top:2px"></div>
   <div id="scanclassico" style="display:flex;gap:22px;flex-wrap:wrap">
     <div>
       <div style="font-size:12px;color:#6b6a65;margin-bottom:4px">V1742 self-trigger &mdash; offsets</div>
@@ -3909,6 +4063,7 @@ async function aggiorna(){
   aggiornaAmpli(s.psu_ampli);
   avvisoAlimentazione(s);
   aggiornaCloud(s.cloud);
+  aggiornaDisco(s.disco);
 
   // Riepiloghi nei titoli: chiuso, il pannello dice ancora la cosa per cui lo
   // si sarebbe aperto.
@@ -4399,7 +4554,14 @@ function nCanaliModello(m){
 }
 function idD2(nome, k, ch){ return "d2_" + nome + "_" + k + "_" + ch; }
 
+let TAB = "comune";      // la linguetta aperta della configurazione
+function mostraScanTab(){
+  for(const el of document.querySelectorAll("#cfgscan > div"))
+    el.style.display = el.dataset.scheda === TAB ? "" : "none";
+}
 function mostraTab(t){
+  TAB = t;
+  mostraScanTab();
   try{ localStorage.setItem("cfg.tab", t); }catch(e){}
   for(const el of document.querySelectorAll("#cfgtabs span"))
     el.classList.toggle("sel", el.dataset.tab === t);
@@ -4664,41 +4826,49 @@ async function avviaScan(tipo, idval, idsec, nome){
 }
 
 // --- scan per scheda (MultiBoard) -------------------------------------------
-// I blocchi si ridisegnano solo quando cambiano le schede o la loro
-// configurazione, non a ogni giro: riscriverebbero quello che si sta digitando.
+// Un blocco per scheda, nella sua linguetta (#cfgscan), piu' quello del V812.
+// Si ridisegnano solo quando cambiano le schede o la loro configurazione, non
+// a ogni giro: riscriverebbero quello che si sta digitando.
 function disegnaScanSchede(s){
   const schede = s.schede || [];
   const multi = schede.length > 0;
   $("scanclassico").style.display = multi ? "none" : "flex";
-  $("scanschede").style.display = $("scanschedepiede").style.display = multi ? "" : "none";
+  $("scanschedepiede").style.display = $("cfgscan").style.display = multi ? "" : "none";
   if(!multi) return;
-  const usate = schede.filter(x => x.attiva && x.self);
-  const firma = JSON.stringify(usate.map(x => [x.nome, x.modello, x.digitizer2, x.logica, x.canali_self]));
-  if($("scanschede")._firma !== firma){
-    $("scanschede")._firma = firma;
-    $("scanschede").innerHTML = usate.length ? usate.map(bloccoScanScheda).join("")
-      : '<div style="font-size:12px;color:#6b6a65">No ticked board uses the self-trigger.</div>';
+  const firma = JSON.stringify(schede.map(x => [x.nome, x.modello, x.digitizer2, x.attiva, x.self,
+                                                x.logica, x.canali_self]));
+  if($("cfgscan")._firma !== firma){
+    $("cfgscan")._firma = firma;
+    $("cfgscan").innerHTML = schede.map(x => `<div data-scheda="${x.nome}" style="display:none">` +
+        (x.attiva && x.self ? bloccoScanScheda(x)
+          : notaScan(x.nome, x.attiva ? "it does not use the self-trigger" : "it is not ticked for the run")) +
+        "</div>").join("") +
+      '<div data-scheda="_v812" style="display:none">' + bloccoScanV812() + "</div>";
+    mostraScanTab();
   }
+  const usate = schede.filter(x => x.attiva && x.self);
   for(const x of usate){
     const b = $("sgo_" + x.nome);
     if(!b) continue;
     b.disabled = !!s.scan || !x.in_corso;
-    b.title = x.in_corso ? "" : x.nome + " is not acquiring: start the run first";
+    b.title = s.scan ? "a scan is already running" : x.in_corso ? "" : x.nome + " is not acquiring: start the run first";
   }
-  // Il V812 fa un run per punto con una DAQ senza --board: con le schede non
-  // funziona ancora, e si dice invece di lasciare un pulsante che fallisce.
-  const fuori = schede.filter(x => !(x.attiva && x.self))
-    .map(x => x.nome + (x.attiva ? " (no self-trigger)" : ""));
-  $("scanschedepiede").textContent = "V812 CFD scan: one run per point, not yet with boards" +
-    (fuori.length ? "  \u00b7  " + fuori.join(", ") + ": not in the scan" : "");
+  $("scanschedepiede").textContent = usate.length
+    ? "A scan starts from the tab of its board in Configuration: " +
+      usate.map(x => x.nome + " · " + x.modello).join(", ") + "."
+    : "No ticked board uses the self-trigger: there is no scan to start.";
+}
+const STILE_SCAN = "margin-top:14px;padding-top:10px;border-top:1px solid #eee";
+const TITOLO_SCAN = "font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b6a65;margin-bottom:5px";
+function notaScan(nome, perche){
+  return `<div style="${STILE_SCAN};font-size:12px;color:#6b6a65">Threshold scan of ${nome}: ${perche}.</div>`;
 }
 function bloccoScanScheda(x){
   const n = x.nome, or = (x.logica || "OR").toUpperCase() === "OR";
   const unita = x.digitizer2 ? "thresholds [ADC counts from the baseline]" : "offsets";
   const valori = x.digitizer2 ? "200 100 60 40 30 20 15" : "1200 600 300 100 50";
-  return `<div style="border-top:1px solid #eee;padding-top:10px;margin-top:10px">
-    <div style="font-size:12px;color:#6b6a65;margin-bottom:5px"><b style="color:#1a1a19">${n}</b>
-      &middot; ${x.modello} self-trigger &mdash; ${unita}</div>
+  return `<div style="${STILE_SCAN}">
+    <div style="${TITOLO_SCAN}">threshold scan of ${n} &mdash; <span style="text-transform:none">${unita}</span></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px">
       <input id="sv_${n}" value="${valori}" style="width:190px">
       <input id="ss_${n}" value="20" style="width:52px" title="seconds per point">
@@ -4706,15 +4876,28 @@ function bloccoScanScheda(x){
       <label><input type="radio" name="sm_${n}" value="tutti" checked> all channels together (${x.logica})</label>
       <label${or ? "" : ' style="color:#9a9a94"'}><input type="radio" name="sm_${n}" value="uno"${or ? "" : " disabled"}> one at a time:</label>
       <input id="sc_${n}" value="${(x.canali_self || []).join(" ")}" style="width:70px"${or ? "" : " disabled"}>
-      <button id="sgo_${n}" class="sgo" data-scheda="${n}" style="background:#2a78d6;color:#fff;margin-left:auto">Start</button>
+      <button id="sgo_${n}" class="sgo" data-scheda="${n}" style="background:#2a78d6;color:#fff;margin-left:auto">Start scan</button>
     </div>` +
     (or ? "" : `<div style="font-size:11px;color:#6b6a65;margin-top:4px">one at a time needs
       SelfTriggerLogic = OR: with ${x.logica} the parked channels would stop every trigger</div>`) +
-    `<div style="font-size:11px;color:#6b6a65;margin-top:4px">changes the thresholds of the running ${n}
-      run, all points in the same file; at the end, or on Stop scan, they go back to the ones in use
-      when it started</div></div>`;
+    `<div style="font-size:11px;color:#6b6a65;margin-top:4px">on the running ${n} run, all points in the
+      same file; at the end, or on Stop scan, the thresholds go back to the ones in use when it started.
+      Progress and Stop in the Threshold scan box.</div></div>`;
 }
-$("scanschede").addEventListener("click", async ev => {
+// Il V812 fa un run per punto con una DAQ senza --board: con le schede non
+// funziona ancora, e si dice invece di lasciare un pulsante che fallisce.
+function bloccoScanV812(){
+  return `<div style="${STILE_SCAN}">
+    <div style="${TITOLO_SCAN}">threshold scan of the V812 &mdash; <span style="text-transform:none">thresholds [mV]</span></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;color:#9a9a94">
+      <input value="5 7 10 15 20 30" style="width:190px" disabled>
+      <input value="60" style="width:52px" disabled><span style="font-size:11px">s/point</span>
+      <button style="background:#eb6834;color:#fff;margin-left:auto" disabled>Start scan</button>
+    </div>
+    <div style="font-size:11px;color:#6b6a65;margin-top:4px">one run per point: not yet with boards
+      (it starts a DAQ without --board)</div></div>`;
+}
+$("cfgscan").addEventListener("click", async ev => {
   const b = ev.target.closest(".sgo");
   if(!b) return;
   const n = b.dataset.scheda;
@@ -5021,6 +5204,23 @@ function aggiornaCloud(c){
   const p = c.problemi || [];
   riga.style.display = p.length ? "block" : "none";
   riga.innerHTML = p.length ? "<b>Not on the cloud:</b><br>" + p.map(escH).join("<br>") : "";
+}
+
+// Lo spazio sul disco: niente finche' ce n'e' (piu' del doppio della soglia
+// d'avvio), giallo sotto, rosso quando un run nuovo non parte piu'.
+function aggiornaDisco(d){
+  const el = $("disco");
+  if(!d || d.libero_gb === null || d.libero_gb === undefined || d.libero_gb >= 2 * d.avvio_gb){
+    el.style.display = "none"; return;
+  }
+  el.style.display = "";
+  const sotto = d.libero_gb < d.avvio_gb;
+  el.className = "alim " + (sotto ? "male" : "attenzione");
+  el.textContent = (sotto ? "\u26a0 DISK " : "DISK ") + d.libero_gb.toFixed(1) + " GB FREE" +
+                   (sotto ? " \u00b7 NO NEW RUNS" : "");
+  el.title = "free space on the disk of " + d.cartella + ". A run starts with at least " +
+             d.avvio_gb + " GB; the run in progress is stopped under " + d.ferma_gb + " GB" +
+             (d.gb_ora ? ". Now " + d.gb_ora.toFixed(1) + " GB per hour are being used." : ".");
 }
 
 function avvisoAlimentazione(s){

@@ -1173,11 +1173,15 @@ Gran Sasso: a Frascati non c'e'.
     su un canale spuntato prende il valore di serie della DAQ.
     `#cfg=<scheda>` nell'indirizzo apre quella linguetta (`#cfg=_v1742`,
     `#cfg=_v812` quelle dei moduli);
-  - **Threshold scan con le schede** (2026-11-12, proposta
-    `proposta-scan-schede.png`): un blocco per scheda spuntata che usa il
-    self-trigger, con le sue unita' (conteggi ADC dalla base per il VX2730B,
-    offset per un V1742), tutti i canali insieme o uno alla volta (spento se
-    la logica non e' OR); lo lancia `tools/scan_scheda.sh`. Lo scan del V812
+  - **Threshold scan con le schede** (2026-11-12, proposte
+    `proposta-scan-schede.png` e `proposta-scan-linguette.png`): **lo scan di
+    ogni scheda sta nella sua linguetta di Configuration**, sotto "Apply now",
+    con le sue unita' (conteggi ADC dalla base per il VX2730B, offset per un
+    V1742), tutti i canali insieme o uno alla volta (spento se la logica non
+    e' OR); lo lancia `tools/scan_scheda.sh`. Una scheda non spuntata o senza
+    self-trigger lo dice in una riga; quello del V812 sta nella linguetta V812,
+    spento. Il riquadro *Threshold scan* a destra tiene stato, avanzamento,
+    log e Stop, e a riposo dice da quale linguetta si parte. Lo scan del V812
     con le schede non c'e' ancora (fa un run per punto con una DAQ senza
     `--board`) e la pagina lo dice. Provato sul notebook coi due PMT: avvio
     dalla pagina, avanzamento, Stop (soglie rimesse, run acceso), disegno da
@@ -1210,9 +1214,20 @@ Gran Sasso: a Frascati non c'e'.
   non rimette un backup vuoto, e **`nomi.prossimo_numero` conta anche i
   `.log`**, perche' cancellati i dati di un run il numero non torni a lui
   (vale col MultiBoard, dove il numero lo da' il controllore; la DAQ da sola
-  conta ancora i soli dati). **Nessuno controlla lo spazio libero** prima o
-  durante un run: in `TODO.md`. A 5 kHz e 2 canali da 1024 campioni il 2730
+  conta ancora i soli dati). A 5 kHz e 2 canali da 1024 campioni il 2730
   scrive ~20 MB/s, 70 GB all'ora.
+- **Il controllore guarda lo spazio sul disco** (dal 2026-11-12): il disco
+  piu' pieno fra `data/` e le `OutputDir` di `[digitizer]` e di ogni scheda,
+  ogni 20 s. Sotto **20 GB** un run non parte (anche dalla coda, che allora si
+  ferma lasciando le voci da fare) e, a run in corso, parte la mail
+  HARDWARE "disk below ..." (una ogni `ripeti_hw_min`); sotto **5 GB** ferma
+  scan, coda e run, scrive "stopped for disk space" nel registro delle azioni
+  e manda "disk almost full: run stopped". Soglie in `[settings]`
+  (`MinFreeGBStart`, `MinFreeGBStop`). Nella barra in alto il badge DISK
+  compare solo sotto il doppio della soglia d'avvio (giallo), rosso sotto la
+  soglia. Un TOML vuoto non fa partire niente. Provato con una DAQ finta in
+  una copia in `/tmp` (che e' in RAM, 7.9 GB): rifiuto, avviso una volta
+  sola, arresto in 0.5 s.
 - `notifiche.esito_run` prende per un errore ogni riga della **console** che
   contiene "Error": "ErrorFlags 0" nel riassunto del 2730 l'ha fatto (mail
   falsa su un run finito bene). Ora la DAQ scrive "error flags".

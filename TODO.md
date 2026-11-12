@@ -68,10 +68,8 @@ Restano:
   verso si muove la base col DC offset in percento (misurato solo il 50%). Il
   guadagno e' misurato coi PMT il 2026-11-12 (CLAUDE.md): resta da tarare
   `ADCToVolts`, che sbaglia fino al 7%, con un impulsatore canale per canale;
-- **lo spazio sul disco** (2026-11-12, il notebook si e' riempito con un run da
-  129 GB): il controllore dovrebbe rifiutare di avviare un run sotto una
-  soglia di spazio libero e fermarlo (con la mail) se scende sotto un'altra;
-  oggi nessuno lo guarda, e la DAQ scrive finche' il disco non e' pieno;
+- ~~lo spazio sul disco~~ fatto il 2026-11-12 nel controllore (CLAUDE.md). La
+  DAQ da sola, lanciata da terminale, non lo guarda ancora;
 - **il rate massimo** di DAQ-X2730: 16 canali da 1024 campioni sono 32 kB per
   evento, la USB porta 280 MB/s (~8 kHz), ma la scrittura HDF5 evento per
   evento puo' fermarsi prima. Poi la soppressione degli zeri della scheda

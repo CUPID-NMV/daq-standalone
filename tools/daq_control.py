@@ -1550,6 +1550,14 @@ class Controllo:
             # che mancano non sono "da aggiungere", vengono da [digitizer].
             if grezzo is None and extra.get("solo_presenti"):
                 continue
+            # Una scelta col valore del file fuori dall'elenco (una scheda
+            # tolta da [boards], una frequenza scritta a mano): il menu
+            # mostrerebbe la prima voce e la pagina segnerebbe una modifica
+            # che nessuno ha fatto. Il valore vero si aggiunge in fondo.
+            if tipo == "scelta" and grezzo is not None:
+                v = _ui_da_toml(tipo, grezzo)
+                if v not in dettagli:
+                    dettagli = list(dettagli) + [v]
             fuori.append(dict({
                 "sezione": sezione, "chiave": chiave, "etichetta": etichetta,
                 "tipo": tipo, "dettagli": dettagli,
@@ -1566,7 +1574,15 @@ class Controllo:
         """Tutte le chiavi modificabili dalla pagina, comprese quelle delle
         schede: (sezione, chiave, etichetta, tipo, dettagli, extra)."""
         out = [(s, c, e, t, d, {}) for s, c, e, t, d in CAMPI]
-        for sc in self.schede():
+        schede = self.schede()
+        if schede:
+            # Con piu' schede il V812 lo programma solo quella scritta in
+            # [cfd] Board (DAQ-WC.cpp): una scelta fra i V1742 di [boards].
+            # Subito dopo "enabled", nella linguetta del V812.
+            v17 = [sc["nome"] for sc in schede if not sc["digitizer2"]]
+            i = next((k for k, x in enumerate(out) if x[:2] == ("cfd", "Enabled")), len(out) - 1)
+            out.insert(i + 1, ("cfd", "Board", "programmed by the V1742 board", "scelta", v17, {}))
+        for sc in schede:
             sez = "boards." + sc["nome"]
             # Enabled lo scrive la casella "in run" del riquadro Boards.
             out.append((sez, "Enabled", "in run (%s)" % sc["nome"], "booleano", None,
@@ -3157,6 +3173,11 @@ PAGINA = r"""<!doctype html>
             font-size:12px;background:#f3f3f0;color:#52514e;cursor:pointer;user-select:none}
  .tabs span.sel{background:#1a1a19;color:#fff;border-color:#1a1a19}
  .mv{color:#8a8a84;white-space:nowrap;font-variant-numeric:tabular-nums}
+ /* La riga in testa alle linguette V1742 e V812: dice se il modulo entra nel
+    prossimo run. Grigia se e' solo un'informazione, gialla se qualcosa non
+    torna (il V812 acceso ma nessuna scheda del run lo programma). */
+ .banner{padding:7px 10px;border-radius:6px;background:#f3f3f0;color:#52514e;font-size:12px;margin:0 0 8px}
+ .banner.warn{background:#f6e7c8;color:#7a5410}
 </style></head><body>
 <h1>DAQ Control</h1>
 
@@ -3230,6 +3251,16 @@ PAGINA = r"""<!doctype html>
     <div id="cfgschede"></div>
     <div id="cfgcomune">
     <div id="cfg"></div>
+    </div>
+    <!-- Con le schede (MultiBoard) le chiavi del V1742 ([digitizer]) e quelle
+         del V812 ([cfd]) hanno una linguetta ciascuna, e nella comune resta
+         solo quello che usa ogni scheda del run: richiesta dell'utente del
+         2026-11-12, dopo una TriggerPolarity cambiata nella comune pensando al
+         VX2730B, a cui non arriva. Senza schede i tre blocchi stanno uno sotto
+         l'altro e la pagina e' quella di sempre (il Gran Sasso resta com'e'). -->
+    <div id="cfgv1742">
+    <div id="v1742banner" class="banner" style="display:none"></div>
+    <div id="cfgv1742f"></div>
     <div id="tabdig" style="margin-top:14px"></div>
     <div style="margin-top:6px;font-size:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
       set DC offset <input type="text" id="dcoval" placeholder="0xB000" style="width:70px">
@@ -3237,6 +3268,10 @@ PAGINA = r"""<!doctype html>
       <button id="dcoapp" style="padding:3px 9px;font-size:12px">apply</button>
       <span id="dcorun" style="color:#9a9a94;margin-left:8px"></span></div>
     <div id="dcoavvisi" class="msg ko" style="font-size:12px"></div>
+    </div>
+    <div id="cfgv812">
+    <div id="v812banner" class="banner" style="display:none"></div>
+    <div id="cfgv812f"></div>
     <div id="tabcfd" style="margin-top:14px"></div>
     </div>
     <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -4129,25 +4164,87 @@ async function caricaConfig(){
   catch(e){ $("cfg").textContent = "cannot read the configuration"; return; }
   if(CFG.errore){ $("cfg").textContent = CFG.errore; return; }
   $("cfgfile").textContent = CFG.file;
-  let html = "", sez = null;
-  for(const c of CFG.campi.filter(c => !c.scheda)){
-    if(c.sezione !== sez){
-      if(sez !== null) html += "</table>";
-      html += `<div style="margin:10px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b6a65">[${c.sezione}]</div><table>`;
-      sez = c.sezione;
+  // Con le schede, tre gruppi in tre linguette; senza, tutto in "cfg" coi
+  // titoli di sezione di sempre.
+  const conSchede = (CFG.schede || []).length > 0;
+  const v17 = (CFG.schede || []).filter(x => !x.digitizer2).map(x => x.nome);
+  const titolo = {
+    comune: "every board of the run",
+    v1742: "[digitizer] — shared by every V1742 board" + (v17.length ? " (" + v17.join(", ") + ")" : "") +
+           "; a board tab overrides single keys",
+    v812: "[cfd] — V812 constant fraction discriminator",
+  };
+  for(const [g, dest] of [["comune", "cfg"], ["v1742", "cfgv1742f"], ["v812", "cfgv812f"]]){
+    let html = "", sez = null;
+    for(const c of CFG.campi.filter(c => !c.scheda && gruppoCampo(c, conSchede) === g)){
+      const t = conSchede ? titolo[g] : "[" + c.sezione + "]";
+      if(t !== sez){
+        if(sez !== null) html += "</table>";
+        html += `<div style="margin:10px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b6a65">${t}</div><table>`;
+        sez = t;
+      }
+      html += campoHtml(c);
     }
-    html += campoHtml(c);
+    $(dest).innerHTML = html + (sez !== null ? "</table>" : "");
   }
-  $("cfg").innerHTML = html + "</table>";
   disegnaTabelle();
   disegnaSchedeConfig();
   // Delega: le caselle vengono ricreate a ogni ricarica del modulo, quindi
   // si ascolta sui contenitori e non sui singoli campi.
-  for(const id of ["cfg", "tabdig", "tabcfd"]){
-    $(id).oninput  = aggiornaStatoSalva;
-    $(id).onchange = aggiornaStatoSalva;
+  for(const id of ["cfg", "cfgv1742f", "cfgv812f", "tabdig", "tabcfd"]){
+    $(id).oninput  = () => { aggiornaStatoSalva(); bannerModuli(); };
+    $(id).onchange = () => { aggiornaStatoSalva(); bannerModuli(); };
   }
   aggiornaStatoSalva();
+  bannerModuli();
+}
+
+// Le chiavi della run, comuni a tutte le schede: stanno in [digitizer] per
+// storia, ma le legge anche il VX2730B. Sono le stesse che il server toglie
+// dalle linguette dei V1742 (CAMPI_V1742_SCHEDA).
+const CHIAVI_RUN = ["NEvents", "OutputFile", "OutputDir", "SaveData"];
+function gruppoCampo(c, conSchede){
+  if(!conSchede) return "comune";
+  if(c.sezione === "cfd") return "v812";
+  if(c.sezione === "digitizer" && !CHIAVI_RUN.includes(c.chiave)) return "v1742";
+  return "comune";
+}
+
+// Le righe in testa alle linguette V1742 e V812: se il modulo entra nel
+// prossimo run, e per il V812 chi lo programma. Guardano il form, non il
+// file, cosi' cambiando "enabled" o la scheda la riga segue subito.
+function bannerModuli(){
+  const b1 = $("v1742banner"), b2 = $("v812banner");
+  b1.style.display = b2.style.display = "none";
+  const schede = (CFG && CFG.schede) || [];
+  if(!schede.length) return;
+  const riga = (el, html, warn) => {
+    el.innerHTML = html; el.classList.toggle("warn", !!warn); el.style.display = "";
+  };
+  const v17 = schede.filter(x => !x.digitizer2);
+  if(!v17.length)
+    riga(b1, "There is no V1742 in [boards]: these keys are not used.");
+  else if(!v17.some(x => x.attiva))
+    riga(b1, "No V1742 board is ticked for the next run: these keys are not used now.");
+
+  const campo = k => CFG.campi.find(c => c.sezione === "cfd" && c.chiave === k && c.presente);
+  const valore = c => { if(!c) return ""; const v = valoreCampo(c); return v === null ? c.valore : v; };
+  if(!CFG.campi.some(c => c.sezione === "cfd" && c.presente)) return;
+  const acceso = valore(campo("Enabled")) === "true";
+  const nome = valore(campo("Board"));
+  const sb = v17.find(x => x.nome === nome);
+  const chi = nome ? "the V1742 board <b>" + nome + "</b>" : "";
+  if(!acceso)
+    riga(b2, "Module disabled." + (nome && !(sb && sb.attiva)
+      ? " It is programmed by " + chi + ", which is not ticked for the next run." : ""));
+  else if(!nome)
+    riga(b2, "[cfd] Board is empty: no board programs the V812 in the next run.", true);
+  else if(!sb)
+    riga(b2, "[cfd] Board = <b>" + nome + "</b> is not a V1742 board of [boards]: no board programs the V812.", true);
+  else if(!sb.attiva)
+    riga(b2, "Programmed by " + chi + ", which is not ticked for the next run: nobody programs the V812.", true);
+  else
+    riga(b2, "Programmed by " + chi + " at the start of the run.");
 }
 
 // --- configurazione per scheda ----------------------------------------------
@@ -4169,11 +4266,14 @@ function mostraTab(t){
   try{ localStorage.setItem("cfg.tab", t); }catch(e){}
   for(const el of document.querySelectorAll("#cfgtabs span"))
     el.classList.toggle("sel", el.dataset.tab === t);
-  $("cfgcomune").style.display = t === "comune" ? "" : "none";
   // Le soglie a caldo sono di una scheda: con le schede la riga sta nella
   // linguetta della scheda, e il comando va a lei sola.
   const sch = (CFG.schede || []).find(x => x.nome === t);
   const conSchede = (CFG.schede || []).length > 0;
+  // Senza schede i tre blocchi si vedono tutti, come sempre.
+  $("cfgcomune").style.display = (!conSchede || t === "comune") ? "" : "none";
+  $("cfgv1742").style.display  = (!conSchede || t === "_v1742") ? "" : "none";
+  $("cfgv812").style.display   = (!conSchede || t === "_v812") ? "" : "none";
   $("cfgcaldo").style.display = (conSchede ? !!sch : t === "comune") ? "" : "none";
   $("cfgcaldo").dataset.scheda = sch ? sch.nome : "";
   $("cfgcaldo").dataset.d2 = sch && sch.digitizer2 ? "1" : "";
@@ -4188,10 +4288,14 @@ function mostraTab(t){
 
 function disegnaSchedeConfig(){
   const schede = CFG.schede || [];
+  // Le linguette dei moduli col trattino basso davanti: non si confondono col
+  // nome di una scheda, che e' una sezione [boards.<nome>].
+  const haCfd = CFG.campi.some(c => c.sezione === "cfd" && c.presente);
   $("cfgtabs").style.display = schede.length ? "flex" : "none";
   $("cfgtabs").innerHTML = schede.length
-    ? '<span data-tab="comune">run (common)</span>' +
-      schede.map(x => `<span data-tab="${x.nome}">${x.nome} &middot; ${x.modello}</span>`).join("")
+    ? '<span data-tab="comune">run (common)</span><span data-tab="_v1742">V1742</span>' +
+      schede.map(x => `<span data-tab="${x.nome}">${x.nome} &middot; ${x.modello}</span>`).join("") +
+      (haCfd ? '<span data-tab="_v812">V812 &middot; CFD</span>' : "")
     : "";
   $("cfgtabs").onclick = ev => { const t = ev.target.closest("span"); if(t) mostraTab(t.dataset.tab); };
   let h = "";
@@ -4202,8 +4306,8 @@ function disegnaSchedeConfig(){
          `<table>${campi.map(campoHtml).join("")}</table>` +
          (x.digitizer2 ? `<div id="tabd2_${x.nome}"></div>`
            : `<div style="font-size:12px;color:#6b6a65;margin-top:8px">Only the keys written in
-              [boards.${x.nome}] are shown: everything else comes from the "run (common)" tab
-              ([digitizer]).</div>`) + "</div>";
+              [boards.${x.nome}] are shown: everything else comes from the "V1742" tab
+              ([digitizer]), and events, prefix, folder and test run from "run (common)".</div>`) + "</div>";
   }
   $("cfgschede").innerHTML = h;
   for(const x of schede) if(x.digitizer2) tabellaDig2(x.nome, x.modello);
@@ -4213,7 +4317,8 @@ function disegnaSchedeConfig(){
   try{ t = localStorage.getItem("cfg.tab") || "comune"; }catch(e){}
   const m = /cfg=([\w.-]+)/.exec(location.hash || "");
   if(m) t = m[1];
-  if(t !== "comune" && !schede.some(x => x.nome === t)) t = "comune";
+  const valide = ["comune", "_v1742"].concat(haCfd ? ["_v812"] : [], schede.map(x => x.nome));
+  if(!valide.includes(t)) t = "comune";
   mostraTab(schede.length ? t : "comune");
   $("cfgschede").oninput = $("cfgschede").onchange = () => {
     for(const x of schede) if(x.digitizer2) aggiornaMvDig2(x.nome, nCanaliModello(x.modello));

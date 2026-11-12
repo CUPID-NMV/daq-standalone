@@ -46,11 +46,13 @@ ad avere hardware e librerie CAEN.
   repo in `/home/daq/daq-standalone`. Stesso utente e stessi percorsi del PC
   DAQ, apposta: `/home/daq/daq-standalone` e' scritto in `OutputDir` di
   `run-local.toml`, in `tools/elog_sync.sh` e nei JSON delle misure.
-  - **Va tenuto allineato al PC DAQ** (decisione dell'utente del
-    2026-11-11): ogni `git pull` fatto sul PC DAQ si fa anche sul notebook, e
-    se cambia il C++ si ricompilano `build/` e `build-swmr/` (verificando il
-    binario come sotto). Vale anche per i pacchetti e le librerie installati
-    su uno dei due.
+  - **Il DAQ del Gran Sasso e' INDIPENDENTE da quello del notebook**
+    (decisione dell'utente del 2026-11-12, che supera l'"allineato al PC
+    DAQ" del giorno prima): sul PC DAQ niente `git pull`, niente
+    compilazioni, niente modifiche al TOML; resta su `main` com'e' finche' il
+    notebook non lo sostituisce. Il lavoro va sul ramo `schede-2730`, che si
+    scarica solo sul notebook, e le scelte fatte per il notebook non si
+    estendono "anche al Gran Sasso".
   - E' un notebook gia' in uso per il veto dei muoni di CUORE: l'utente
     `cuore_muons` ha i suoi dati, ROOT, il DT5202 e una copia vecchia della DAQ
     in `~/daq/daq-standalone` (aprile 2026), da non usare. La DAQ sta tutta
@@ -965,10 +967,10 @@ significato (DCOffset in percento, non conteggi di un DAC); da `[digitizer]`
 prende solo OutputDir, OutputFile, NEvents e SaveData. Il primo giro (un
 programma separato, `DAQ-X2730`, del primo pomeriggio) e' stato tolto.
 
-**Stato al 2026-11-11: sul ramo git `schede-2730`, che sul notebook e' la
+**Stato al 2026-11-12: sul ramo git `schede-2730`, che sul notebook e' la
 copia di lavoro; il PC DAQ resta su `main` e non ne sa niente** (decisione
-dell'utente: si lavora solo sul notebook, al Gran Sasso si porta quando e'
-sistemato). Il percorso del V1742 non cambia, ma col V1742 si prova solo al
+dell'utente: il DAQ del Gran Sasso deve restare indipendente da quello del
+notebook, vedi "Due macchine"). Il percorso del V1742 non cambia, ma col V1742 si prova solo al
 Gran Sasso: a Frascati non c'e'.
 
 - **Con l'A4818 non si legge**: la scheda tecnica della famiglia (DS9688) da'
@@ -1033,6 +1035,21 @@ Gran Sasso: a Frascati non c'e'.
   "Apply now" sta nella linguetta della scheda e scrive il file che la DAQ
   ha dichiarato nel log. Provato sul rumore a ingressi aperti: a 40 conteggi
   zero eventi, ch1 a 14 1416 eventi in 6 s, di nuovo a 40 zero.
+- **Due PMT negativi su ch0 e ch1** (2026-11-12; simili a quelli del Gran
+  Sasso, senza inverter; due run di prova in self-trigger a 0 dB e DC offset
+  50%, `measurements/vx2730b_pmt_sonda_20261112.png` e
+  `vx2730b_pmt_carica_20261112.png`): fotoelettrone **~10 mV su ch0, ~8 su
+  ch1** (0.4-0.7 pC), contro i ~36 mV dei PMT del Gran Sasso dopo la catena
+  di la'; **FWHM 4 ns, cioe' 2 campioni**: a 500 MS/s la larghezza non e'
+  risolta e l'ampiezza dipende dalla fase del campionamento, quindi per il
+  fotoelettrone si usa la carica. Rumore 0.6-0.7 mV. Rate al buio sopra
+  ~5 mV (20 conteggi) **~4 kHz su ch0 e ~1.5 kHz su ch1**, circa dieci volte
+  la stima per i PMT del Gran Sasso: causa non cercata. Con DC offset 50% la
+  base sta a meta' scala e agli impulsi negativi restano 2 V: non serve
+  spostarla (il verso del DC offset in percento non e' ancora verificato).
+  In AND (`SelfTriggerLogic = "AND"`, finestra di coincidenza di fabbrica,
+  che la DAQ non imposta) il run 0005 andava a ~5 Hz contro ~5.5 kHz in OR:
+  se siano coincidenze vere o casuali non e' verificato.
 - **Formato**: lo stesso HDF5 v3 del V1742 (canali concatenati in
   `/events/waveforms`; `daqio` lo legge senza modifiche), piu'
   `/events/timestamp` a 64 bit in unita' di 8 ns (attributo `UnitNs`) e in
@@ -1110,14 +1127,25 @@ Gran Sasso: a Frascati non c'e'.
     del run si cerca accanto al file dei dati**: una scheda 2.0 tiene aperto
     anche il log della libreria CAEN (`~/.CAEN/caendig2...`), che e' stato
     preso per il log del run e ha fatto partire una mail falsa;
-  - **Configuration a linguette**: "run (common)" e' il riquadro di sempre,
-    poi una per scheda. Quella del VX2730B ha le chiavi di `X2730.cpp` e la
+  - **Configuration a linguette**: "run (common)" ha solo le chiavi del run,
+    comuni a ogni scheda (eventi, prefisso, cartella, run di prova,
+    verbosita'); poi **V1742** (tutto `[digitizer]`: campionamento, fronte,
+    canali, DC offset, offset del self-trigger, cioe' i valori di tutti i
+    V1742, che le loro linguette scavalcano), una linguetta per scheda, e
+    **V812 · CFD** (`[cfd]`, con "programmed by the V1742 board", cioe'
+    `[cfd] Board`). Divisione chiesta dall'utente il 2026-11-12, dopo una
+    `TriggerPolarity` cambiata nella comune pensando al VX2730B, a cui non
+    arriva. In testa a V1742 e V812 una riga dice se il modulo entra nel
+    prossimo run (gialla se il V812 e' acceso e nessuna scheda del run lo
+    programma). Senza `MultiBoard` la pagina e' quella di sempre, un riquadro
+    solo, senza `[cfd] Board`. Quella del VX2730B ha le chiavi di `X2730.cpp` e la
     tabella dei canali (registrati, self-trigger, soglia in conteggi coi mV
     NOMINALI accanto, DC offset in %, guadagno in dB, piedistallo dell'ultimo
     run di quella scheda); quella di un V1742 in `[boards]` le sole chiavi che
     scavalca. Save scrive le modifiche di tutte le linguette; una cella vuota
     su un canale spuntato prende il valore di serie della DAQ.
-    `#cfg=<scheda>` nell'indirizzo apre quella linguetta;
+    `#cfg=<scheda>` nell'indirizzo apre quella linguetta (`#cfg=_v1742`,
+    `#cfg=_v812` quelle dei moduli);
   - **il controllo di coerenza guarda `[digitizer]` solo se nel run c'e' un
     V1742**: col solo 2730 "ChannelList is empty" bloccava ogni salvataggio;
   - provato: due schede di cui una assente (il V1742, a Frascati non c'e'),

@@ -336,6 +336,45 @@ def guadagni(path):
         return {}, {}
 
 
+def conta_per_canale(path, da, a, soglie, segno, nmax=3000):
+    """{canale: (sopra, letti)}: in quanti eventi del tratto [da, a) di un run
+    del VX2730B ogni canale supera la sua soglia (conteggi dalla base, nel
+    verso degli impulsi: segno -1 per gli impulsi negativi), su al piu' nmax
+    eventi presi dal mezzo del tratto.
+
+    Il rate del trigger e' uno solo (l'OR della scheda) e non dice quale
+    canale abbia sparato; le forme d'onda registrate si'. Si conta qui, durante
+    lo scan, e non dopo come per il V1742: sul notebook il file del run si
+    cancella appena e' verificato sul cloud (archivia.py, DeleteAfterUpload).
+    E' una ricostruzione con la soglia SCRITTA: quella effettiva della scheda
+    ne dista qualche conteggio, diversa per canale (misurato il 2026-11-11)."""
+    f, tmp = daqio.open_file(path, live=True)
+    try:
+        hdr = daqio.read_header(f)
+        lista = [int(c) for c in np.atleast_1d(hdr["ChannelList"])]
+        ns = int(hdr["SamplesPerChannel"])
+        pt = int(hdr.get("PreTriggerSamples", ns // 4))
+        ds = f["/events/waveforms"]
+        ds.refresh()
+        a = min(a, ds.shape[0])
+        if a - da > nmax:
+            da += (a - da - nmax) // 2
+            a = da + nmax
+        if a <= da:
+            return {}
+        w = ds[da:a].reshape(-1, len(lista), ns).astype(np.float32)
+    finally:
+        f.close()
+        daqio._cleanup(tmp)
+    # La base prima del trigger, l'impulso in una finestra attorno al punto
+    # di trigger (PreTriggerSamples): fuori ci possono essere altri impulsi
+    # che non c'entrano con questo evento.
+    base = np.median(w[:, :, :max(8, pt - 16)], axis=2)
+    amp = (segno * (w[:, :, max(0, pt - 16):min(ns, pt + 32)] - base[:, :, None])).max(axis=2)
+    return {c: (int((amp[:, k] >= soglie[c]).sum()), int(amp.shape[0]))
+            for k, c in enumerate(lista) if c in soglie}
+
+
 def scrivi_misura(args, path, st, channels, sigma, rows, iniziali=None, interrotto=None, gdb=None, mvpc=None):
     """Misura salvata per intero, cosi' due scan si possono confrontare davvero."""
     rec = {
@@ -350,7 +389,10 @@ def scrivi_misura(args, path, st, channels, sigma, rows, iniziali=None, interrot
                         "atteso": r[3], "conteggi": r[4],
                         "eventi_da": r[5], "eventi_a": r[6]},
                        **({"soglie_scritte": {str(c): v for c, v in r[7].items()},
-                           "soglia_mv": r[8]} if len(r) > 8 else {})) for r in rows],
+                           "soglia_mv": r[8]} if len(r) > 8 else {}),
+                       **({"per_canale": {str(c): {"sopra": v[0], "letti": v[1], "rate": v[2]}
+                                          for c, v in r[9].items()}} if len(r) > 9 and r[9] else {}))
+                  for r in rows],
     }
     nome = "noise_scan_%s" % time.strftime("%Y%m%d_%H%M%S")
     if SCHEDA:
@@ -370,7 +412,8 @@ def scrivi_misura(args, path, st, channels, sigma, rows, iniziali=None, interrot
                     # al 7% dal vero, misurato il 2026-11-12).
                     "guadagno_db": {str(c): v for c, v in (gdb or {}).items()},
                     "mv_per_conteggio": {str(c): v for c, v in (mvpc or {}).items()},
-                    "unita_richiesta": "mV" if getattr(args, "mv", False) else "counts"})
+                    "unita_richiesta": "mV" if getattr(args, "mv", False) else "counts",
+                    "polarita": st.get("polarity")})
         nome += "_" + SCHEDA
     if args.canale is not None:
         # Col segnale acceso il rate "atteso" dal rumore gaussiano non vuol
@@ -606,7 +649,19 @@ def main():
                 smv = (float(off) if args.mv else
                        float(np.mean([scritte[c] * mvpc[c] for c in channels])) if all(c in mvpc for c in channels)
                        else None)
-                riga += (scritte, smv)
+                # Quante volte ogni canale del trigger ha superato la sua soglia
+                # in questo passo, dalle forme d'onda: per --per-channel di
+                # plot_scan.py, che senza file non potrebbe piu' rifarlo.
+                per = {}
+                try:
+                    soglie_tutti = {c: abs(int(applied[c][1])) for c in tutti}
+                    segno = -1.0 if st.get("polarity") == "falling" else 1.0
+                    for c, (sopra, letti) in conta_per_canale(path, start, start + counts,
+                                                              soglie_tutti, segno).items():
+                        per[c] = (sopra, letti, rate * sopra / letti if letti else 0.0)
+                except Exception as e:
+                    print(f"     (conteggio per canale non riuscito: {e})", flush=True)
+                riga += (scritte, smv, per)
             rows.append(riga)
 
             if rate > rate_max:

@@ -327,6 +327,54 @@ def per_canale(d, tipo, k_mv_offset):
     return {c: (np.array(x), np.array(y), np.array(a)) for c, (x, y, a) in fuori.items()}
 
 
+def per_canale_dig2(d):
+    """Come per_canale, per uno scan del VX2730B: quante volte al secondo ogni
+    canale del trigger ha superato la sua soglia scritta, punto per punto.
+
+    Dal 2026-11-12 il conto lo fa noise_scan.py durante lo scan ("per_canale"
+    nei punti), perche' sul notebook il file del run si cancella appena e'
+    sul cloud. Per uno scan di prima lo si rifa' dal file, se c'e' ancora.
+    I canali parcheggiati (soglia 16383, scan un canale alla volta) non
+    compaiono: non potevano scattare. Ritorna {canale: (soglie_mV, rate_Hz,
+    soglie_conteggi)}; i mV sono nominali, NaN senza mv_per_conteggio."""
+    mvpc = d.get("mv_per_conteggio") or {}
+    canali = [str(c) for c in (d.get("canali") or [])]
+    fuori, percorso, segno = {}, None, None
+    for p in d.get("punti", []):
+        scritte = p.get("soglie_scritte") or {c: abs(p.get("distanza", 0)) for c in canali}
+        pc = p.get("per_canale")
+        if pc is None:
+            # Scan di prima del conto durante lo scan: dal file, se c'e'.
+            if percorso is None:
+                percorso = trova_file(d.get("file", "")) or ""
+                if percorso:
+                    try:
+                        f, tmp = daqio.open_file(percorso, live=not percorso.endswith(".gz"))
+                        pol = str(daqio.read_header(f).get("Polarity", "negative")).lower()
+                        f.close()
+                        daqio._cleanup(tmp)
+                    except Exception:
+                        pol = "negative"
+                    segno = 1.0 if pol.startswith("pos") else -1.0
+            if not percorso or p.get("eventi_da") is None:
+                continue
+            from noise_scan import conta_per_canale
+            pc = {}
+            for c, (sopra, letti) in conta_per_canale(
+                    percorso, p["eventi_da"], p["eventi_a"],
+                    {int(k): int(v) for k, v in scritte.items()}, segno).items():
+                pc[str(c)] = {"rate": p["rate"] * sopra / letti if letti else 0.0}
+        for c, v in pc.items():
+            soglia = scritte.get(c)
+            if soglia is None or soglia >= 16383:
+                continue
+            fuori.setdefault(int(c), ([], [], []))
+            fuori[int(c)][0].append(soglia * mvpc[c] if c in mvpc else np.nan)
+            fuori[int(c)][1].append(v["rate"])
+            fuori[int(c)][2].append(soglia)
+    return {c: (np.array(x, float), np.array(y, float), np.array(a, float)) for c, (x, y, a) in fuori.items()}
+
+
 def frequenza(nome_file):
     """Frequenza di campionamento dedotta dal nome della run."""
     for tag in TAG_FREQUENZA:
@@ -538,12 +586,6 @@ def main():
             quando = (s[5].get("quando") or "")[5:16].replace("-", "/")
             serie[i] = s[:4] + (s[4] + ("   [%s]" % quando if quando else "   [%d]" % (i + 1)),) + s[5:]
 
-    if args.per_channel and any(s[0] == "dig2" for s in serie):
-        raise SystemExit("Il conteggio per canale ricostruisce l'ampiezza con la "
-                         "calibrazione del V1742: per il VX2730B non c'e' ancora. "
-                         "Lo scan un canale alla volta (scan_scheda.sh -c) da' gia' "
-                         "una curva per canale.")
-
     if args.per_channel and any(s[0] == "v812" for s in serie):
         # Per il V812 "per canale" vuol dire CHI ha fatto scattare il trigger
         # a ogni soglia (chi_ha_sparato). Il conteggio di per_canale, che
@@ -602,9 +644,19 @@ def main():
             # resta in conteggi di offset come negli altri grafici. Prima c'era
             # un default nascosto di 3.5 mV/offset: a 750 MS/s avrebbe
             # applicato la calibrazione dei 2.5 GS/s senza dirlo.
-            k = args.mv_per_offset or (MV_PER_OFFSET.get(frequenza(d.get("file", "")))
-                                       if tipo == "v1742" else 1.0)
-            if k is None:
+            if tipo == "dig2":
+                canali = per_canale_dig2(d)
+                if not canali:
+                    raise SystemExit(
+                        "Per canale: questo scan del VX2730B e' di prima che il conto per canale "
+                        "si facesse durante lo scan, e il file del suo run non e' piu' sul disco "
+                        "(sul notebook si cancella appena e' sul cloud). Si puo' fare solo per gli "
+                        "scan presi da adesso.")
+                k = None
+            else:
+                k = args.mv_per_offset or (MV_PER_OFFSET.get(frequenza(d.get("file", "")))
+                                           if tipo == "v1742" else 1.0)
+            if tipo != "dig2" and k is None:
                 raise SystemExit(
                     "Il conteggio per canale confronta la soglia con l'ampiezza "
                     "ricostruita in millivolt, e a %s la conversione "
@@ -614,7 +666,8 @@ def main():
                     "Per forzarla: --mv-per-offset <valore>, sapendo che a quella "
                     "frequenza e' un'assunzione."
                     % leggibile(frequenza(d.get("file", ""))))
-            canali = per_canale(d, tipo, k)
+            if tipo != "dig2":
+                canali = per_canale(d, tipo, k)
             if not canali:
                 raise SystemExit("Non sono riuscito a rileggere nessun dato: "
                                  "i file delle run ci sono ancora in data/?")
@@ -626,7 +679,7 @@ def main():
                     raise SystemExit("Troppe curve per i colori disponibili: "
                                      "scegli meno canali o meno scan.")
                 x_mv, y, x_asse = canali[ch]
-                x = x_mv if unita == "mV" else x_asse
+                x = x_mv if unita in ("mV", "mV nominali") else x_asse
                 ordine = np.argsort(x)
                 etichetta = "ch %d" % ch
                 if len(serie) > 1:

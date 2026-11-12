@@ -1117,6 +1117,15 @@ Gran Sasso: a Frascati non c'e'.
   della tabella dei canali; in conteggi con guadagni diversi un avviso dice
   che la stessa lista e' una soglia diversa in mV. Cambiando unita', la lista
   di serie passa all'altra (200 ... 15 conteggi, 20 ... 2 mV).
+- **"per channel" negli scan del VX2730B** (dal 2026-11-12): quante volte al
+  secondo ogni canale del trigger ha superato la sua soglia scritta. Il conto
+  lo fa `noise_scan.py` DURANTE lo scan (`conta_per_canale`, fino a 3000
+  eventi del passo, l'impulso attorno al punto di trigger) e lo scrive nei
+  punti (`per_canale`): dopo non si potrebbe, perche' sul notebook il file del
+  run si cancella appena e' sul cloud. Per uno scan di prima `plot_scan.py`
+  lo rifa' dal file, se c'e' ancora. E' una ricostruzione con la soglia
+  scritta, non quella effettiva della scheda. Provato su un file sintetico
+  (conteggi entro l'1% dal vero); durante uno scan vero non ancora.
 - **Formato**: lo stesso HDF5 v3 del V1742 (canali concatenati in
   `/events/waveforms`; `daqio` lo legge senza modifiche), piu'
   `/events/timestamp` a 64 bit in unita' di 8 ns (attributo `UnitNs`) e in

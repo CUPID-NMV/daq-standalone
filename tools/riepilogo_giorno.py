@@ -46,6 +46,7 @@ def run_del_giorno(cartelle_dati, giorno):
     for cartella in cartelle_dati:
         for radice, cartelle, files in os.walk(cartella):
             in_scan = os.sep + "scan" in radice[len(cartella):]
+            in_check = os.sep + "check" in radice[len(cartella):]
             for f in files:
                 # TEST_: run di prova (SaveData = false), dati gia' cancellati
                 if not f.endswith(".log") or f.startswith(("daq-console", "controllore",
@@ -62,6 +63,8 @@ def run_del_giorno(cartelle_dati, giorno):
                 r["log"] = percorso
                 if in_scan:
                     n_scan += 1
+                elif in_check:
+                    pass        # i controlli del rate: li riassume note_controlli
                 else:
                     righe.append(r)
     righe.sort(key=lambda r: r["ora"])
@@ -140,7 +143,9 @@ def leggi_rate(giorno, path=None):
         with open(path) as f:
             for riga in f:
                 c = riga.rstrip("\n").split(",")
-                if len(c) < 5 or not c[1].startswith(giorno) or c[4] == "1":
+                # c[4]: 1 scan, 2 controllo del rate (due minuti a 47 Hz in
+                # mezzo ai cosmici), 0 tutto il resto.
+                if len(c) < 5 or not c[1].startswith(giorno) or c[4] not in ("0", ""):
                     continue
                 try:
                     campioni.setdefault(c[2], []).append((float(c[0]), int(c[3])))
@@ -263,6 +268,29 @@ def _gb(b):
     return "%.1f GB" % (b / 1e9)
 
 
+def note_controlli(giorno):
+    """Una riga sui controlli del rate del giorno (tools/controllo_rate.py), o None."""
+    try:
+        import controllo_rate
+        voci = [v for v in controllo_rate.storia(2000) if str(v.get("ora", "")).startswith(giorno)]
+    except Exception:
+        return None
+    if not voci:
+        return None
+    buoni = [v for v in voci if v.get("rate_hz")]
+    fuori = [v for v in buoni if v.get("fuori")]
+    falliti = [v for v in voci if v.get("esito") == "failed"]
+    riga = "Rate checks: %d (%d ok%s%s)" % (
+        len(voci), len(buoni) - len(fuori),
+        ", %d out of tolerance" % len(fuori) if fuori else "",
+        ", %d failed" % len(falliti) if falliti else "")
+    if buoni:
+        r = [v["rate_hz"] for v in buoni]
+        att = buoni[-1].get("atteso_hz")
+        riga += ", rate %.2f-%.2f Hz%s" % (min(r), max(r), ", expected %.2f" % att if att else "")
+    return riga + " (in data/check/, not listed)"
+
+
 def componi_riepilogo(cartelle_dati, giorno):
     """(oggetto, testo, html, png, numero di run) del riepilogo di quel giorno."""
     righe, n_scan = run_del_giorno(cartelle_dati, giorno)
@@ -287,6 +315,9 @@ def componi_riepilogo(cartelle_dati, giorno):
         note.append("Not closed cleanly: %d (%s)" % (len(male), ", ".join(r["run"] for r in male)))
     if n_scan:
         note.append("Threshold scan runs: %d (in data/scan/, not listed)" % n_scan)
+    controlli = note_controlli(giorno)
+    if controlli:
+        note.append(controlli)
     note += _note_comuni(righe, disco)
     titolo = "Runs started on %s (data/, scan runs excluded)" % giorno
     testo, html_ = _impagina(titolo, "Runs started on <b>%s</b> (data/, scan runs excluded)" % giorno,

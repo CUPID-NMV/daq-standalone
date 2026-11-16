@@ -58,6 +58,7 @@ import nomi
 import tomledit
 import psu_control
 import notifiche
+import controllo_rate
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BINARIO = os.path.join(ROOT, "build", "main", "DAQ-WC")
@@ -792,6 +793,55 @@ def percorso_grafico(nome):
     return percorso if os.path.isfile(percorso) else None
 
 
+def scrivi_sicuro(percorso, testo):
+    """Scrive il file intero o non lo tocca: in un temporaneo accanto, fsync,
+    controllo della lunghezza, poi lo sostituisce.
+
+    Il 2026-11-12, col disco del notebook pieno, un salvataggio dalla pagina
+    ha lasciato run-local.toml E il suo backup a zero byte: aprire in "w"
+    svuota il file prima di scriverci, e l'errore di spazio arrivava alla
+    chiusura implicita, dove Python lo ignora. Il controllo del rate riscrive
+    il TOML due volte all'ora, da solo, anche di notte: lo fa con questa."""
+    d = os.path.dirname(os.path.abspath(percorso))
+    tmp = os.path.join(d, ".%s.tmp-%d" % (os.path.basename(percorso), os.getpid()))
+    dati = testo.encode("utf-8")
+    try:
+        with open(tmp, "wb") as f:
+            f.write(dati)
+            f.flush()
+            os.fsync(f.fileno())
+        if os.path.getsize(tmp) != len(dati):
+            raise OSError("%s: written %d bytes instead of %d"
+                          % (os.path.basename(percorso), os.path.getsize(tmp), len(dati)))
+        os.replace(tmp, percorso)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def toml_della_daq(pid):
+    """Il TOML con cui e' partita una DAQ, dalla sua riga di comando (None se
+    non si legge). Un run lanciato da terminale con un altro file il controllo
+    del rate non lo interrompe: non saprebbe con cosa farlo ripartire."""
+    try:
+        argv = open("/proc/%d/cmdline" % pid, "rb").read().split(b"\0")
+    except OSError:
+        return None
+    for a in argv[1:]:
+        a = a.decode("utf-8", "replace")
+        if a.endswith(".toml"):
+            if not os.path.isabs(a):
+                try:
+                    a = os.path.join(os.readlink("/proc/%d/cwd" % pid), a)
+                except OSError:
+                    pass
+            return a
+    return None
+
+
 def trova_scan():
     """Lo scan in corso, oppure None.
 
@@ -1279,6 +1329,13 @@ class Controllo:
         self.notifiche = notifiche.Notifiche(notifiche_cfg, self._cartelle_dati, porta,
                                              log=lambda t: print(t, flush=True))
         self._daq_prima = trova_daq() is not None   # per vedere la FINE di una run
+        # Il controllo del rate ogni ora (tools/controllo_rate.py): None, o cosa
+        # sta facendo. Finche' c'e', la DAQ e' sua. Il filo dell'orologio
+        # aspetta 15 s: prima main() chiude un controllo rimasto a meta'.
+        self._controllo = None
+        self._controllo_subito = False
+        self._lock_controllo = threading.Lock()
+        threading.Thread(target=self._orologio_controllo, daemon=True).start()
         self.archivio = archivio
         self._archivio_t = 0.0    # ultimo lancio di archivia.py: 0 = al primo giro
         # Dove sono le run rispetto al cloud, letto da archivia.py ogni
@@ -1629,6 +1686,10 @@ class Controllo:
                 pass
             if info["log"] and os.sep + "scan" + os.sep in info["log"]:
                 info["scan"] = True
+            # I run del controllo del rate: la loro fine la giudica il
+            # controllo stesso, e nel registro del rate non sono cosmici.
+            if info["log"] and os.sep + controllo_rate.CARTELLA + os.sep in info["log"]:
+                info["controllo"] = True
 
     def _campiona_rate(self):
         """Annota quanti eventi ha la run in corso, ogni RATE_PASSO_S secondi.
@@ -1671,7 +1732,9 @@ class Controllo:
                 f.write("%.1f,%s,%s,%d,%d\n" % (
                     adesso, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(adesso)),
                     os.path.splitext(os.path.basename(info["log"]))[0], eventi,
-                    1 if info["scan"] else 0))
+                    # 2: run del controllo del rate, 47 Hz per due minuti in
+                    # mezzo ai cosmici; il riepilogo li toglie come gli scan.
+                    1 if info["scan"] else 2 if info.get("controllo") else 0))
         except OSError:
             pass
 
@@ -1740,7 +1803,7 @@ class Controllo:
         questo controllore ha riscritto la console, e le ultime righe di
         questa run le ha tenute da parte _avvia prima di farlo.
         """
-        if info["scan"]:
+        if info["scan"] or info.get("controllo"):
             return
         if info["log"]:
             # La stima dell'efficienza per il riepilogo serale si fa adesso, a
@@ -1925,6 +1988,7 @@ class Controllo:
              "psu_ampli": self.psu_ampli.stato() if self.psu_ampli else None,
              "notifiche": self.notifiche.stato(),
              "cloud": notifiche.pagina_cloud(self.cloud, 60 * self.notifiche.cfg["cloud_ritardo_min"]),
+             "controllo": self.controllo_stato(),
              "versione": VERSIONE_PAGINA}
         if scan:
             s["scan"] = {
@@ -2122,6 +2186,8 @@ class Controllo:
         return True, ""
 
     def coda_avvia(self):
+        if self._controllo:
+            return False, self.controllo_occupato()
         with self.lock:
             d = self.leggi_coda()
             if d["attiva"]:
@@ -2237,33 +2303,74 @@ class Controllo:
                         v.update(campi)
                 self._scrivi_coda(dd)
 
+            # Un controllo del rate in corso ha la DAQ: la voce parte dopo.
+            if not self._aspetta_controllo():
+                return
             segna(stato="running", messaggio="")
-            ok, errore = self._applica(voce["modifiche"])
-            if not ok:
-                segna(stato="failed", messaggio=errore)
-                continue
-
-            with self.lock:
-                avviata, messaggio = self._avvia(da_coda=True)
-            if not avviata:
-                segna(stato="failed", messaggio=messaggio)
-                continue
-
-            inizio = time.time()
+            # Un run per giro; piu' di uno se un controllo del rate lo
+            # interrompe: la voce riprende per il tempo che le restava, con le
+            # sue modifiche (il controllo rimette il TOML che le conteneva).
+            fatto, files, eventi, controlli = 0.0, [], 0, 0
             while True:
-                time.sleep(0.5)
-                if not trova_daq():
-                    break
-                if not self.leggi_coda().get("attiva"):
-                    return                      # ferma_coda ha gia' fatto tutto
-                if voce["secondi"] and time.time() - inizio >= voce["secondi"]:
-                    with self.lock:
-                        self._ferma(da_coda=True)
+                with self.lock:
+                    # Sotto il lucchetto, come la partenza del controllo: o il
+                    # run parte prima e il controllo lo ferma, o si aspetta.
+                    avviata, messaggio = None, ""
+                    if not self._controllo:
+                        ok, errore = self._applica(voce["modifiche"])
+                        if not ok:
+                            avviata, messaggio = False, errore
+                        else:
+                            avviata, messaggio = self._avvia(da_coda=True)
+                if avviata is None:
+                    if not self._aspetta_controllo():
+                        return
+                    continue
+                if not avviata:
+                    segna(stato="failed", messaggio=messaggio)
                     break
 
-            ev, _, runfile = self.eventi_correnti()
-            segna(stato="done", run=os.path.basename(runfile) if runfile else None,
-                  eventi=ev, messaggio="%.0f s" % (time.time() - inizio))
+                inizio = time.time()
+                interrotta = False
+                while True:
+                    time.sleep(0.5)
+                    if self._controllo:
+                        interrotta = True       # il controllo ferma il run da se'
+                        break
+                    if not trova_daq():
+                        break
+                    if not self.leggi_coda().get("attiva"):
+                        return                      # ferma_coda ha gia' fatto tutto
+                    if voce["secondi"] and fatto + time.time() - inizio >= voce["secondi"]:
+                        with self.lock:
+                            self._ferma(da_coda=True)
+                        break
+
+                ev, _, runfile = self.eventi_correnti()
+                if runfile and os.path.basename(runfile) not in files:
+                    files.append(os.path.basename(runfile))
+                eventi += ev or 0
+                fatto += time.time() - inizio
+                if interrotta:
+                    controlli += 1
+                    if not self._aspetta_controllo():
+                        return
+                    if not voce["secondi"] or voce["secondi"] - fatto >= 5:
+                        continue
+                segna(stato="done", run=", ".join(files) or None, eventi=eventi,
+                      messaggio="%.0f s%s" % (fatto, "" if not controlli else
+                                              ", interrupted by %d rate check%s" % (
+                                                  controlli, "s" if controlli > 1 else "")))
+                break
+
+    def _aspetta_controllo(self):
+        """Aspetta che il controllo del rate in corso finisca. False se intanto
+        la coda e' stata fermata."""
+        while self._controllo:
+            time.sleep(0.5)
+            if not self.leggi_coda().get("attiva"):
+                return False
+        return self.leggi_coda().get("attiva", False)
 
     # -- scan --------------------------------------------------------------
     def coda_scan(self, n=30):
@@ -2295,6 +2402,8 @@ class Controllo:
         dirlo chiaro invece di limitarsi a fallire: quello del V1742 cambia le
         soglie a caldo e vuole una run gia' in corso, quello del V812 fa una
         run per punto e vuole la DAQ ferma."""
+        if self._controllo:
+            return False, self.controllo_occupato()
         with self.lock:
             if tipo not in SCAN:
                 return False, "Unknown scan: %s" % tipo
@@ -2421,6 +2530,8 @@ class Controllo:
 
     # -- azioni ------------------------------------------------------------
     def avvia(self, da_coda=False):
+        if self._controllo and not da_coda:
+            return False, self.controllo_occupato()
         with self.lock:
             return self._avvia(da_coda)
 
@@ -2596,6 +2707,20 @@ class Controllo:
             return False, "It is not closing: pid %d is still there." % pid
 
     def ferma(self, da_coda=False):
+        c = self._controllo
+        if c and not da_coda:
+            # Stop run durante un controllo del rate: si ferma il controllo e
+            # il run di fisica NON riparte (con una coda, si ferma anche lei):
+            # chi preme Stop vuole la DAQ ferma. Il TOML lo rimette il controllo.
+            c["annulla"] = True
+            esito = ""
+            if trova_daq():
+                with self.lock:
+                    esito = self._ferma(da_coda=True)[1]
+            return True, ("Rate check stopped%s; the physics run will not be resumed%s."
+                          % (" (" + esito.rstrip(".") + ")" if esito else "",
+                             " and the queue stops" if (c.get("fisica") or {}).get("tipo") == "coda"
+                             else ""))
         with self.lock:
             return self._ferma(da_coda)
 
@@ -2620,6 +2745,525 @@ class Controllo:
         return False, ("Still alive after %d s. The link is probably hung: "
                        "a second stop terminates it at once."
                        % ATTESA_ARRESTO_S)
+
+    # -- controllo del rate ogni ora ------------------------------------------
+    #
+    #  Ogni ora si ferma il run in corso, si prende un run di 2 minuti con la
+    #  configurazione dei run di Andamento_run e si fa ripartire il run di
+    #  prima (tools/controllo_rate.py). Finche' lavora la DAQ e' sua, come lo e'
+    #  della coda o di uno scan: la pagina non avvia run, non salva il TOML e
+    #  non cambia le soglie, la coda aspetta e poi riprende la sua voce per il
+    #  tempo che le restava. Lo stato a meta' sta su file, cosi' un riavvio del
+    #  controllore nel mezzo rimette il TOML (riprendi_controllo_interrotto).
+
+    def _modifica_controllo(self, f=None, **campi):
+        """Legge, cambia e riscrive data/controllo-rate.json sotto il suo lucchetto:
+        la pagina e il controllo in corso lo scrivono tutti e due."""
+        with self._lock_controllo:
+            d = controllo_rate.leggi()
+            d.update(campi)
+            if f:
+                f(d)
+            controllo_rate.scrivi(d, scrivi_file=scrivi_sicuro)
+            return d
+
+    def controllo_occupato(self):
+        """Il motivo per cui la pagina non puo' toccare la DAQ, o None."""
+        c = self._controllo
+        if not c:
+            return None
+        fine = c["inizio"] + c["durata_s"] + 60
+        return ("A rate check is running (until about %s): the run in progress, if any, "
+                "resumes by itself afterwards." % time.strftime("%H:%M", time.localtime(fine)))
+
+    def controllo_stato(self):
+        """Per la pagina: configurazione, cosa sta facendo, gli ultimi controlli."""
+        d = controllo_rate.leggi()
+        ora = time.time()
+        c = self._controllo
+        s = {k: d[k] for k in ("attivo", "ogni_min", "al_minuto", "durata_s", "riferimento",
+                               "riferimento_da", "atteso_hz", "atteso_da", "tolleranza",
+                               "consecutivi", "fuori", "allarme", "falliti")}
+        s["prossimo"] = (controllo_rate.prossimo_slot(ora, int(d["ogni_min"]), int(d["al_minuto"]))
+                         if d["attivo"] else None)
+        s["in_corso"] = None
+        if c:
+            s["in_corso"] = {k: c.get(k) for k in ("fase", "inizio", "durata_s", "fisica",
+                                                   "acquisizione", "motivo", "annulla")}
+        s["storia"] = controllo_rate.storia(72)
+        s["cartella"] = controllo_rate.CARTELLA
+        return s
+
+    def controllo_imposta(self, corpo, chi=""):
+        """Le impostazioni dalla pagina. Torna (esito, messaggio)."""
+        def numero(chiave, lo, hi, tipo=int):
+            v = corpo.get(chiave)
+            try:
+                v = tipo(v)
+            except (TypeError, ValueError):
+                raise ValueError("%s: '%s' is not a number" % (chiave, corpo.get(chiave)))
+            if not lo <= v <= hi:
+                raise ValueError("%s must be between %g and %g" % (chiave, lo, hi))
+            return v
+        try:
+            nuovo = {"attivo": bool(corpo.get("attivo")),
+                     "ogni_min": numero("ogni_min", 10, 1440),
+                     "durata_s": numero("durata_s", 30, 1800),
+                     "consecutivi": numero("consecutivi", 1, 10),
+                     "tolleranza": numero("tolleranza_pct", 1, 100, float) / 100.0}
+            nuovo["al_minuto"] = numero("al_minuto", 0, nuovo["ogni_min"] - 1)
+            atteso = str(corpo.get("atteso_hz") or "").strip()
+            nuovo["atteso_hz"] = numero("atteso_hz", 1e-6, 1e6, float) if atteso else None
+        except ValueError as e:
+            return False, str(e)
+
+        def cambia(d):
+            if nuovo["atteso_hz"] != d.get("atteso_hz"):
+                d["atteso_da"] = ("set by hand on %s%s" % (time.strftime("%d/%m %H:%M"),
+                                                          " by " + chi if chi else "")
+                                  if nuovo["atteso_hz"] else
+                                  "the mean of the first 3 checks with this reference")
+                d["fuori"] = 0
+            # Acceso adesso: il primo controllo all'istante programmato
+            # successivo, non subito. Per subito c'e' "Check now".
+            if nuovo["attivo"] and not d.get("attivo"):
+                d["ultimo_slot"] = controllo_rate.slot_corrente(
+                    time.time(), nuovo["ogni_min"], nuovo["al_minuto"])
+            d.update(nuovo)
+        try:
+            d = self._modifica_controllo(cambia)
+        except OSError as e:
+            return False, "Cannot write %s: %s" % (controllo_rate.STATO, e)
+        if not d["attivo"]:
+            return True, "Rate check saved: OFF."
+        return True, ("Rate check saved: every %d min at minute %d, %d s; next at %s." % (
+            d["ogni_min"], d["al_minuto"], d["durata_s"], time.strftime(
+                "%H:%M", time.localtime(controllo_rate.prossimo_slot(
+                    time.time(), d["ogni_min"], d["al_minuto"])))))
+
+    def controllo_riferimento(self, che, chi=""):
+        """La configurazione di riferimento: "attuale" la prende dal TOML com'e'
+        adesso, "andamento" torna a quella dei run di Andamento_run."""
+        if self._controllo:
+            return False, "A rate check is running: the TOML holds its configuration now."
+        if che == "andamento":
+            rif, da = controllo_rate.RIFERIMENTO_ANDAMENTO, controllo_rate.ORIGINE_ANDAMENTO
+            atteso, atteso_da = controllo_rate.ATTESO_ANDAMENTO, controllo_rate.ORIGINE_ATTESO
+        elif che == "attuale":
+            try:
+                import tomllib
+                with open(self.toml, "rb") as f:
+                    rif = controllo_rate.riferimento_da_config(tomllib.load(f))
+            except Exception as e:
+                return False, "Cannot read %s: %s" % (self.toml, e)
+            da = "taken from the TOML on %s%s" % (time.strftime("%d/%m %H:%M"),
+                                                 " by " + chi if chi else "")
+            # Un'altra configurazione, un altro rate: l'atteso lo daranno i
+            # primi controlli fatti con questa.
+            atteso, atteso_da = None, "the mean of the first 3 checks with this reference"
+        else:
+            return False, "unknown reference: %s" % che
+        self._modifica_controllo(riferimento=rif, riferimento_da=da, atteso_hz=atteso,
+                                 atteso_da=atteso_da, riferimento_t=time.time(),
+                                 fuori=0, allarme=False)
+        return True, "Reference configuration: %s (%d keys)." % (da, len(rif))
+
+    def controllo_atteso_dagli_ultimi(self, n=3):
+        """Il rate atteso dalla media degli ultimi n controlli riusciti con
+        questo riferimento."""
+        d = controllo_rate.leggi()
+        buoni = [v["rate_hz"] for v in controllo_rate.storia(500)
+                 if v.get("rate_hz") and v.get("unix", 0) >= float(d.get("riferimento_t") or 0)]
+        if len(buoni) < n:
+            return False, "Only %d successful checks with this reference: need %d." % (len(buoni), n)
+        m = sum(buoni[-n:]) / n
+        self._modifica_controllo(atteso_hz=round(m, 3), fuori=0,
+                                 atteso_da="mean of the last %d checks, set on %s" % (
+                                     n, time.strftime("%d/%m %H:%M")))
+        return True, "Expected rate: %.2f Hz (mean of the last %d checks)." % (m, n)
+
+    def controllo_ora(self):
+        """"Check now": lo fa partire il filo dell'orologio entro pochi secondi."""
+        if self._controllo:
+            return False, "A rate check is already running."
+        if trova_scan():
+            return False, "A scan is running: the check would wait for it. Stop the scan first."
+        self._controllo_subito = True
+        return True, "Rate check starting in a few seconds."
+
+    def _orologio_controllo(self):
+        """Ogni 5 s guarda se tocca a un controllo. Con uno scan in corso
+        aspetta che finisca: fermarlo a meta' lo rovinerebbe."""
+        time.sleep(15)
+        while True:
+            try:
+                d = controllo_rate.leggi()
+                dovuto, slot = controllo_rate.tocca(d, time.time())
+                if (dovuto or self._controllo_subito) and not self._controllo and not trova_scan():
+                    motivo = ("by hand" if self._controllo_subito and not dovuto else
+                              "scheduled at %s" % time.strftime("%H:%M", time.localtime(slot)))
+                    self._controllo_subito = False
+                    self._esegui_controllo(motivo, slot if dovuto else None)
+            except Exception as e:
+                print("controllo del rate: %s" % e, flush=True)
+                self._controllo = None
+            time.sleep(5)
+
+    def _console_contiene(self, testo):
+        try:
+            with open(self.log_path, "rb") as f:
+                return testo.encode() in f.read(2000000)
+        except OSError:
+            return False
+
+    def _esegui_controllo(self, motivo, slot=None):
+        """Un controllo intero: ferma, applica, misura, rimette, riprende."""
+        d = controllo_rate.leggi()
+        durata = float(d["durata_s"])
+        inizio = time.time()
+        voce = {"ora": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(inizio)), "unix": inizio,
+                "motivo": motivo, "atteso_hz": d.get("atteso_hz"), "run": None,
+                "eventi": None, "durata_s": None, "rate_hz": None, "per_canale": {},
+                "fisica": None, "esito": "", "nota": ""}
+
+        with self.lock:
+            pid = trova_daq()
+            coda = self.coda_attiva()
+            fisica = None
+            if pid:
+                altro = toml_della_daq(pid)
+                if altro and os.path.realpath(altro) != os.path.realpath(self.toml):
+                    voce.update(esito="skipped", nota=(
+                        "the run in progress was started with another TOML (%s): the check "
+                        "would not know how to resume it" % altro))
+                    return self._chiudi_controllo(voce, slot)
+                _, _, runfile = self.eventi_correnti()
+                fisica = {"tipo": "coda" if coda else "manuale",
+                          "run": os.path.basename(runfile) if runfile else None}
+            elif coda:
+                fisica = {"tipo": "coda", "run": None}    # fra due voci della coda
+            if coda:
+                cv = next((v for v in self.leggi_coda()["voci"] if v["stato"] == "running"), None)
+                fisica["voce"] = cv["nome"] if cv else None
+            voce["fisica"] = fisica
+            self._controllo = {"fase": "stop", "inizio": inizio, "durata_s": durata,
+                               "fisica": fisica, "motivo": motivo, "annulla": False,
+                               "acquisizione": None}
+        self._modifica_controllo(in_corso={"fase": "stop", "inizio": inizio, "fisica": fisica,
+                                           "slot": slot})
+        registra("controller", "", "rate check",
+                 "started (%s); %s" % (motivo, "physics run %s stopped" % (fisica.get("run") or "")
+                                        if pid else "no run in progress"))
+        print("controllo del rate: inizio (%s)" % motivo, flush=True)
+
+        c = self._controllo
+        testo = mtime = log = None
+        ripristinato = True
+        try:
+            if pid:
+                with self.lock:
+                    ok, m = self._ferma(da_coda=True)
+                if not ok:
+                    raise RuntimeError("could not stop the run in progress: " + m)
+            if c["annulla"]:
+                raise RuntimeError("stopped by hand")
+
+            import tomllib
+            testo = io.open(self.toml, encoding="utf-8").read()
+            mtime = os.path.getmtime(self.toml)
+            if not testo.strip():
+                testo = None
+                raise RuntimeError("the TOML is empty: nothing to start, nothing to restore")
+            backup = self.toml + ".bak-controllo"
+            scrivi_sicuro(backup, testo)
+            self._modifica_controllo(in_corso={"fase": "misura", "inizio": inizio, "fisica": fisica,
+                                               "slot": slot, "backup": backup, "mtime": mtime})
+            g = tomllib.loads(testo).get("digitizer", {})
+            od = str(g.get("OutputDir") or "")
+            if not os.path.isabs(od):
+                od = os.path.join(os.path.dirname(BINARIO), od)
+            cartella = os.path.join(od, controllo_rate.CARTELLA)
+            os.makedirs(cartella, exist_ok=True)
+            # Il prefisso con la tensione gia' dentro: _avvia non ha niente da
+            # riscrivere (e non lascia un backup della pagina a ogni controllo).
+            prefisso = self.prefisso_con_hv(d["prefisso"])
+            modifiche = [list(m) for m in d["riferimento"]] + [
+                ["digitizer", "OutputDir", json.dumps(cartella)],
+                ["digitizer", "OutputFile", json.dumps(prefisso)],
+                ["digitizer", "SaveData", "true"],
+                ["digitizer", "NEvents", "10000000"]]
+            ok, err = self._applica_sicuro(modifiche)
+            if not ok:
+                raise RuntimeError("cannot apply the reference configuration: " + err)
+            if c["annulla"]:
+                raise RuntimeError("stopped by hand")
+
+            c["fase"] = "avvio"
+            with self.lock:
+                ok, m = self._avvia(da_coda=True)
+            if not ok:
+                raise RuntimeError("the check run did not start: " + m)
+            # I 120 s contano dall'inizio dell'acquisizione: prima la DAQ
+            # misura i piedistalli e le soglie in Transparent Mode, 10-20 s.
+            t0 = time.time()
+            while time.time() - t0 < 180 and trova_daq() and not c["annulla"]:
+                if self._console_contiene("Acquisition started"):
+                    c["acquisizione"] = time.time()
+                    break
+                time.sleep(0.5)
+            if c["acquisizione"]:
+                c["fase"] = "misura"
+                while (time.time() - c["acquisizione"] < durata and trova_daq()
+                       and not c["annulla"]):
+                    time.sleep(0.5)
+            _, _, runfile = self.eventi_correnti()
+            if runfile:
+                log = os.path.splitext(runfile)[0] + ".log"
+            c["fase"] = "chiusura"
+            if trova_daq():
+                with self.lock:
+                    ok, m = self._ferma(da_coda=True)
+                if not ok:
+                    raise RuntimeError("the check run did not stop: " + m)
+            if c["annulla"]:
+                raise RuntimeError("stopped by hand")
+            if not c["acquisizione"]:
+                raise RuntimeError("the check run did not start acquiring within 180 s"
+                                   if time.time() - t0 >= 180 else
+                                   "the check run died before acquiring: see the DAQ log")
+        except Exception as e:
+            voce["esito"] = "stopped" if c["annulla"] else "failed"
+            voce["nota"] = str(e)
+            # Il motivo vero (un VME che non risponde) sta nella console, che
+            # il run di fisica riscrive fra poco: si copia adesso.
+            if not c["annulla"] and c["fase"] in ("avvio", "misura", "chiusura"):
+                errori = [r.strip() for r in self.coda_log(80)
+                          if "Error" in r or "terminate" in r or "what()" in r]
+                if errori:
+                    voce["nota"] += " -- DAQ console: " + errori[-1]
+        finally:
+            if testo is not None:
+                try:
+                    scrivi_sicuro(self.toml, testo)
+                    # La data di prima: una pagina aperta con modifiche non
+                    # salvate le salva ancora, invece di sentirsi dire che il
+                    # file e' cambiato (il contenuto e' lo stesso).
+                    os.utime(self.toml, (mtime, mtime))
+                except OSError as e:
+                    ripristinato = False
+                    voce["esito"] = "failed"
+                    voce["nota"] = ("%s; THE TOML WAS NOT RESTORED (%s): the copy is in %s"
+                                    % (voce["nota"], e, self.toml + ".bak-controllo")).lstrip("; ")
+
+        # Il run di fisica riparte prima della misura: ogni secondo qui e'
+        # tempo morto dei cosmici.
+        c["fase"] = "ripresa"
+        ripresa = ""
+        if fisica and ripristinato and not c["annulla"]:
+            if fisica["tipo"] == "manuale":
+                with self.lock:
+                    ok, m = self._avvia(da_coda=True)
+                ripresa = ("physics run resumed: " if ok else "PHYSICS RUN NOT RESUMED: ") + m
+                if not ok:
+                    voce["nota"] = (voce["nota"] + "; " + ripresa).lstrip("; ")
+            else:
+                ripresa = "the queue resumes its entry"
+        self._controllo = None              # da qui la coda riparte da sola
+        if fisica and fisica["tipo"] == "coda" and (c["annulla"] or not ripristinato):
+            # Stop run durante il controllo ferma tutto, coda compresa; e con
+            # il TOML non rimesso la coda non deve ripartire su quello del
+            # controllo. coda_ferma rimette il TOML di prima della coda.
+            self.coda_ferma()
+            ripresa = "queue stopped"
+
+        if log and os.path.exists(log) and voce["esito"] not in ("stopped",):
+            try:
+                r = controllo_rate.misura(log)
+                voce.update(run=r["run"], eventi=r["eventi"], durata_s=r["durata_s"],
+                            rate_hz=r["rate_hz"], errore_rel=r["errore_rel"],
+                            per_canale=r["per_canale"])
+                if r.get("errore") and not voce["esito"]:
+                    voce.update(esito="failed", nota=r["errore"])
+                if r.get("errore_canali"):
+                    voce["nota"] = (voce["nota"] + "; per channel: " + r["errore_canali"]).lstrip("; ")
+            except Exception as e:
+                if not voce["esito"]:
+                    voce.update(esito="failed", nota="cannot read the check run: %s" % e)
+        elif not voce["esito"]:
+            voce.update(esito="failed", nota="the check run left no log")
+        voce["ripresa"] = ripresa
+        return self._chiudi_controllo(voce, slot)
+
+    def _applica_sicuro(self, modifiche):
+        """Come _applica, ma con la scrittura sicura."""
+        try:
+            testo = io.open(self.toml, encoding="utf-8").read()
+            nuovo, _ = tomledit.sostituisci(testo, [tuple(m) for m in modifiche])
+        except OSError as e:
+            return False, str(e)
+        except KeyError as e:
+            return False, str(e).strip("\'")
+        try:
+            import tomllib
+            errori, _ = coerenza(tomllib.loads(nuovo))
+            if errori:
+                return False, "; ".join(errori)
+        except Exception as e:
+            return False, "Invalid TOML: %s" % e
+        try:
+            scrivi_sicuro(self.toml, nuovo)
+        except OSError as e:
+            return False, str(e)
+        return True, ""
+
+    def _chiudi_controllo(self, voce, slot):
+        """Registro, allarme, mail; e lo stato a meta' si cancella."""
+        self._controllo = None
+        evento = None
+        if voce["rate_hz"] and not voce["esito"]:
+            voce["esito"] = "ok"
+        risultato = {}
+
+        def aggiorna(d):
+            if slot:
+                d["ultimo_slot"] = max(float(d.get("ultimo_slot") or 0), slot)
+            d["in_corso"] = None
+            if voce["esito"] == "ok":
+                scarto, ev = controllo_rate.valuta(d, voce["rate_hz"])
+                voce["scarto"] = scarto
+                voce["fuori"] = abs(scarto) > d["tolleranza"] if scarto is not None else None
+                risultato["evento"] = ev
+                # Senza atteso (riferimento appena cambiato): lo danno i primi 3.
+                if d.get("atteso_hz") is None:
+                    buoni = [v["rate_hz"] for v in controllo_rate.storia(500)
+                             if v.get("esito") == "ok"
+                             and v.get("unix", 0) >= float(d.get("riferimento_t") or 0)]
+                    buoni.append(voce["rate_hz"])
+                    if len(buoni) >= 3:
+                        d["atteso_hz"] = round(sum(buoni[:3]) / 3, 3)
+                        d["atteso_da"] = "mean of the first 3 checks with this reference (%s)" % (
+                            time.strftime("%d/%m %H:%M"))
+            elif voce["esito"] == "failed":
+                d["falliti"] = int(d.get("falliti") or 0) + 1
+                risultato["evento"] = "fallito" if d["falliti"] == 1 else None
+            risultato["d"] = dict(d)
+        try:
+            self._modifica_controllo(aggiorna)
+        except OSError as e:
+            print("controllo del rate: stato non scritto: %s" % e, flush=True)
+        try:
+            controllo_rate.annota(voce)
+        except OSError as e:
+            print("controllo del rate: registro non scritto: %s" % e, flush=True)
+        evento = risultato.get("evento")
+        if voce["esito"] == "ok":
+            esito = "%.2f Hz in %s (%s events%s)" % (
+                voce["rate_hz"], voce["run"], voce["eventi"],
+                ", %+.1f%% from %.2f" % (100 * voce["scarto"], voce["atteso_hz"])
+                if voce.get("scarto") is not None else "")
+        else:
+            esito = "%s: %s" % (voce["esito"].upper(), voce["nota"])
+        if voce.get("ripresa"):
+            esito += "; " + voce["ripresa"]
+        registra("controller", "", "rate check", esito)
+        print("controllo del rate: " + esito, flush=True)
+        if evento:
+            try:
+                self._mail_controllo(evento, voce, risultato.get("d") or controllo_rate.leggi())
+            except Exception as e:
+                print("notifiche: controllo del rate: %s" % e, flush=True)
+        return voce["esito"] == "ok", esito
+
+    def _mail_controllo(self, evento, voce, d):
+        """Una mail all'inizio di un allarme, una al rientro, una al primo
+        controllo fallito: non una all'ora."""
+        righe = []
+        for v in controllo_rate.storia(8):
+            if v.get("rate_hz"):
+                righe.append("  %s  %-30s %7s ev  %8.2f Hz  %s   %s" % (
+                    v["ora"][5:16], v.get("run") or "", v.get("eventi"), v["rate_hz"],
+                    "%+6.1f%%" % (100 * v["scarto"]) if v.get("scarto") is not None else "      ",
+                    "  ".join("ch%s %.2f" % kv for kv in sorted(v.get("per_canale", {}).items()))))
+            else:
+                righe.append("  %s  %s: %s" % (v["ora"][5:16], v.get("esito"), v.get("nota")))
+        atteso = d.get("atteso_hz")
+        if evento == "allarme":
+            oggetto = ("RATE CHECK — %.1f Hz, expected %.1f Hz (%+.0f%%): %d checks in a row"
+                       % (voce["rate_hz"], atteso, 100 * voce["scarto"], d["consecutivi"]))
+            testa = ("The last %d rate checks are more than %.0f%% away from the expected rate "
+                     "(%.2f Hz, %s)." % (d["consecutivi"], 100 * d["tolleranza"], atteso,
+                                         d.get("atteso_da")))
+        elif evento == "rientro":
+            oggetto = "RATE CHECK back to normal — %.1f Hz (%+.1f%%)" % (
+                voce["rate_hz"], 100 * voce["scarto"])
+            testa = "The last rate check is back within %.0f%% of the expected rate (%.2f Hz)." % (
+                100 * d["tolleranza"], atteso)
+        else:
+            oggetto = "RATE CHECK failed — %s" % (voce.get("nota") or "")[:90]
+            testa = ("The rate check of %s failed: %s\n\nNo more mails until a check succeeds."
+                     % (voce["ora"], voce.get("nota")))
+        corpo = ("%s\n\nLast checks (time, run, events, rate, from expected, per channel):\n%s\n\n"
+                 "Reference configuration: %s\n"
+                 "Every %d min, %d s per check; a mail when %d checks in a row are more than %.0f%% "
+                 "away, one when a check is back inside.\n"
+                 "Physics run after the check: %s\n\nController: %s\n"
+                 % (testa, "\n".join(righe), d.get("riferimento_da"), d["ogni_min"], d["durata_s"],
+                    d["consecutivi"], 100 * d["tolleranza"], voce.get("ripresa") or "none",
+                    notifiche.indirizzo_pagina(self.notifiche.porta)))
+        # Su main l'oggetto comincia con "[DAQ V1742]" scritto per esteso; sul ramo
+        # del notebook c'e' notifiche.PREFISSO. Cosi' vale per tutti e due.
+        self.notifiche.manda(("hw",), getattr(notifiche, "PREFISSO", "[DAQ V1742]") + " " + oggetto, corpo)
+
+    def riprendi_controllo_interrotto(self):
+        """All'avvio del controllore: un controllo rimasto a meta' (riavvio nel
+        mezzo) si chiude rimettendo il TOML e, se c'era un run di fisica
+        lanciato a mano, facendolo ripartire. Da chiamare PRIMA della chiusura
+        della coda interrotta, che rimette il TOML di prima della coda."""
+        d = controllo_rate.leggi()
+        ic = d.get("in_corso")
+        if not ic:
+            return
+        fatto = []
+        pid = trova_daq()
+        if pid:
+            # E' il run di controllo se scrive nella cartella dei controlli.
+            del_controllo = False
+            try:
+                for fd in os.listdir("/proc/%d/fd" % pid):
+                    dove = os.readlink("/proc/%d/fd/%s" % (pid, fd))
+                    if os.sep + controllo_rate.CARTELLA + os.sep in dove:
+                        del_controllo = True
+            except OSError:
+                pass
+            if del_controllo:
+                fatto.append("check run stopped: %s" % self._ferma(da_coda=True)[1])
+                pid = None
+        b = ic.get("backup")
+        if b and os.path.exists(b):
+            try:
+                import tomllib
+                vecchio = io.open(b, encoding="utf-8").read()
+                tomllib.loads(vecchio)
+                if not vecchio.strip():
+                    raise ValueError("empty backup")
+                scrivi_sicuro(self.toml, vecchio)
+                if ic.get("mtime"):
+                    os.utime(self.toml, (ic["mtime"], ic["mtime"]))
+                fatto.append("TOML restored")
+            except Exception as e:
+                fatto.append("TOML NOT restored from %s: %s" % (b, e))
+        fisica = ic.get("fisica") or {}
+        if fisica.get("tipo") == "manuale" and not pid:
+            fatto.append("physics run: %s" % self._avvia(da_coda=True)[1])
+        voce = {"ora": time.strftime("%Y-%m-%d %H:%M:%S"), "unix": time.time(),
+                "motivo": "interrupted by a controller restart", "esito": "interrupted",
+                "nota": "the controller restarted in the middle of the check; " + "; ".join(fatto),
+                "run": None, "eventi": None, "durata_s": None, "rate_hz": None, "per_canale": {},
+                "fisica": fisica, "atteso_hz": d.get("atteso_hz")}
+        self._modifica_controllo(in_corso=None, ultimo_slot=max(float(d.get("ultimo_slot") or 0),
+                                                                float(ic.get("slot") or 0)))
+        controllo_rate.annota(voce)
+        registra("controller", "", "rate check", "interrupted by a restart: " + "; ".join(fatto))
 
 
 # ---------------------------------------------------------------------------
@@ -2698,6 +3342,20 @@ PAGINA = r"""<!doctype html>
      max-height:170px;font-size:12px;margin:0;white-space:pre-wrap}
  .msg{padding:9px 12px;border-radius:6px;margin:10px 0;display:none}
  .ok{background:#dcefe4;color:#15603a}
+ /* Il controllo del rate: giallo nella barra in alto, perche' in quei due
+    minuti la DAQ non sta prendendo il run di fisica. */
+ .stato.chk{background:#f6e7c8;color:#7a5410}
+ .rck{font-size:12px;color:#52514e}
+ .rck b{color:#1a1a19;font-weight:600}
+ .rcsub{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b6a65;margin:12px 0 4px}
+ .rct td{font-size:12px;padding:3px 12px 3px 4px;border-bottom:1px solid #f0f0ec;white-space:nowrap;
+         font-variant-numeric:tabular-nums}
+ .rct thead td{color:#6b6a65;font-weight:600}
+ .rcal{padding:8px 12px;border-radius:6px;background:#f8e0da;color:#8a2a18;font-size:12px;margin:0 0 8px}
+ .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:600}
+ .p-run{background:#dcefe4;color:#15603a}
+ .p-off{background:#ececea;color:#8a8a84}
+ .p-ko{background:#f8e0da;color:#8a2a18}
  .ko{background:#f8e0da;color:#8a2a18}
  .az{font-size:12px;color:#52514e}
  .hvnum{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
@@ -2765,6 +3423,11 @@ PAGINA = r"""<!doctype html>
 <div class="riga">
   <div class="box" id="b_cfg" style="flex:2 1 560px"><h2>Configuration<span class="riass"></span></h2>
     <div id="cfgfile" style="font-size:12px;color:#6b6a65;margin-bottom:8px"></div>
+    <!-- Durante un controllo del rate nel TOML c'e' la configurazione del
+         controllo: chi apre la pagina in quei due minuti la vedrebbe qui. -->
+    <div id="cfgrc" class="rcal" style="display:none;background:#f6e7c8;color:#7a5410">
+      A rate check is running: the file holds the check configuration until it ends, and
+      Save is refused. The form reloads by itself when the check is over.</div>
     <div id="cfg"></div>
     <div id="tabdig" style="margin-top:14px"></div>
     <div style="margin-top:6px;font-size:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
@@ -2914,6 +3577,61 @@ PAGINA = r"""<!doctype html>
 
 <div class="box" id="b_log"><h2>DAQ log</h2><pre id="log"></pre></div>
   </div>
+</div>
+
+<!-- Il controllo del rate ogni ora (tools/controllo_rate.py): un run di due
+     minuti, sempre con la stessa configurazione, in mezzo ai run di fisica. -->
+<div class="box" id="b_rc" style="margin-top:12px"><h2>Rate check<span class="qm" data-aiuto="aiutorc">?</span><span class="riass"></span></h2>
+  <div id="rcallarme" class="rcal" style="display:none"></div>
+  <div id="rcstato" style="margin-bottom:8px"></div>
+  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+    <label class="rck" style="font-size:13px"><input type="checkbox" id="rc_on" style="vertical-align:-2px"> enabled</label>
+    <span class="rck">&middot; every</span> <input id="rc_ogni" style="width:52px">
+    <span class="rck">min, at minute</span> <input id="rc_min" style="width:44px">
+    <span class="rck">&middot; duration</span> <input id="rc_dur" style="width:56px"> <span class="rck">s</span>
+    <span class="rck">&middot; expected</span> <input id="rc_att" style="width:70px" placeholder="from checks">
+    <span class="rck">Hz &plusmn;</span> <input id="rc_tol" style="width:44px">
+    <span class="rck">% &middot; mail after</span> <input id="rc_cons" style="width:36px">
+    <span class="rck">checks in a row</span>
+    <span style="margin-left:auto;display:flex;gap:8px">
+      <button id="rc_ora" style="background:#ececea">Check now</button>
+      <button id="rc_salva" style="background:#2a78d6;color:#fff">Save</button>
+    </span>
+  </div>
+  <div id="aiutorc" class="aiuto">
+    Every hour (at the minute you choose) the controller stops the run in progress, if
+    any, takes a run of the given duration with the <b>reference configuration</b>
+    &mdash; always the same, whatever the physics run is using &mdash; then puts the
+    TOML back and starts the physics run again: a new run with the next number. A queue
+    entry resumes for the time it had left. With nothing running the check is taken
+    anyway, and the DAQ stays idle after it. A scan is not interrupted: the check waits
+    for its end. The duration counts from the start of acquisition; the rate is events
+    divided by the acquisition time the DAQ declares. Per channel: events per second
+    with that channel over its self-trigger threshold, as in Andamento_run.
+    Check runs have their own prefix (CHECK_ plus the bias voltage) and numbering, go to
+    the <code>check/</code> folder of OutputDir and to the cloud; the e-log and the
+    daily summary leave them out of the run list. During a check Start run, Save to
+    TOML, the threshold buttons and scans are refused; Stop run stops the check and
+    does not resume the physics run (with a queue, the queue stops too).
+    A mail to the Hardware list when the given number of checks in a row are farther
+    than the tolerance from the expected rate, one when a check is back inside, one at
+    the first failed check. All checks in <code>data/controllo-rate.jsonl</code>.
+  </div>
+  <div class="rcsub">Reference configuration</div>
+  <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
+    <div id="rc_rif" class="rck" style="flex:1 1 420px"></div>
+    <button id="rc_attuale" class="nb">Use current configuration as reference</button>
+    <button id="rc_andamento" class="nb">Andamento_run reference</button>
+    <button id="rc_chiavi" class="nb">keys &#9656;</button>
+  </div>
+  <pre id="rc_elenco" style="display:none;margin-top:6px"></pre>
+  <div class="rcsub">Expected rate</div>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <div id="rc_atteso" class="rck" style="flex:1 1 420px"></div>
+    <button id="rc_dagli" class="nb">Set from the last 3 checks</button>
+  </div>
+  <div id="rc_grafico" style="margin-top:10px"></div>
+  <div id="rc_tab" style="margin-top:6px;overflow-x:auto"></div>
 </div>
 
 <div class="box" id="b_plot" style="margin-top:12px"><h2>Scan plots<span class="qm" data-aiuto="aiutoplot">?</span><span class="riass"></span></h2>
@@ -3154,9 +3872,15 @@ document.querySelectorAll(".qm").forEach(q => {
 });
 
 $("avvia").onclick = () => azione("avvia", "Start a new run?");
-$("ferma").onclick = () => azione("ferma",
-  "Stop the running acquisition?\n\nThe DAQ closes the file and resets the board: " +
-  "nothing already acquired is lost.");
+$("ferma").onclick = () => {
+  const ic = ULTIMO_STATO && ULTIMO_STATO.controllo && ULTIMO_STATO.controllo.in_corso;
+  if(ic) return azione("ferma",
+    "Stop the rate check?\n\nThe check run is closed and the TOML put back, but the physics run is " +
+    "NOT resumed" + (ic.fisica && ic.fisica.tipo === "coda" ? " and the queue stops" : "") + ".");
+  return azione("ferma",
+    "Stop the running acquisition?\n\nThe DAQ closes the file and resets the board: " +
+    "nothing already acquired is lost.");
+};
 
 // --- notifiche ---------------------------------------------------------------
 const NOMI_NOT = {riepilogo: "Daily summary", sequenza: "Sequence end", errori: "Run error",
@@ -3259,8 +3983,20 @@ async function aggiorna(){
   $("sommario").textContent = s.in_corso
       ? (s.run || "") + (s.rate !== null && s.rate !== undefined ? "   " + s.rate + " Hz" : "")
       : "";
-  $("avvia").disabled = s.in_corso || !!s.scan || (s.coda && s.coda.attiva);
-  $("ferma").disabled = !s.in_corso || !!s.scan || (s.coda && s.coda.attiva);
+  // Durante un controllo del rate la barra lo dice, con l'ora a cui riparte il
+  // run di fisica; Stop run resta acceso anche con una coda (ferma tutto).
+  const rcIc = s.controllo && s.controllo.in_corso;
+  if(rcIc){
+    $("badge").textContent = "RATE CHECK";
+    $("badge").className = "stato chk";
+    const fatti = rcIc.acquisizione ? Math.min(rcIc.durata_s, Math.round(s.adesso - rcIc.acquisizione)) : null;
+    $("sommario").textContent = (s.run ? s.run.replace(/\.h5$/, "") + " \u00b7 " : "") +
+        (fatti != null ? fatti + " / " + rcIc.durata_s + " s \u00b7 " : "") +
+        (s.in_corso && s.eventi != null ? s.eventi + " events" + (s.rate != null ? ", " + s.rate + " Hz" : "") + " \u00b7 " : "") +
+        rcFisica(rcIc);
+  }
+  $("avvia").disabled = s.in_corso || !!s.scan || (s.coda && s.coda.attiva) || !!rcIc;
+  $("ferma").disabled = rcIc ? !!rcIc.annulla : (!s.in_corso || !!s.scan || (s.coda && s.coda.attiva));
   aggiornaMonitor(s);
   ULTIMO_STATO = s;
   aggiornaPsu(s.psu);
@@ -3344,6 +4080,13 @@ async function aggiorna(){
     `${a.quando} &middot; <b>${a.chi}</b> from ${a.da}: ${a.azione} &rarr; ${a.esito}`
   ).join("<br>") || "no actions recorded";
   if(s.notifiche) disegnaNotifiche(s.notifiche);
+  disegnaControllo(s);
+  // A fine controllo il modulo si rilegge dal file, se non ci sono modifiche
+  // non salvate: aperto durante il controllo mostrerebbe la sua configurazione.
+  const rcOra_ = !!(s.controllo && s.controllo.in_corso);
+  $("cfgrc").style.display = rcOra_ ? "block" : "none";
+  if(window._rcPrima && !rcOra_ && CFG && !modificheCorrenti().length) caricaConfig();
+  window._rcPrima = rcOra_;
 }
 
 // --- configurazione -------------------------------------------------------
@@ -4177,6 +4920,229 @@ function psuDisegna(hover){
 });
 window.addEventListener("resize", () => psuDisegna(null));
 
+// --- controllo del rate --------------------------------------------------------
+// I campi si riempiono dal server all'apertura e dopo un'azione riuscita, non a
+// ogni giro: riscriverebbero quello che si sta scrivendo.
+let RC_RIEMPI = true;
+const rcEsc = t => String(t == null ? "" : t).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                                             .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const rcOra = t => new Date(t * 1000).toLocaleTimeString("en-GB", {hour: "2-digit", minute: "2-digit"});
+const rcPct = x => (x >= 0 ? "+" : "−") + Math.abs(100 * x).toFixed(1) + " %";
+
+function rcRiassuntoRif(rif){
+  const v = {};
+  (rif || []).forEach(([sez, k, x]) => { v[sez + "." + k] = String(x); });
+  const g = k => v["digitizer." + k];
+  const nudo = x => (x || "").replace(/[\[\]"]/g, "");
+  const parti = [];
+  if(g("ChannelList")) parti.push("channels " + nudo(g("ChannelList")));
+  if(g("SelfTrigger") === "true")
+    parti.push("self-trigger " + nudo(g("SelfTriggerMode")) + " on " + nudo(g("SelfTriggerChannels")) +
+               ", offsets " + nudo(g("SelfTriggerThresholdOffset")).replace(/, /g, "/"));
+  else if(g("SelfTrigger") === "false") parti.push("self-trigger off");
+  if(g("ExternalTrigger")) parti.push("external trigger " + (g("ExternalTrigger") === "true" ? "ON" : "off"));
+  if(g("SoftwareTrigger") === "true") parti.push("software trigger ON");
+  if(v["cfd.Enabled"]) parti.push("V812 " + (v["cfd.Enabled"] === "true" ? "ON" : "off"));
+  if(g("SamplingRate")) parti.push(nudo(g("SamplingRate")));
+  if(g("PostTriggerSize")) parti.push("post-trigger " + g("PostTriggerSize") + " %");
+  if(g("DCOffset")) parti.push("DC offset " + g("DCOffset"));
+  if(g("DRS4Correction")) parti.push("DRS4 corrections " + (g("DRS4Correction") === "true" ? "on" : "off"));
+  return parti.map(rcEsc).join(" &middot; ");
+}
+
+// Il run di fisica dopo il controllo, in una riga: per la barra in alto e per il riquadro.
+function rcFisica(ic){
+  const f = ic.fisica;
+  if(ic.annulla) return "stopped by hand: the physics run will not be resumed";
+  if(!f) return "nothing was running: the DAQ stays idle after the check";
+  // Stima: la DAQ si ferma in un paio di secondi e il V1742 riparte in ~15-20 s.
+  const fine = (ic.acquisizione || (ic.inizio + 25)) + ic.durata_s + 20;
+  const chi = f.tipo === "coda"
+      ? "queue entry" + (f.voce ? " “" + f.voce + "”" : "")
+      : "physics run" + (f.run ? " (after " + f.run.replace(/\.h5$/, "") + ")" : "");
+  return chi + " resumes at about " + rcOra(fine);
+}
+
+function rcGrafico(rc){
+  const st = rc.storia || [];
+  if(!st.length){ $("rc_grafico").innerHTML = '<span class="rck">no checks yet</span>'; return; }
+  const W = 960, H = 190, x0 = 54, x1 = W - 14, y0 = 14, y1 = H - 30;
+  let ta = Math.min(...st.map(v => v.unix)), tb = Math.max(...st.map(v => v.unix));
+  if(tb - ta < 4 * 3600){ const m = (ta + tb) / 2; ta = m - 2 * 3600; tb = m + 2 * 3600; }
+  const buoni = st.filter(v => v.rate_hz != null);
+  const att = rc.atteso_hz, tol = rc.tolleranza;
+  const valori = buoni.map(v => v.rate_hz).concat(att ? [att * (1 - tol), att * (1 + tol)] : []);
+  let lo = valori.length ? Math.min(...valori) : 0, hi = valori.length ? Math.max(...valori) : 1;
+  const pad = (hi - lo) * 0.15 || Math.max(1, hi * 0.1);
+  lo = Math.max(0, lo - pad); hi += pad;
+  const X = u => x0 + (x1 - x0) * (u - ta) / (tb - ta);
+  const Y = r => y1 - (y1 - y0) * (r - lo) / (hi - lo);
+  const e = Math.pow(10, Math.floor(Math.log10((hi - lo) / 4)));
+  const m = (hi - lo) / 4 / e;
+  const passo = (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * e;
+  const dec = Math.max(0, -Math.floor(Math.log10(passo)));
+  let g = `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;max-width:${W}px">`;
+  for(let v = Math.ceil(lo / passo) * passo; v <= hi + 1e-9; v += passo){
+    g += `<line x1="${x0}" x2="${x1}" y1="${Y(v)}" y2="${Y(v)}" stroke="#efefeb"/>` +
+         `<text x="${x0 - 6}" y="${Y(v) + 4}" font-size="11" fill="#8a8a84" text-anchor="end">${v.toFixed(dec)}</text>`;
+  }
+  g += `<text x="12" y="${(y0 + y1) / 2}" font-size="11" fill="#8a8a84" text-anchor="middle" ` +
+       `transform="rotate(-90 12 ${(y0 + y1) / 2})">rate [Hz]</text>`;
+  if(att){
+    g += `<rect x="${x0}" y="${Y(att * (1 + tol))}" width="${x1 - x0}" height="${Y(att * (1 - tol)) - Y(att * (1 + tol))}" fill="#e9f0fa"/>` +
+         `<line x1="${x0}" x2="${x1}" y1="${Y(att)}" y2="${Y(att)}" stroke="#2a78d6" stroke-dasharray="4 3"/>` +
+         `<text x="${x1 - 4}" y="${Y(att * (1 + tol)) - 5}" font-size="11" fill="#2a78d6" text-anchor="end">` +
+         `expected ${att.toFixed(2)} Hz &plusmn; ${Math.round(100 * tol)} %</text>`;
+  }
+  // Tacche ogni 1, 3, 6 o 12 ore, all'ora locale piena; la data a mezzanotte.
+  const ore = (tb - ta) / 3600, ogni = ore <= 12 ? 1 : ore <= 36 ? 3 : ore <= 96 ? 6 : 12;
+  const d = new Date(ta * 1000); d.setMinutes(0, 0, 0);
+  for(; d.getTime() / 1000 <= tb; d.setHours(d.getHours() + 1)){
+    const u = d.getTime() / 1000;
+    if(u < ta || d.getHours() % ogni) continue;
+    const etich = d.getHours() === 0
+        ? d.toLocaleDateString("en-GB", {day: "2-digit", month: "2-digit"})
+        : String(d.getHours()).padStart(2, "0") + ":00";
+    g += `<line x1="${X(u)}" x2="${X(u)}" y1="${y1}" y2="${y1 + 4}" stroke="#b5b5b0"/>` +
+         `<text x="${X(u)}" y="${H - 10}" font-size="11" fill="${d.getHours() === 0 ? "#52514e" : "#8a8a84"}" text-anchor="middle">${etich}</text>`;
+  }
+  if(buoni.length > 1)
+    g += `<polyline fill="none" stroke="#b9b9b3" stroke-width="1.5" points="${buoni.map(v => X(v.unix) + "," + Y(v.rate_hz)).join(" ")}"/>`;
+  buoni.forEach(v => {
+    const fuori = att && Math.abs(v.rate_hz / att - 1) > tol;
+    g += `<circle cx="${X(v.unix)}" cy="${Y(v.rate_hz)}" r="4.5" fill="${fuori ? "#a8321f" : "#1a1a19"}" stroke="#fff" stroke-width="2">` +
+         `<title>${rcEsc(v.ora.slice(5, 16) + "  " + (v.run || "") + "\n" + v.rate_hz.toFixed(2) + " Hz, " + v.eventi + " events" +
+                         (att ? ", " + rcPct(v.rate_hz / att - 1) : ""))}</title></circle>`;
+  });
+  // I controlli falliti: un segno rosso sull'asse, col motivo al passaggio del mouse.
+  st.filter(v => v.rate_hz == null).forEach(v => {
+    g += `<path d="M${X(v.unix) - 5},${y1} l5,-9 l5,9 z" fill="${v.esito === "failed" ? "#a8321f" : "#b5b5b0"}">` +
+         `<title>${rcEsc(v.ora.slice(5, 16) + "  " + v.esito + ": " + (v.nota || ""))}</title></path>`;
+  });
+  $("rc_grafico").innerHTML = g + "</svg>";
+}
+
+function rcTabella(rc){
+  const st = (rc.storia || []).slice(-8).reverse();
+  if(!st.length){ $("rc_tab").innerHTML = ""; return; }
+  const pill = v => {
+    if(v.esito === "ok" && v.fuori) return '<span class="pill p-ko">out of tolerance</span>';
+    if(v.esito === "ok") return '<span class="pill p-run">ok</span>';
+    // Il motivo intero al passaggio del mouse: nella riga ne basta l'inizio.
+    const corto = t => (t || "").length > 70 ? t.slice(0, 68) + "\u2026" : (t || "");
+    if(v.esito === "failed") return `<span class="pill p-ko">failed</span> <span class="rck" title="${rcEsc(v.nota)}">${rcEsc(corto(v.nota))}</span>`;
+    return `<span class="pill p-off">${rcEsc(v.esito)}</span> <span class="rck" title="${rcEsc(v.nota)}">${rcEsc(corto(v.nota))}</span>`;
+  };
+  $("rc_tab").innerHTML = `<table class="rct" style="width:auto"><thead><tr><td>check</td><td>run</td>
+    <td style="text-align:right">events</td><td style="text-align:right">rate</td>
+    <td style="text-align:right">vs expected</td><td>per channel [Hz]</td><td></td></tr></thead>` +
+    st.map(v => `<tr><td>${rcEsc(v.ora.slice(5, 16))}</td><td>${rcEsc((v.run || "").replace(/_750Ms.*$/, ""))}</td>
+      <td style="text-align:right">${v.eventi == null ? "&mdash;" : v.eventi}</td>
+      <td style="text-align:right">${v.rate_hz == null ? "&mdash;" : "<b>" + v.rate_hz.toFixed(2) + " Hz</b>"}</td>
+      <td style="text-align:right">${v.scarto == null ? "" : rcPct(v.scarto)}</td>
+      <td>${Object.entries(v.per_canale || {}).map(([c, r]) => "ch" + c + " " + r.toFixed(2)).join(" &middot; ")}</td>
+      <td>${pill(v)}</td></tr>`).join("") + "</table>";
+}
+
+function disegnaControllo(s){
+  const rc = s.controllo;
+  if(!rc) return;
+  const ic = rc.in_corso;
+  const st = rc.storia || [];
+  const ult = st.length ? st[st.length - 1] : null;
+  const ultTesto = !ult ? "" : ult.rate_hz != null
+      ? ult.ora.slice(11, 16) + ": " + ult.rate_hz.toFixed(2) + " Hz" + (ult.scarto != null ? " (" + rcPct(ult.scarto) + ")" : "")
+      : ult.ora.slice(11, 16) + ": " + ult.esito;
+  riass("b_rc", ic ? "check running" :
+        (rc.attivo ? "on · next " + rcOra(rc.prossimo) : "off") + (ult ? " · last " + ultTesto : ""));
+  if(ic){
+    const fase = {stop: "stopping the run in progress", avvio: "starting the check run",
+                  misura: "measuring", chiusura: "closing the check run",
+                  ripresa: "resuming the physics run"}[ic.fase] || ic.fase;
+    const fatti = ic.acquisizione ? Math.min(ic.durata_s, Math.round(s.adesso - ic.acquisizione)) : null;
+    $("rcstato").innerHTML = `<span class="stato chk">RATE CHECK RUNNING</span>
+      <span class="rck" style="margin-left:10px">${rcEsc(fase)}${fatti != null ? " &middot; " + fatti + " / " + ic.durata_s + " s" : ""}
+      &middot; ${rcEsc(rcFisica(ic))}</span>`;
+  } else {
+    $("rcstato").innerHTML = `<span class="rck">${rc.attivo
+        ? "next check at <b>" + rcOra(rc.prossimo) + "</b>" : "rate check <b>OFF</b>"}${
+        ult ? " &middot; last " + rcEsc(ultTesto) : ""}</span>`;
+  }
+  const al = [];
+  if(rc.allarme) al.push(`ALARM: the last ${rc.consecutivi} or more checks are farther than ${Math.round(100 * rc.tolleranza)} % from the expected rate; the Hardware list got a mail.`);
+  if(rc.falliti) al.push(`The last ${rc.falliti} check${rc.falliti > 1 ? "s" : ""} failed: see the table.`);
+  $("rcallarme").style.display = al.length ? "block" : "none";
+  $("rcallarme").textContent = al.join("  ");
+
+  if(RC_RIEMPI){
+    $("rc_on").checked = rc.attivo;
+    $("rc_ogni").value = rc.ogni_min;
+    $("rc_min").value = rc.al_minuto;
+    $("rc_dur").value = rc.durata_s;
+    $("rc_att").value = rc.atteso_hz == null ? "" : rc.atteso_hz;
+    $("rc_tol").value = Math.round(100 * rc.tolleranza * 10) / 10;
+    $("rc_cons").value = rc.consecutivi;
+    RC_RIEMPI = false;
+  }
+  $("rc_ora").disabled = !!ic || !!s.scan;
+  $("rc_attuale").disabled = $("rc_andamento").disabled = !!ic;
+
+  $("rc_rif").innerHTML = rcRiassuntoRif(rc.riferimento) +
+    `<br><span style="color:#8a8a84">${rcEsc(rc.riferimento_da)} &middot; ${(rc.riferimento || []).length} keys</span>`;
+  $("rc_elenco").textContent = (rc.riferimento || []).map(([sz, k, v]) => `[${sz}] ${k} = ${v}`).join("\n") +
+    `\n\nand for every check: [digitizer] OutputDir = <OutputDir>/${rc.cartella}, OutputFile = CHECK_ with the bias ` +
+    `voltage, SaveData = true, NEvents = 10000000 (the duration stops it)`;
+  if(rc.atteso_hz){
+    const n = rc.atteso_hz * rc.durata_s;
+    const err = 100 / Math.sqrt(Math.max(n, 1));
+    $("rc_atteso").innerHTML = `<b>${rc.atteso_hz.toFixed(2)} Hz</b> &plusmn; ${Math.round(100 * rc.tolleranza)} %
+      &middot; ${rcEsc(rc.atteso_da)} &middot; statistical error of one check &plusmn;${err.toFixed(1)} %
+      (~${Math.round(n)} events in ${rc.durata_s} s)` +
+      (err > 100 * rc.tolleranza / 3 ? `<br><span style="color:#a8321f">With so few events the statistical error is
+       more than a third of the tolerance: two checks in a row out of it will happen by chance. Use a longer check
+       or a wider tolerance.</span>` : "");
+  } else {
+    $("rc_atteso").innerHTML = `<span style="color:#7a5410">not set: ${rcEsc(rc.atteso_da)}. No alarm until then.</span>`;
+  }
+  rcGrafico(rc);
+  rcTabella(rc);
+}
+
+async function rcPost(percorso, corpo, conferma){
+  if(conferma && !confirm(conferma)) return;
+  try{
+    const q = new URLSearchParams({chi: $("chi").value, token: TOKEN});
+    const opz = {method: "POST"};
+    if(corpo){
+      opz.body = JSON.stringify(Object.assign({chi: $("chi").value}, corpo));
+      opz.headers = {"Content-Type": "application/json"};
+    }
+    const r = await fetch("/api/controllo/" + percorso + (percorso.includes("?") ? "&" : "?") + q, opz);
+    const d = await r.json();
+    msg(d.messaggio, d.esito);
+    if(d.esito) RC_RIEMPI = true;
+  }catch(e){ msg("Request failed: " + e, false); }
+  aggiorna();
+}
+$("rc_salva").onclick = () => rcPost("imposta", {
+  attivo: $("rc_on").checked, ogni_min: $("rc_ogni").value, al_minuto: $("rc_min").value,
+  durata_s: $("rc_dur").value, atteso_hz: $("rc_att").value, tolleranza_pct: $("rc_tol").value,
+  consecutivi: $("rc_cons").value});
+$("rc_ora").onclick = () => rcPost("ora", null,
+  "Take a rate check now?\n\nThe run in progress, if any, is stopped, and started again after the check " +
+  "(" + ($("rc_dur").value || 120) + " s of acquisition plus the two restarts).");
+$("rc_attuale").onclick = () => rcPost("riferimento?che=attuale", null,
+  "Use the configuration now in the TOML as the reference of every check?\n\n" +
+  "The expected rate is cleared: the first 3 checks with the new reference will set it.");
+$("rc_andamento").onclick = () => rcPost("riferimento?che=andamento", null,
+  "Go back to the configuration of the Andamento_run runs, with its expected rate?");
+$("rc_dagli").onclick = () => rcPost("atteso", null,
+  "Set the expected rate to the mean of the last 3 checks with this reference?");
+$("rc_chiavi").onclick = () => {
+  const e = $("rc_elenco");
+  e.style.display = e.style.display === "none" ? "block" : "none";
+};
+
 aggiorna();
 setInterval(aggiorna, 2000);
 setTimeout(psuSerie, 500);
@@ -4376,6 +5342,13 @@ def crea_handler(ctrl, token):
                     return self._json({"esito": False, "messaggio": "richiesta illeggibile: %s" % e})
                 chi = (corpo.get("chi") or chi).strip()[:40]
                 modifiche = [(m[0], m[1], m[2]) for m in corpo.get("modifiche", [])]
+                if ctrl._controllo:
+                    # Nel TOML c'e' la configurazione del controllo, e alla
+                    # fine il controllo rimette quella di prima: un
+                    # salvataggio adesso andrebbe perso. Dopo, si salva.
+                    return self._json({"esito": False, "diff": [], "messaggio":
+                                       ctrl.controllo_occupato() + " Save again after it: "
+                                       "your changes are still in the form."})
                 esito, messaggio, diff = ctrl.scrivi_config(modifiche, corpo.get("mtime"))
                 extra["diff"] = diff
                 if diff:
@@ -4459,8 +5432,34 @@ def crea_handler(ctrl, token):
                 registra(chi, da, "psu/" + azione, messaggio)
 
             elif parti.path == "/api/soglie":
-                esito, messaggio = ctrl.soglie_a_caldo(qs.get("offsets", [""])[0])
+                # Durante un controllo del rate la DAQ accesa e' quella del
+                # controllo: le soglie cambierebbero la sua misura.
+                if ctrl._controllo:
+                    esito, messaggio = False, ctrl.controllo_occupato()
+                else:
+                    esito, messaggio = ctrl.soglie_a_caldo(qs.get("offsets", [""])[0])
                 registra(chi, da, "soglie a caldo", messaggio)
+
+            elif parti.path.startswith("/api/controllo/"):
+                azione = parti.path.rsplit("/", 1)[1]
+                if azione == "imposta":
+                    try:
+                        n = int(self.headers.get("Content-Length", 0))
+                        corpo = json.loads(self.rfile.read(n) or b"{}")
+                    except (ValueError, OSError) as e:
+                        return self._json({"esito": False,
+                                           "messaggio": "richiesta illeggibile: %s" % e})
+                    chi = (corpo.get("chi") or chi).strip()[:40]
+                    esito, messaggio = ctrl.controllo_imposta(corpo, chi)
+                elif azione == "ora":
+                    esito, messaggio = ctrl.controllo_ora()
+                elif azione == "riferimento":
+                    esito, messaggio = ctrl.controllo_riferimento(qs.get("che", [""])[0], chi)
+                elif azione == "atteso":
+                    esito, messaggio = ctrl.controllo_atteso_dagli_ultimi()
+                else:
+                    return self._manda(404, "text/plain", b"not found")
+                registra(chi, da, "rate check/" + azione, messaggio)
 
             elif parti.path == "/api/notifiche":
                 n = ctrl.notifiche
@@ -4577,6 +5576,13 @@ def main():
     # mentre la eseguiva: il thread che la portava avanti non c'e' piu'. La si
     # chiude e si rimette il TOML, invece di lasciare uno stato che dice il
     # falso. Ripartira' chi vuole, sapendo da dove.
+    # Un controllo del rate rimasto a meta' prima: rimette il TOML che c'era
+    # prima del controllo, cioe' quello con la voce della coda, e solo dopo la
+    # coda si chiude rimettendo il suo. All'inverso vincerebbe il controllo.
+    try:
+        ctrl.riprendi_controllo_interrotto()
+    except Exception as e:
+        print("controllo del rate interrotto: %s" % e, flush=True)
     if ctrl.coda_attiva():
         ctrl._chiudi_coda("Interrupted by a controller restart: resume it by hand.")
         stampa("Coda           : era rimasta attiva, chiusa e TOML ripristinato")

@@ -1454,6 +1454,71 @@ LNGS; solo correzione CAEN):
   soglia); i PMT del veto hanno gli impulsi propri di quelli del prototipo (il
   riferimento per il veto e' l'H10721-210, il prototipo ha gli H14600-103).
 
+## Il controllo del rate ogni ora (dal 2026-11-16, ramo main, PC DAQ)
+
+Chiesto dall'utente il 2026-11-16 per il Gran Sasso, dove girano i run
+COSMIC (trigger esterno, V812 in maggioranza 5): **ogni ora il controllore
+ferma il run in corso, prende un run di 2 minuti con la configurazione dei run
+di `Andamento_run` e fa ripartire il run di prima.** Messo su `main`, quindi
+sul PC DAQ, per scelta esplicita dell'utente dello stesso giorno (eccezione
+alla regola "il PC DAQ non si tocca"); sul ramo `schede-2730` non c'e' ancora.
+Logica in `tools/controllo_rate.py`, agganci in `tools/daq_control.py`
+(riquadro *Rate check* della pagina).
+
+- **La configurazione di riferimento e' fissa**: quella dei run di
+  `Andamento_run` (377 run `LNGS__54-0V`/`LNGS___54-0V`), copiata dal TOML che
+  la DAQ scrive in testa al `.log` della `LNGS___54-0V_0001`: self-trigger
+  paired relativo su ch16-18 e ch20-21, offset 450/600/600/80/80, senza
+  trigger esterno ne' V812, 750 MS/s, PostTrigger 55, DCOffset 0xB000, DRS4 on.
+  Venti chiavi (`controllo_rate.CHIAVI`), applicate con tomledit; piu'
+  `OutputDir` = `<OutputDir>/check`, `OutputFile` = `CHECK_` con la tensione,
+  `SaveData` = true, `NEvents` = 10000000 (lo ferma la durata). La pagina puo'
+  prenderne un'altra dal TOML ("Use current configuration as reference") o
+  tornare a questa.
+- **Il rate atteso di serie e' 47.3 Hz**: mediana dei 60 run standard piu'
+  recenti di `Andamento_run` (12-13/11, dispersione 1.3%). In 120 s sono ~5700
+  eventi, 1.3% di errore statistico: il 10% di tolleranza e' a sette sigma.
+  Cambiato il riferimento, l'atteso lo danno i primi 3 controlli.
+- **La misura** (`controllo_rate.misura`): totale = eventi scritti / tempo di
+  acquisizione dichiarato nel `.log`; per canale la definizione di
+  `Andamento_run` (offset dal `.log` per la calibrazione del 30/10, massimo in
+  200-600 ns meno la mediana in 0-150). Verificata sulla `LNGS___54-0V_0001`:
+  numeri identici a quelli di `Andamento_run` (48.99 Hz; 14.47 / 14.98 / 13.44
+  / 2.61 / 2.66). I 120 s contano dalla riga "Acquisition started".
+- **Allarme** (scelta dell'utente): mail alla lista Hardware quando **due
+  controlli consecutivi** distano piu' del **10%** dall'atteso; una al
+  rientro, una al primo controllo fallito (DAQ non partita, niente eventi:
+  col motivo dalla console). Numeri e tolleranza dalla pagina.
+- **Con una coda** (scelta dell'utente: si ferma il run e se ne inizia uno
+  nuovo subito dopo) la voce interrotta riprende per il tempo che le restava,
+  con le sue modifiche; nella coda "interrupted by N rate checks". Un run
+  lanciato a mano riparte com'era (un run nuovo, numero successivo); senza run
+  il controllo si fa lo stesso e la DAQ resta ferma. Uno scan non si
+  interrompe: il controllo aspetta che finisca. Un run lanciato da terminale
+  con un altro TOML non si tocca (controllo "skipped").
+- Durante il controllo la pagina rifiuta Start run, Save to TOML, le soglie a
+  caldo, coda e scan; **Stop run ferma il controllo e NON fa ripartire il run
+  di fisica** (con una coda si ferma anche lei). Il TOML si rimette con la
+  scrittura sicura e la data di prima (`os.utime`): una pagina aperta prima
+  salva ancora. Copia in `config/run-local.toml.bak-controllo`; un riavvio
+  del controllore a meta' controllo la rimette (`riprendi_controllo_interrotto`,
+  prima della chiusura della coda) e fa ripartire un run manuale.
+- File: stato e configurazione in `data/controllo-rate.json`, un controllo per
+  riga in `data/controllo-rate.jsonl` (`pandas.read_json(lines=True)`). I run
+  di controllo vanno in `<OutputDir>/check/` e **sul cloud** (scelta
+  dell'utente; `archivia.py` guarda anche `check/`); l'e-log li salta, il
+  riepilogo serale li riassume in una riga, nel `rate-log.csv` hanno 2 nella
+  colonna degli scan (fuori dalla curva dei cosmici). In `Andamento_run` si
+  vedono aggiungendo `CHECK__54-0V_` a `PREFISSO` e con `SOLO_EVENTI = None`.
+- **Si accende dalla pagina** (di serie spento): il primo controllo
+  all'istante programmato successivo, non subito; per subito, "Check now".
+  Tempo morto ~4% (120 s + due partenze del V1742 da ~20 s).
+- Provato il 2026-11-16 sul PC in una copia in `/tmp` sulla porta 8799 con una
+  DAQ finta (binario C che lancia uno script, HDF5 e `.log` come la DAQ):
+  controllo a mano, programmato, in mezzo a una coda, Stop durante il
+  controllo, riavvio a meta', allarme e rientro, DAQ che non parte; TOML
+  identico (md5) dopo ogni prova. Col V1742 vero non ancora.
+
 ## Strumenti
 
 | | |
@@ -1476,6 +1541,7 @@ LNGS; solo correzione CAEN):
 | `tools/Distribuzioni_carica.ipynb` | distribuzioni di carica dei cinque canali da una run o da una lista (numeri col prefisso, nomi, glob), confronto fra le run in rate. Tutti i parametri nella prima cella, CONFIGURAZIONE (richiesta dell'utente del 2026-11-03: in testa solo parametri, anche quelli da prova). Cancelli automatici misurati sulla prima run, sulla forma media degli eventi sopra `SOGLIA_FORMA` (PMT mezzo PE = 73 conteggi, SiPM 100: col 20% piu' alto, sui PMT 6 eventi su 10 erano solo rumore), con la regola per rivelatore in `CANCELLO_AUTO` (soglia, `prima_ns`, `dopo_ns`, `fine_traccia`; sui SiPM 60 ns prima della soglia e fino in fondo alla traccia meno 20 campioni, scelta dell'utente: la regola del 10% li chiudeva a ~680 ns), piedistallo in `PIEDISTALLO`, oppure la ricetta della 0011/0013 (240-500 / 0-150, una riga pronta); piedistallo per evento e per blocco, tutti e due. Selezione degli eventi (data card, `CONDIZIONI` con nome e `SELEZIONE`): espressioni sulle grandezze di ogni evento -- A16 ampiezza nel cancello in mV, Q20 carica in PE (`PE_ADCNS`: 1719 / 1709 per i PMT, SiPM non misurati), C carica in ADC·ns, T istante del massimo, S saturo -- con confronti, and/or/not, aritmetica e `almeno`/`al_piu`/`esattamente(n, ...)`; si applica dopo la lettura (cambiarla non rilegge le run), il `.npz` tiene tutti gli eventi e la colonna `selezionato`. Cariche in `data/carica/` (fuori da git), grafici e `.json` in `measurements/`, cache delle run lette in `data/carica/run/`. Sul Mac legge dal bucket montato (`~/nmv-data/WC/LNGS`) col kernel `Python (jupyter-global)`, scaricando ogni run una volta sola, quattro in parallelo, nella copia locale `~/nmv-copia/WC/LNGS` (`COPIA_LOCALE`; tenuta solo a copia finita, riscaricata se sul bucket cambia dimensione o se non si decomprime, non tenuta sotto `SPAZIO_LIBERO_MIN_GB`); rileggere una run con cancelli nuovi costa ~5 s invece di minuti (0158: notebook intero 25 s contro 94); le run date per numero o per nome che sono nella copia si prendono da li' senza interrogare il bucket, un glob si cerca sul bucket; col bucket non montato le run si cercano nella copia; sul PC da `data/LNGS`, ~5 s per run, senza copia. Sul cloud salta i `.h5` non compressi |
 | `tools/padme.py` | tabella PADME per cella da una run a trigger software, e verifica del guadagno |
 | `tools/plot_majthr.py` | confronto delle due calibrazioni della somma del V812 |
+| `tools/controllo_rate.py` | il controllo del rate ogni ora: configurazione di riferimento, misura (totale e per canale come `Andamento_run`), allarme, registro; `--misura LOG`, `--stato` |
 | `tools/archivia.py` | comprime le run finite e le manda sul cloud con `cp_data`, fuori dalla DAQ; lo lancia il controllore. Prima di ogni file chiede al cloud, senza credenziali, se quel nome c'e' gia'. `--stato`, `--stato --json` (per gli allarmi del controllore), `--aggiungi FILE`, `--comprimi FILE` |
 | `analisi/` | script delle singole analisi, con l'indice e i comandi in `analisi/README.md` |
 

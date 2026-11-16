@@ -298,7 +298,10 @@ def leggi_toml(path):
 def cartelle_da_guardare(cfg, reg, extra):
     od = cfg.get("digitizer", {}).get("OutputDir")
     cartelle = []
-    for d in [str(od), os.path.join(str(od), "scan")] if od else []:
+    # check/: i run del controllo del rate (tools/controllo_rate.py). Sul cloud
+    # vanno, a differenza degli scan: hanno un prefisso loro (CHECK_), quindi
+    # nomi che non si scontrano con quelli dei run di fisica.
+    for d in [str(od), os.path.join(str(od), "scan"), os.path.join(str(od), "check")] if od else []:
         d = os.path.realpath(d)
         if os.path.isdir(d):
             cartelle.append(d)

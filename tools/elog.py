@@ -246,6 +246,9 @@ def main():
         # su disco e lo scan ha il suo .json con i punti.
         if not a.anche_scan:
             cartelle[:] = [c for c in cartelle if c != "scan"]
+        # I run del controllo del rate, 24 al giorno, sono UNA misura ripetuta:
+        # stanno nel riquadro Rate check della pagina e nel riepilogo serale.
+        cartelle[:] = [c for c in cartelle if c != "check"]
         for f in files:
             # TEST_: run di prova (SaveData = false), non sono misure
             if f.endswith(".log") and not f.startswith(("daq-console", "TEST_")):
